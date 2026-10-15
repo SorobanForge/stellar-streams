@@ -24,10 +24,18 @@ export interface StreamsClientOptions {
     xdr: string,
     opts: { networkPassphrase: string; address: string },
   ) => Promise<string>;
+  /** Base delay between confirmation polls and submission retries. Defaults to 1s. */
+  pollIntervalMs?: number;
+  /** How long to wait for a submitted transaction to confirm. Defaults to 30s. */
+  pollTimeoutMs?: number;
 }
 
-const POLL_INTERVAL_MS = 1_000;
-const POLL_TIMEOUT_MS = 30_000;
+const DEFAULT_POLL_INTERVAL_MS = 1_000;
+const DEFAULT_POLL_TIMEOUT_MS = 30_000;
+/** Upper bound for the exponential backoff applied to `TRY_AGAIN_LATER`. */
+const MAX_BACKOFF_MS = 8_000;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
  * A typed client for the Stellar Streams protocol. Read calls simulate against
@@ -107,31 +115,76 @@ export class StreamsClient {
       networkPassphrase,
       address: publicKey,
     });
-    const submitted = await this.server.sendTransaction(
+    const hash = await this.submit(
       TransactionBuilder.fromXDR(signedXdr, networkPassphrase) as Parameters<
         SorobanRpc.Server['sendTransaction']
       >[0],
     );
-
-    if (submitted.status === 'ERROR') {
-      throw new Error(`Transaction submission failed: ${JSON.stringify(submitted.errorResult)}`);
-    }
-    return this.poll(submitted.hash);
+    return this.poll(hash);
   }
 
+  private get pollIntervalMs(): number {
+    return this.options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  }
+
+  private get pollTimeoutMs(): number {
+    return this.options.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS;
+  }
+
+  /**
+   * Submits a signed transaction. `TRY_AGAIN_LATER` means the RPC node queued
+   * nothing (e.g. its mempool is full), so the same envelope is resent with
+   * exponential backoff instead of surfacing an error to the user.
+   */
+  private async submit(tx: Parameters<SorobanRpc.Server['sendTransaction']>[0]): Promise<string> {
+    const startedAt = Date.now();
+    let delay = this.pollIntervalMs;
+    for (;;) {
+      const submitted = await this.server.sendTransaction(tx);
+      if (submitted.status === 'ERROR') {
+        throw new Error(
+          `Transaction ${submitted.hash} was rejected: ${describeTransactionResult(submitted.errorResult)}` +
+            describeDiagnostics(submitted.diagnosticEvents),
+        );
+      }
+      if (submitted.status !== 'TRY_AGAIN_LATER') {
+        // PENDING or DUPLICATE: the transaction is in flight; confirm it by polling.
+        return submitted.hash;
+      }
+      const elapsed = Date.now() - startedAt;
+      if (elapsed + delay > this.pollTimeoutMs) {
+        throw new Error(
+          `RPC kept answering TRY_AGAIN_LATER for transaction ${submitted.hash} after ${formatElapsed(elapsed)}.`,
+        );
+      }
+      await sleep(delay);
+      delay = Math.min(delay * 2, MAX_BACKOFF_MS);
+    }
+  }
+
+  /** Polls `getTransaction` until the transaction succeeds, fails, or times out. */
   private async poll(hash: string): Promise<{ hash: string }> {
     const startedAt = Date.now();
-    while (Date.now() - startedAt < POLL_TIMEOUT_MS) {
+    for (;;) {
       const result = await this.server.getTransaction(hash);
-      if (result.status !== SorobanRpc.Api.GetTransactionStatus.NOT_FOUND) {
-        if (result.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
-          return { hash };
-        }
-        throw new Error(`Transaction ${hash} failed with status ${result.status}`);
+      if (result.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+        return { hash };
       }
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+      if (result.status === SorobanRpc.Api.GetTransactionStatus.FAILED) {
+        throw new Error(
+          `Transaction ${hash} failed: ${describeTransactionResult(result.resultXdr)}` +
+            describeDiagnostics(result.diagnosticEventsXdr),
+        );
+      }
+      // NOT_FOUND: not yet included in a ledger.
+      const elapsed = Date.now() - startedAt;
+      if (elapsed + this.pollIntervalMs > this.pollTimeoutMs) {
+        throw new Error(
+          `Timed out waiting for transaction ${hash} after ${formatElapsed(elapsed)}; it may still land, check the hash on an explorer.`,
+        );
+      }
+      await sleep(this.pollIntervalMs);
     }
-    throw new Error(`Timed out waiting for transaction ${hash}`);
   }
 
   /** Fetch a stream by id. Returns `null` if it does not exist. */
@@ -226,4 +279,65 @@ function normalizeStream(raw: RawStream): Stream {
 
 function addressToScVal(address: string): xdr.ScVal {
   return new Address(address).toScVal();
+}
+
+function formatElapsed(ms: number): string {
+  return `${(ms / 1_000).toFixed(1)}s`;
+}
+
+/** Summarises a `TransactionResult` as its result code plus the first operation's code. */
+function describeTransactionResult(result: xdr.TransactionResult | undefined): string {
+  if (!result) return 'no result returned';
+  try {
+    const inner = result.result();
+    const code = inner.switch().name;
+    const opResults = code === 'txFailed' || code === 'txSuccess' ? inner.results() : [];
+    const op = opResults[0];
+    if (op && op.switch().name === 'opInner') {
+      const tr = op.tr();
+      const value = tr.value() as { switch?: () => { name: string } } | undefined;
+      const opCode = value?.switch?.().name;
+      return opCode ? `${code} (${opCode})` : code;
+    }
+    return code;
+  } catch {
+    return 'unreadable result';
+  }
+}
+
+/** Extracts the `error` diagnostic events emitted by the host, if any. */
+function describeDiagnostics(events: xdr.DiagnosticEvent[] | undefined): string {
+  if (!events?.length) return '';
+  const messages: string[] = [];
+  for (const event of events) {
+    try {
+      const body = event.event().body().v0();
+      const [first, ...rest] = body.topics();
+      if (!first || first.switch().name !== 'scvSymbol' || first.sym().toString() !== 'error') {
+        continue;
+      }
+      messages.push([...rest.map(formatScVal), formatScVal(body.data())].join(' '));
+    } catch {
+      // Skip events we cannot decode rather than masking the original failure.
+    }
+  }
+  return messages.length ? ` — diagnostics: ${messages.join('; ')}` : '';
+}
+
+function formatScVal(value: xdr.ScVal): string {
+  if (value.switch().name === 'scvError') {
+    const error = value.error();
+    const kind = error.switch().name.replace(/^sce/, '');
+    return kind === 'Contract'
+      ? `Error(Contract, #${error.contractCode()})`
+      : `Error(${kind}, ${error.code().name.replace(/^scec/, '')})`;
+  }
+  try {
+    const native = scValToNative(value);
+    return typeof native === 'string'
+      ? native
+      : JSON.stringify(native, (_key, v) => (typeof v === 'bigint' ? v.toString() : v));
+  } catch {
+    return value.switch().name;
+  }
 }
