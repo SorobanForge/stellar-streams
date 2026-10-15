@@ -28,6 +28,7 @@
     "download:cli": "node scripts/run.js download-stellar-cli",
     "build:contracts": "node scripts/run.js build-contracts",
     "optimize": "node scripts/run.js optimize-contracts",
+    "generate:bindings": "node scripts/run.js generate-bindings",
     "create:issues": "./scripts/create-issues.sh",
     "repo:protect": "./scripts/setup-branch-protection.sh",
     "repo:topics": "./scripts/set-topics.sh",
