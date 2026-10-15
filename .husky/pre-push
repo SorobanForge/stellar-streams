@@ -1,0 +1,11 @@
+# Run typecheck and tests on push
+# This catches type errors and test failures before they reach CI.
+# Runtime: typically <60s. If it exceeds this, use --no-verify for emergencies
+# (e.g., WIP pushes, hotfixes) or narrow to affected packages with:
+#   pnpm --filter=... typecheck && pnpm --filter=... test
+#
+# Acceptable use of --no-verify:
+# - Emergency hotfixes where CI will catch issues anyway
+# - Work-in-progress branches not intended for review
+
+pnpm typecheck && pnpm test

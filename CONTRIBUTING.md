@@ -43,9 +43,19 @@ To contribute to this project, you will need:
    pnpm install
    ```
 3. Initialize Husky hooks:
+
    ```bash
    pnpm run prepare
    ```
+
+   This installs Git hooks including:
+   - **pre-commit**: runs lint-staged (ESLint + Prettier) on staged files
+   - **commit-msg**: validates commit message format with commitlint
+   - **pre-push**: runs typecheck and tests before pushing
+
+   The pre-push hook catches type errors and test failures locally before they reach CI. If needed, you can bypass it with `git push --no-verify` for emergencies (e.g., hotfixes).
+
+   **Note on performance**: The pre-push hook typically completes in under 60 seconds. If it takes longer on your machine, you can run checks selectively using Turborepo filters (e.g., `pnpm --filter=web typecheck`).
 
 ---
 
