@@ -10,6 +10,17 @@ This project is a monorepo containing multiple packages and applications, manage
 
 By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Issue Triage & Labels
+
+Before opening a new issue or working on existing ones, please review our [Triage & Labeling Guide](docs/triage.md). It explains:
+
+- **Label taxonomy:** How we classify issues by type, area, priority, difficulty, and status
+- **Issue lifecycle:** The workflow from triage → assignment → in-progress → review → closed
+- **Response expectations:** Expected timelines for triage and review feedback
+- **Setting up labels:** How to synchronize labels using `scripts/create-labels.sh`
+
+This guide helps us organize work consistently and ensures smooth collaboration.
+
 ## Getting Started
 
 ### Prerequisites
