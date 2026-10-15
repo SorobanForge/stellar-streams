@@ -51,7 +51,7 @@ $PayeeAddress = (& $StellarCli keys address payee).Trim()
 $ArbiterAddress = (& $StellarCli keys address arbiter).Trim()
 
 # Native XLM token contract ID on testnet
-$TokenContract = "CDLZFC3SYJYDZT7K67VZ75HPJGWGN6XXU250DEX2ZJ26C6EU5R144Z7X"
+$TokenContract = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
 
 $EscrowId = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 $Amount = 10000000

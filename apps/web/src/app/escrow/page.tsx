@@ -67,7 +67,7 @@ export default function EscrowDemo() {
   const [createPayee, setCreatePayee] = useState<string>('');
   const [createArbiter, setCreateArbiter] = useState<string>('');
   const [createToken, setCreateToken] = useState<string>(
-    'CDLZFC3SYJYDZT7K67VZ75HPJGWGN6XXU250DEX2ZJ26C6EU5R144Z7X',
+    'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
   ); // Native XLM
   const [createAmount, setCreateAmount] = useState<string>('10'); // in XLM
   const [createDeadline, setCreateDeadline] = useState<string>('3600'); // seconds from now
