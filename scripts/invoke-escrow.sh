@@ -46,7 +46,7 @@ PAYEE_ADDRESS=$($STELLAR_CLI keys address payee | tr -d '\r' | xargs)
 ARBITER_ADDRESS=$($STELLAR_CLI keys address arbiter | tr -d '\r' | xargs)
 
 # Native XLM token contract ID on testnet
-TOKEN_CONTRACT="CDLZFC3SYJYDZT7K67VZ75HPJGWGN6XXU250DEX2ZJ26C6EU5R144Z7X"
+TOKEN_CONTRACT="CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
 
 # Generate a unique escrow ID based on current timestamp
 ESCROW_ID=$(date +%s)

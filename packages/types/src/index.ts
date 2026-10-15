@@ -38,10 +38,15 @@ export interface StreamConfig {
   feeBps: number;
 }
 
-/** Inputs for `create_stream`, using decimal-string stroop amounts. */
+/**
+ * Inputs for `create_stream`. `token` is any token contract id (C...), and
+ * `amount` is a decimal string in that token's smallest unit — scale it by the
+ * token's own `decimals()`, which is 7 for XLM and SACs but not for every token.
+ */
 export interface CreateStreamParams {
   sender: string;
   recipient: string;
+  /** Token contract id (C...): the XLM SAC, an issued asset's SAC, or a custom token. */
   token: string;
   amount: string;
   startTime: number;

@@ -1,7 +1,9 @@
 import {
   Account,
   Address,
+  Asset,
   Contract,
+  StrKey,
   TransactionBuilder,
   nativeToScVal,
   scValToNative,
@@ -30,6 +32,38 @@ export interface StreamsClientOptions {
   pollTimeoutMs?: number;
 }
 
+/** On-chain metadata of a SEP-41 token contract (any SAC or custom Soroban token). */
+export interface TokenMetadata {
+  contractId: string;
+  /** Decimal places of the smallest unit. Read from the token; never assume 7. */
+  decimals: number;
+  symbol: string;
+}
+
+/**
+ * The Stellar Asset Contract id for a classic asset (`'native'` for XLM, or
+ * `CODE:ISSUER` / an `Asset`) on the given network. Use it as the `token` of a
+ * stream when streaming an issued asset.
+ */
+export function assetContractId(
+  asset: Asset | 'native' | string,
+  networkPassphrase: string,
+): string {
+  let resolved: Asset;
+  if (asset instanceof Asset) {
+    resolved = asset;
+  } else if (asset === 'native') {
+    resolved = Asset.native();
+  } else {
+    const [code, issuer] = asset.split(':');
+    if (!code || !issuer) {
+      throw new Error(`Expected an asset as 'native' or 'CODE:ISSUER', got: ${asset}`);
+    }
+    resolved = new Asset(code, issuer);
+  }
+  return resolved.contractId(networkPassphrase);
+}
+
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_POLL_TIMEOUT_MS = 30_000;
 /** Upper bound for the exponential backoff applied to `TRY_AGAIN_LATER`. */
@@ -54,6 +88,8 @@ export class StreamsClient {
    * `getStream` and `claimable` issued together — share one `getAccount`.
    */
   private account: Promise<Account> | null = null;
+  /** Token metadata never changes for a deployed contract, so cache it per id. */
+  private readonly tokens = new Map<string, Promise<TokenMetadata>>();
 
   constructor(options: StreamsClientOptions) {
     this.options = options;
@@ -106,14 +142,23 @@ export class StreamsClient {
     this.account = null;
   }
 
-  /** Simulates a read-only contract call and returns the decoded result. */
-  private async simulate(method: string, ...args: xdr.ScVal[]): Promise<unknown> {
+  /** Simulates a read-only call on the stream contract and returns the decoded result. */
+  private simulate(method: string, ...args: xdr.ScVal[]): Promise<unknown> {
+    return this.simulateOn(this.contract, method, ...args);
+  }
+
+  /** Simulates a read-only call on any contract and returns the decoded result. */
+  private async simulateOn(
+    contract: Contract,
+    method: string,
+    ...args: xdr.ScVal[]
+  ): Promise<unknown> {
     const account = await this.sourceAccount();
     const tx = new TransactionBuilder(account, {
       fee: '100',
       networkPassphrase: this.options.networkPassphrase,
     })
-      .addOperation(this.contract.call(method, ...args))
+      .addOperation(contract.call(method, ...args))
       .setTimeout(30)
       .build();
 
@@ -257,12 +302,12 @@ export class StreamsClient {
     return { admin: raw.admin, treasury: raw.treasury, feeBps: Number(raw.fee_bps) };
   }
 
-  /** Currently withdrawable amount for a stream, in stroops. */
+  /** Currently withdrawable amount for a stream, in the token's smallest unit. */
   async claimable(id: bigint | number | string): Promise<bigint> {
     return (await this.simulate('claimable', nativeToScVal(BigInt(id), { type: 'u64' }))) as bigint;
   }
 
-  /** Total amount vested so far, in stroops. */
+  /** Total amount vested so far, in the token's smallest unit. */
   async vested(id: bigint | number | string): Promise<bigint> {
     return (await this.simulate('vested', nativeToScVal(BigInt(id), { type: 'u64' }))) as bigint;
   }
@@ -272,8 +317,37 @@ export class StreamsClient {
     return (await this.simulate('next_stream_id')) as bigint;
   }
 
-  /** Lock tokens and open a new stream. */
+  /**
+   * Reads `decimals` and `symbol` from a token contract. Works for any SEP-41
+   * token: the native XLM SAC, an issued asset's SAC (see `assetContractId`),
+   * or a custom Soroban token. Results are cached per contract id.
+   */
+  async getTokenMetadata(tokenId: string): Promise<TokenMetadata> {
+    assertTokenId(tokenId);
+    let pending = this.tokens.get(tokenId);
+    if (!pending) {
+      const token = new Contract(tokenId);
+      pending = Promise.all([
+        this.simulateOn(token, 'decimals'),
+        this.simulateOn(token, 'symbol'),
+      ]).then(([decimals, symbol]) => ({
+        contractId: tokenId,
+        decimals: Number(decimals),
+        symbol: String(symbol),
+      }));
+      this.tokens.set(tokenId, pending);
+      pending.catch(() => this.tokens.delete(tokenId));
+    }
+    return pending;
+  }
+
+  /**
+   * Lock tokens and open a new stream. `params.token` may be any token
+   * contract id; `params.amount` is in that token's smallest unit, so scale it
+   * by the token's own `decimals` (see `getTokenMetadata`), not by 7.
+   */
   async createStream(params: CreateStreamParams): Promise<{ hash: string }> {
+    assertTokenId(params.token);
     return this.invoke(
       'create_stream',
       addressToScVal(params.sender),
@@ -329,6 +403,12 @@ function normalizeStream(raw: RawStream): Stream {
     cliffTime: Number(raw.cliff_time),
     cancelled: raw.cancelled,
   };
+}
+
+function assertTokenId(tokenId: string): void {
+  if (!StrKey.isValidContract(tokenId)) {
+    throw new Error(`Invalid token contract id: ${tokenId}. Expected a C... contract address.`);
+  }
 }
 
 function addressToScVal(address: string): xdr.ScVal {

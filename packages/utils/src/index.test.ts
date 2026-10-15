@@ -7,6 +7,9 @@ import {
   computeVestedAmount,
   computeProgressBps,
   formatBps,
+  formatTokenAmount,
+  parseTokenAmount,
+  XLM_DECIMALS,
 } from './index';
 
 describe('formatAddress', () => {
@@ -101,5 +104,60 @@ describe('vesting math', () => {
     expect(computeProgressBps(schedule, 1_000)).toBe(10_000);
     expect(formatBps(5_000)).toBe('50%');
     expect(formatBps(2_550)).toBe('25.5%');
+  });
+});
+
+describe('formatTokenAmount', () => {
+  it('formats a 6-decimal token (e.g. USDC)', () => {
+    expect(formatTokenAmount(1_000_000n, 6)).toBe('1');
+    expect(formatTokenAmount('1234567', 6)).toBe('1.234567');
+    expect(formatTokenAmount(1, 6)).toBe('0.000001');
+  });
+
+  it('formats an 18-decimal token beyond Number.MAX_SAFE_INTEGER', () => {
+    expect(formatTokenAmount(1_500_000_000_000_000_000n, 18)).toBe('1.5');
+  });
+
+  it('formats a 0-decimal token', () => {
+    expect(formatTokenAmount(42n, 0)).toBe('42');
+  });
+
+  it('matches formatStroopsToXlm for XLM_DECIMALS', () => {
+    expect(formatTokenAmount(123_456_789n, XLM_DECIMALS)).toBe(formatStroopsToXlm(123_456_789n));
+  });
+
+  it('handles negatives', () => {
+    expect(formatTokenAmount(-1_500_000n, 6)).toBe('-1.5');
+  });
+
+  it('rejects invalid decimals', () => {
+    expect(() => formatTokenAmount(1n, -1)).toThrow('Invalid token decimals');
+    expect(() => formatTokenAmount(1n, 1.5)).toThrow('Invalid token decimals');
+    expect(() => formatTokenAmount(1n, 39)).toThrow('Invalid token decimals');
+  });
+});
+
+describe('parseTokenAmount', () => {
+  it('parses using the token decimals', () => {
+    expect(parseTokenAmount('1.5', 6)).toBe(1_500_000n);
+    expect(parseTokenAmount('1', 18)).toBe(10n ** 18n);
+    expect(parseTokenAmount('7', 0)).toBe(7n);
+  });
+
+  it('truncates precision beyond the token decimals', () => {
+    expect(parseTokenAmount('1.0000019', 6)).toBe(1_000_001n);
+    expect(parseTokenAmount('1.9', 0)).toBe(1n);
+  });
+
+  it('round-trips with formatTokenAmount', () => {
+    for (const decimals of [0, 2, 6, 7, 18]) {
+      const raw = 123_456_789_012n;
+      expect(parseTokenAmount(formatTokenAmount(raw, decimals), decimals)).toBe(raw);
+    }
+  });
+
+  it('rejects invalid input', () => {
+    expect(() => parseTokenAmount('abc', 6)).toThrow('Invalid token amount');
+    expect(() => parseTokenAmount('1', -1)).toThrow('Invalid token decimals');
   });
 });

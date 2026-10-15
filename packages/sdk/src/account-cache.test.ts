@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Account, xdr } from '@stellar/stellar-sdk';
+import { Account, nativeToScVal, xdr } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
 import {
   makeClient,
@@ -23,7 +23,12 @@ describe('RPC transport calls for the dashboard read pattern', () => {
 
   beforeEach(() => {
     rpc = mockRpc();
-    rpc.simulateTransaction.mockImplementation(simulateByMethod(streamScVal(), 42n));
+    rpc.simulateTransaction.mockImplementation(
+      simulateByMethod({
+        get_stream: streamScVal(),
+        claimable: nativeToScVal(42n, { type: 'i128' }),
+      }),
+    );
   });
 
   afterEach(() => {
@@ -59,7 +64,12 @@ describe('source account cache', () => {
 
   beforeEach(() => {
     rpc = mockRpc();
-    rpc.simulateTransaction.mockImplementation(simulateByMethod(streamScVal(), 42n));
+    rpc.simulateTransaction.mockImplementation(
+      simulateByMethod({
+        get_stream: streamScVal(),
+        claimable: nativeToScVal(42n, { type: 'i128' }),
+      }),
+    );
     rpc.sendTransaction.mockResolvedValue(sendResponse('PENDING'));
     rpc.getTransaction.mockResolvedValue(txResponse(GetTransactionStatus.SUCCESS));
   });

@@ -1,4 +1,4 @@
-import { Account, Keypair, StrKey, nativeToScVal, xdr } from '@stellar/stellar-sdk';
+import { Account, Address, Keypair, StrKey, nativeToScVal, xdr } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
 import { vi } from 'vitest';
 import { StreamsClient, type StreamsClientOptions } from './index';
@@ -119,12 +119,22 @@ export function streamScVal(overrides: Partial<Record<string, unknown>> = {}): x
   });
 }
 
-/** Answers `get_stream` with `stream` and `claimable` with `claimable`. */
-export function simulateByMethod(stream: xdr.ScVal, claimable = 0n) {
+/** The contract and method a simulated transaction invokes. */
+export function invokedCall(tx: unknown): { contractId: string; method: string } {
+  const op = (tx as { operations: Array<{ func?: xdr.HostFunction }> }).operations[0];
+  const call = op!.func!.invokeContract();
+  return {
+    contractId: Address.fromScAddress(call.contractAddress()).toString(),
+    method: call.functionName().toString(),
+  };
+}
+
+/** Answers each simulated call with the ScVal registered for its method name. */
+export function simulateByMethod(results: Record<string, xdr.ScVal>) {
   return async (tx: Parameters<SorobanRpc.Server['simulateTransaction']>[0]) => {
-    const op = (tx as { operations: Array<{ func?: xdr.HostFunction }> }).operations[0];
-    const method = op?.func?.invokeContract().functionName().toString();
-    if (method === 'get_stream') return simulationSuccess(stream);
-    return simulationSuccess(nativeToScVal(claimable, { type: 'i128' }));
+    const { method } = invokedCall(tx);
+    const retval = results[method];
+    if (!retval) throw new Error(`Unexpected simulation of ${method}`);
+    return simulationSuccess(retval);
   };
 }

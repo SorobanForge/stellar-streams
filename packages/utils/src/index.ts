@@ -3,6 +3,9 @@
  * All monetary math is done with `bigint` to avoid IEEE-754 precision loss.
  */
 
+/** Decimal places of native XLM and of every Stellar Asset Contract (SAC). */
+export const XLM_DECIMALS = 7;
+
 /** Number of stroops in one XLM (1 XLM = 10^7 stroops). */
 export const STROOPS_PER_XLM = 10_000_000n;
 
@@ -12,42 +15,75 @@ export function formatAddress(address: string, chars = 4): string {
   return `${address.slice(0, chars)}...${address.slice(-chars)}`;
 }
 
+function assertDecimals(decimals: number): void {
+  // SEP-41 `decimals()` is a u32; i128 holds at most 38 significant digits.
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 38) {
+    throw new Error(`Invalid token decimals: ${String(decimals)}`);
+  }
+}
+
 /**
- * Formats a raw stroop amount into a human-readable XLM string, preserving
- * precision for values larger than `Number.MAX_SAFE_INTEGER`.
+ * Formats a raw on-chain token amount (the smallest unit) into a human-readable
+ * string using the token's `decimals`, preserving precision for values larger
+ * than `Number.MAX_SAFE_INTEGER`. Read `decimals` from the token contract
+ * (e.g. `StreamsClient.getTokenMetadata`) rather than assuming 7.
  */
-export function formatStroopsToXlm(stroops: bigint | number | string): string {
-  const value = BigInt(stroops);
+export function formatTokenAmount(raw: bigint | number | string, decimals: number): string {
+  assertDecimals(decimals);
+  const value = BigInt(raw);
   const negative = value < 0n;
   const abs = negative ? -value : value;
+  const unit = 10n ** BigInt(decimals);
 
-  const whole = abs / STROOPS_PER_XLM;
-  const fraction = abs % STROOPS_PER_XLM;
+  const whole = abs / unit;
+  const fraction = abs % unit;
   const sign = negative ? '-' : '';
 
   if (fraction === 0n) return `${sign}${whole.toString()}`;
 
-  const fractionStr = fraction.toString().padStart(7, '0').replace(/0+$/, '');
+  const fractionStr = fraction.toString().padStart(decimals, '0').replace(/0+$/, '');
   return `${sign}${whole.toString()}.${fractionStr}`;
 }
 
 /**
- * Parses a human-readable XLM amount into stroops. Fractional digits beyond
- * 7 decimal places are truncated (they are below the smallest unit).
+ * Parses a human-readable token amount into its smallest unit using the
+ * token's `decimals`. Fractional digits beyond `decimals` places are truncated
+ * (they are below the smallest unit).
  */
-export function parseXlmToStroops(xlm: string | number): bigint {
-  const raw = typeof xlm === 'number' ? xlm.toString() : xlm.trim();
+export function parseTokenAmount(amount: string | number, decimals: number): bigint {
+  assertDecimals(decimals);
+  const raw = typeof amount === 'number' ? amount.toString() : amount.trim();
   if (!/^-?\d*(\.\d*)?$/.test(raw) || raw === '' || raw === '.' || raw === '-') {
-    throw new Error(`Invalid XLM amount: ${String(xlm)}`);
+    throw new Error(`Invalid token amount: ${String(amount)}`);
   }
 
   const negative = raw.startsWith('-');
   const unsigned = negative ? raw.slice(1) : raw;
   const [whole = '0', fraction = ''] = unsigned.split('.');
-  const paddedFraction = (fraction + '0000000').slice(0, 7);
+  const paddedFraction = fraction.padEnd(decimals, '0').slice(0, decimals);
 
-  const result = BigInt(whole || '0') * STROOPS_PER_XLM + BigInt(paddedFraction || '0');
+  const result = BigInt(whole || '0') * 10n ** BigInt(decimals) + BigInt(paddedFraction || '0');
   return negative ? -result : result;
+}
+
+/**
+ * Formats a raw stroop amount into a human-readable XLM string. Equivalent to
+ * `formatTokenAmount(stroops, XLM_DECIMALS)`; use that for non-XLM tokens.
+ */
+export function formatStroopsToXlm(stroops: bigint | number | string): string {
+  return formatTokenAmount(stroops, XLM_DECIMALS);
+}
+
+/**
+ * Parses a human-readable XLM amount into stroops. Equivalent to
+ * `parseTokenAmount(xlm, XLM_DECIMALS)`; use that for non-XLM tokens.
+ */
+export function parseXlmToStroops(xlm: string | number): bigint {
+  try {
+    return parseTokenAmount(xlm, XLM_DECIMALS);
+  } catch {
+    throw new Error(`Invalid XLM amount: ${String(xlm)}`);
+  }
 }
 
 /** Formats a duration in seconds into a compact human string (e.g. "2d 3h 4m"). */

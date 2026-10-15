@@ -16,12 +16,12 @@ import {
   Wallet,
 } from 'lucide-react';
 import { useWallet } from '@stellar-starter-kit/wallets';
-import { StreamsClient } from '@stellar-starter-kit/sdk';
+import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
 import { getStreamStatus, type Stream } from '@stellar-starter-kit/types';
 import {
   formatAddress,
-  formatStroopsToXlm,
-  parseXlmToStroops,
+  formatTokenAmount,
+  parseTokenAmount,
   computeProgressBps,
   formatBps,
   formatDuration,
@@ -33,9 +33,10 @@ const RPC_URL = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? 'https://soroban-test
 const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ?? 'Test SDF Network ; September 2015';
 const CONTRACT_ID = process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID ?? '';
+// Testnet native XLM SAC; any SEP-41 token contract id works.
 const DEFAULT_TOKEN =
-  process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ??
-  'CDLZFC3SYJYDZT7K67VZ75HPJGWGN6XXU250DEX2ZJ26C6EU5R144Z7X';
+  process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ||
+  'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
 
 const DAY = 86_400;
 
@@ -49,6 +50,7 @@ export default function StreamsDashboard() {
 
   // Create form.
   const [recipient, setRecipient] = useState('');
+  const [token, setToken] = useState(DEFAULT_TOKEN);
   const [amount, setAmount] = useState('100');
   const [durationDays, setDurationDays] = useState('30');
   const [cliffDays, setCliffDays] = useState('0');
@@ -57,6 +59,7 @@ export default function StreamsDashboard() {
   const [lookupId, setLookupId] = useState('');
   const [stream, setStream] = useState<Stream | null>(null);
   const [claimable, setClaimable] = useState<bigint>(0n);
+  const [streamToken, setStreamToken] = useState<TokenMetadata | null>(null);
   const [loadingStream, setLoadingStream] = useState(false);
 
   const client = useMemo(
@@ -89,6 +92,8 @@ export default function StreamsDashboard() {
         const found = await client.getStream(id);
         setStream(found);
         setClaimable(found ? await client.claimable(id).catch(() => 0n) : 0n);
+        // Amounts are in the token's smallest unit; read its decimals to display them.
+        setStreamToken(found ? await client.getTokenMetadata(found.token).catch(() => null) : null);
         if (!found) notify('error', `No stream found with id ${id}.`);
       } catch (err) {
         notify('error', err instanceof Error ? err.message : 'Failed to load stream.');
@@ -137,11 +142,12 @@ export default function StreamsDashboard() {
       const endTime = now + Math.floor(Number(durationDays) * DAY);
       const cliffTime = now + Math.floor(Number(cliffDays) * DAY);
 
+      const { decimals } = await client.getTokenMetadata(token.trim());
       const { hash } = await client.createStream({
         sender: activeAddress,
         recipient,
-        token: DEFAULT_TOKEN,
-        amount: parseXlmToStroops(amount).toString(),
+        token: token.trim(),
+        amount: parseTokenAmount(amount, decimals).toString(),
         startTime,
         endTime,
         cliffTime,
@@ -154,6 +160,11 @@ export default function StreamsDashboard() {
       setBusy(false);
     }
   };
+
+  const formatAmount = (raw: bigint | string) =>
+    streamToken
+      ? `${formatTokenAmount(raw, streamToken.decimals)} ${streamToken.symbol}`
+      : `${raw.toString()} (base units)`;
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   const status = stream ? getStreamStatus(stream, nowSeconds) : null;
@@ -293,10 +304,23 @@ export default function StreamsDashboard() {
               />
             </label>
 
+            <label className="block">
+              <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                Token contract
+              </span>
+              <input
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="C..."
+                required
+                className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
+              />
+            </label>
+
             <div className="grid grid-cols-2 gap-4">
               <label className="block">
                 <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                  Amount (XLM)
+                  Amount
                 </span>
                 <input
                   type="number"
@@ -412,21 +436,15 @@ export default function StreamsDashboard() {
                     </div>
                     <div>
                       <dt className="text-[10px] text-slate-500 uppercase">Total</dt>
-                      <dd className="mt-1 text-slate-300">
-                        {formatStroopsToXlm(BigInt(stream.totalAmount))} XLM
-                      </dd>
+                      <dd className="mt-1 text-slate-300">{formatAmount(stream.totalAmount)}</dd>
                     </div>
                     <div>
                       <dt className="text-[10px] text-slate-500 uppercase">Withdrawn</dt>
-                      <dd className="mt-1 text-slate-300">
-                        {formatStroopsToXlm(BigInt(stream.withdrawn))} XLM
-                      </dd>
+                      <dd className="mt-1 text-slate-300">{formatAmount(stream.withdrawn)}</dd>
                     </div>
                     <div>
                       <dt className="text-[10px] text-slate-500 uppercase">Claimable</dt>
-                      <dd className="mt-1 font-bold text-cyan-300">
-                        {formatStroopsToXlm(claimable)} XLM
-                      </dd>
+                      <dd className="mt-1 font-bold text-cyan-300">{formatAmount(claimable)}</dd>
                     </div>
                   </dl>
 
