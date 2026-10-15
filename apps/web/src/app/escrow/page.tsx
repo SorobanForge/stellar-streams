@@ -83,6 +83,7 @@ export default function EscrowDemo() {
   const [createArbiter, setCreateArbiter] = useState<string>('');
   const [createToken, setCreateToken] = useState<string>(
     config.tokenContractId,
+    'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
   ); // Native XLM
   const [createAmount, setCreateAmount] = useState<string>('10'); // in XLM
   const [createDeadline, setCreateDeadline] = useState<string>('3600'); // seconds from now

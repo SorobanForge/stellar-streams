@@ -207,12 +207,52 @@ const { hash } = await client.createStream({
 });
 ```
 
+### Streaming a custom token
+
+`token` can be any SEP-41 token contract id (`C...`): the native XLM SAC, the SAC of an issued
+asset, or a custom Soroban token. Amounts are always in the token's **smallest unit**, and the
+number of decimals comes from the token itself (`decimals()`), not from a hardcoded 7. Read it with
+`getTokenMetadata` and scale with the decimals-aware helpers:
+
+```typescript
+import { StreamsClient, assetContractId } from '@stellar-starter-kit/sdk';
+import { formatTokenAmount, parseTokenAmount } from '@stellar-starter-kit/utils';
+
+// The SAC of an issued asset (or pass 'native' for XLM), or any custom token contract id.
+const token = assetContractId(`USDC:${USDC_ISSUER}`, 'Test SDF Network ; September 2015');
+
+const { decimals, symbol } = await client.getTokenMetadata(token); // SACs have 7; custom tokens may differ
+
+await client.createStream({
+  sender: address,
+  recipient,
+  token,
+  amount: parseTokenAmount('250.5', decimals).toString(),
+  startTime: now,
+  endTime: now + 30 * 86_400,
+  cliffTime: now,
+});
+
+// Display: format with the decimals of the stream's own token.
+const stream = await client.getStream(id);
+const meta = await client.getTokenMetadata(stream!.token);
+`${formatTokenAmount(stream!.totalAmount, meta.decimals)} ${meta.symbol}`; // "250.5 USDC"
+```
+
+`createStream` and `getTokenMetadata` reject anything that is not a contract id, so a `G...`
+account or an `ISSUER:CODE` string fails fast before any RPC call.
+
 Formatting and vesting helpers live in `@stellar-starter-kit/utils`:
 
 ```typescript
-import { formatStroopsToXlm, computeVestedAmount } from '@stellar-starter-kit/utils';
+import {
+  formatTokenAmount,
+  formatStroopsToXlm,
+  computeVestedAmount,
+} from '@stellar-starter-kit/utils';
 
-formatStroopsToXlm(123_456_789n); // "12.3456789"
+formatTokenAmount(1_234_567n, 6); // "1.234567" — any token, given its decimals
+formatStroopsToXlm(123_456_789n); // "12.3456789" — shorthand for 7-decimal XLM
 computeVestedAmount(schedule, now); // bigint
 ```
 
@@ -237,15 +277,15 @@ pnpm run dev
 
 Copy `.env.example` to `.env.local` and set:
 
-| Variable                                 | Purpose                                             |
-| :--------------------------------------- | :-------------------------------------------------- |
-| `NEXT_PUBLIC_STELLAR_NETWORK`            | `local`, `testnet`, or `mainnet`.                   |
-| `NEXT_PUBLIC_HORIZON_URL`                | Horizon endpoint.                                   |
-| `NEXT_PUBLIC_SOROBAN_RPC_URL`            | Soroban RPC endpoint.                               |
-| `NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE` | Network passphrase.                                 |
-| `NEXT_PUBLIC_STREAM_CONTRACT_ID`         | Deployed `stream` contract id.                      |
-| `NEXT_PUBLIC_SPLITS_CONTRACT_ID`         | Deployed `splits` contract id.                      |
-| `NEXT_PUBLIC_TOKEN_CONTRACT_ID`          | Token contract to stream (defaults to testnet XLM). |
+| Variable                                 | Purpose                                                                                      |
+| :--------------------------------------- | :------------------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_STELLAR_NETWORK`            | `local`, `testnet`, or `mainnet`.                                                            |
+| `NEXT_PUBLIC_HORIZON_URL`                | Horizon endpoint.                                                                            |
+| `NEXT_PUBLIC_SOROBAN_RPC_URL`            | Soroban RPC endpoint.                                                                        |
+| `NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE` | Network passphrase.                                                                          |
+| `NEXT_PUBLIC_STREAM_CONTRACT_ID`         | Deployed `stream` contract id.                                                               |
+| `NEXT_PUBLIC_SPLITS_CONTRACT_ID`         | Deployed `splits` contract id.                                                               |
+| `NEXT_PUBLIC_TOKEN_CONTRACT_ID`          | Default token contract in the create form (defaults to testnet XLM SAC); any token id works. |
 
 ---
 
@@ -281,7 +321,6 @@ Good places to start:
 
 - Add an integration test that exercises a full stream lifecycle on a local node.
 - Implement the `splits` dashboard page.
-- Add multi-token stream support to the SDK.
 
 ---
 
