@@ -48,3 +48,7 @@ bin/
 
 # Temporary directories
 temp-old-modules/
+
+# Lockfiles - this repository uses pnpm only (see CONTRIBUTING.md)
+package-lock.json
+yarn.lock

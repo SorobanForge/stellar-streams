@@ -5,9 +5,10 @@
   "description": "Payment streaming, vesting, and splits protocol for Stellar and Soroban.",
   "engines": {
     "node": ">=18.0.0",
-    "pnpm": ">=8.0.0"
+    "pnpm": ">=9.0.0"
   },
   "scripts": {
+    "preinstall": "node scripts/check-package-manager.js",
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",

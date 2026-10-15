@@ -28,8 +28,16 @@ This guide helps us organize work consistently and ensures smooth collaboration.
 To contribute to this project, you will need:
 
 - **Node.js** >= 18.0.0
-- **pnpm** >= 8.0.0
+- **pnpm** >= 9.0.0
 - **Git**
+
+> **pnpm only.** This monorepo uses the `workspace:` protocol and is managed
+> exclusively with pnpm. npm and yarn are not supported: `.npmrc` sets
+> `engine-strict=true` and a `preinstall` guard rejects both with a clear message
+> instead of writing a conflicting `package-lock.json` or `yarn.lock`.
+>
+> Enable pnpm with [Corepack](https://pnpm.io/installation#using-corepack) if you
+> do not have it: `corepack enable`.
 
 ### Installation
 
