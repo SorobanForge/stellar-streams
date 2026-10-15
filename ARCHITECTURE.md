@@ -44,7 +44,7 @@ Rust workspaces built with [soroban-sdk](https://crates.io/crates/soroban-sdk) `
 | :------- | :------------------------------------------------------------------------------------------------------ |
 | `stream` | **Flagship.** Linear vesting streams with cliffs, cancellation, optional protocol fee, and TTL bumping. |
 | `splits` | Reusable proportional payment splits with duplicate detection and dust handling.                        |
-| `escrow` | Arbiter-based escrow with deadline-driven refunds.                                                      |
+| `escrow` | Arbiter-based escrow with deadline-driven refunds. [See lifecycle below.](#escrow-lifecycle)             |
 
 Design rules:
 
@@ -96,3 +96,94 @@ A Next.js 15 App Router application:
 - **Husky + commitlint + lint-staged** enforce Conventional Commits and formatting on commit.
 - **GitHub Actions** runs four jobs: JS lint/format, typecheck, unit tests, and the production
   build, plus a dedicated `contracts` job (`cargo fmt`, `clippy -D warnings`, `cargo test`).
+
+
+---
+
+## Escrow Lifecycle
+
+The `escrow` contract implements a three-party agreement: **payer** (funds the escrow), **payee**
+(receives funds if released), and **arbiter** (neutral party who can mediate disputes). The state
+machine is defined in [`contracts/escrow/src/lib.rs`](./contracts/escrow/src/lib.rs).
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    actor Payer
+    actor Payee
+    actor Arbiter
+    participant Escrow
+
+    Payer->>Escrow: create_escrow(id, payer, payee, arbiter, token, amount, deadline)
+    Note over Escrow: status = Created
+
+    Payer->>Escrow: fund_escrow(id)
+    Escrow->>Escrow: transfer amount to contract
+    Note over Escrow: status = Funded
+
+    alt Release Path
+        alt Payer or Arbiter
+            Payer->>Escrow: release_escrow(id, caller=Payer)
+            Escrow->>Escrow: transfer amount to payee
+            Note over Escrow: status = Released
+        or
+            Arbiter->>Escrow: release_escrow(id, caller=Arbiter)
+            Escrow->>Escrow: transfer amount to payee
+            Note over Escrow: status = Released
+        end
+    else Refund Path
+        alt Payee or Arbiter
+            Payee->>Escrow: refund_escrow(id, caller=Payee)
+            Escrow->>Escrow: transfer amount to payer
+            Note over Escrow: status = Refunded
+        or
+            Arbiter->>Escrow: refund_escrow(id, caller=Arbiter)
+            Escrow->>Escrow: transfer amount to payer
+            Note over Escrow: status = Refunded
+        end
+    else Cancel Path (Before Deadline)
+        Payer->>Escrow: cancel_escrow(id, caller=Payer)
+        Note over Escrow: Created → Cancelled (no transfer)
+    else Cancel Path (After Deadline)
+        Payer->>Escrow: cancel_escrow(id, caller=Payer)
+        Escrow->>Escrow: transfer amount to payer
+        Note over Escrow: Funded → Cancelled
+    end
+```
+
+### State Transition Table
+
+| From | To | Authorized Caller(s) | Precondition | Error Code | Notes |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| — | `Created` | Payer | Amount > 0 | `InvalidAmount` | Initial state after `create_escrow()` |
+| `Created` | `Funded` | Payer | Balance sufficient | — | Token transfer happens in this step |
+| `Created` | `Cancelled` | Payer | Always | — | Cancels unfunded agreement; no refund needed |
+| `Funded` | `Released` | Payer or Arbiter | Any time | — | Payee receives funds |
+| `Funded` | `Refunded` | Payee or Arbiter | Any time | — | Payer receives funds back |
+| `Funded` | `Cancelled` | Payer | Deadline passed | `DeadlineNotReached` | Payer receives funds back after deadline |
+| `Released`, `Refunded`, `Cancelled` | — | — | — | `AlreadyFinalized` | Terminal states; no further transitions |
+
+### Error Codes
+
+| Code | Error | Meaning |
+| :--- | :--- | :--- |
+| 1 | `EscrowNotFound` | Escrow ID does not exist |
+| 2 | `EscrowAlreadyExists` | Attempted to create an escrow with a duplicate ID |
+| 3 | `InvalidAmount` | Amount ≤ 0 |
+| 4 | `UnauthorizedOperation` | Caller is not authorized for this transition |
+| 5 | `InvalidStateTransition` | Cannot transition from current state |
+| 6 | `DeadlineNotReached` | Attempted cancel before deadline (only in Funded state) |
+| 7 | `DeadlineExpired` | Reserved for future use |
+| 8 | `AlreadyFinalized` | Escrow has reached a terminal state |
+
+### Key Design Decisions
+
+1. **Three-party model:** Payer and payee may not agree; arbiter breaks ties.
+2. **Deadline gating:** Cancellation after funding is only allowed once the deadline passes, ensuring
+   payee has time to act.
+3. **No funds until funded:** The `Created` state holds no tokens; cancelling before funding is free.
+4. **Terminal states:** Once an escrow reaches `Released`, `Refunded`, or `Cancelled`, no further
+   transitions are allowed.
+5. **Auth-first:** Every transition requires `require_auth()` on the caller to ensure cryptographic
+   proof of intent.
