@@ -11,6 +11,7 @@ describe('cn class merging utility', () => {
   });
 
   it('should filter out falsy conditions', () => {
-    expect(cn('btn', false && 'hidden', 'visible')).toBe('btn visible');
+    const hidden = false;
+    expect(cn('btn', hidden && 'hidden', 'visible')).toBe('btn visible');
   });
 });

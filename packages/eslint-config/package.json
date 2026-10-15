@@ -3,5 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
-  "main": "index.js"
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "dependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint-config-next": "^16.4.1",
+    "eslint-config-prettier": "^10.1.8"
+  },
+  "peerDependencies": {
+    "eslint": "^9.0.0"
+  }
 }
