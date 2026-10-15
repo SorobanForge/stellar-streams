@@ -1,4 +1,4 @@
-import { Account, Keypair, StrKey, xdr } from '@stellar/stellar-sdk';
+import { Account, Keypair, StrKey, nativeToScVal, xdr } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
 import { vi } from 'vitest';
 import { StreamsClient, type StreamsClientOptions } from './index';
@@ -86,4 +86,45 @@ export function txResponse(
     latestLedger: 1,
     ...extra,
   } as unknown as SorobanRpc.Api.GetTransactionResponse;
+}
+
+/** Encodes a `Stream` struct the way the contract's `get_stream` returns it. */
+export function streamScVal(overrides: Partial<Record<string, unknown>> = {}): xdr.ScVal {
+  const value = {
+    cancelled: false,
+    cliff_time: 1_500n,
+    end_time: 2_000n,
+    id: 1n,
+    recipient: PUBLIC_KEY,
+    sender: PUBLIC_KEY,
+    start_time: 1_000n,
+    token: CONTRACT_ID,
+    total_amount: 1_000_000_000n,
+    withdrawn: 0n,
+    ...overrides,
+  };
+  return nativeToScVal(value, {
+    type: {
+      cancelled: ['symbol'],
+      cliff_time: ['symbol', 'u64'],
+      end_time: ['symbol', 'u64'],
+      id: ['symbol', 'u64'],
+      recipient: ['symbol', 'address'],
+      sender: ['symbol', 'address'],
+      start_time: ['symbol', 'u64'],
+      token: ['symbol', 'address'],
+      total_amount: ['symbol', 'i128'],
+      withdrawn: ['symbol', 'i128'],
+    },
+  });
+}
+
+/** Answers `get_stream` with `stream` and `claimable` with `claimable`. */
+export function simulateByMethod(stream: xdr.ScVal, claimable = 0n) {
+  return async (tx: Parameters<SorobanRpc.Server['simulateTransaction']>[0]) => {
+    const op = (tx as { operations: Array<{ func?: xdr.HostFunction }> }).operations[0];
+    const method = op?.func?.invokeContract().functionName().toString();
+    if (method === 'get_stream') return simulationSuccess(stream);
+    return simulationSuccess(nativeToScVal(claimable, { type: 'i128' }));
+  };
 }

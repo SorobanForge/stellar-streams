@@ -37,6 +37,9 @@ const MAX_BACKOFF_MS = 8_000;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Raised when the network rejects a submission because its sequence number is stale. */
+class StaleSequenceError extends Error {}
+
 /**
  * A typed client for the Stellar Streams protocol. Read calls simulate against
  * Soroban RPC; write calls are prepared, signed by the injected wallet signer,
@@ -45,6 +48,12 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export class StreamsClient {
   private readonly server: SorobanRpc.Server;
   private readonly options: StreamsClientOptions;
+  /**
+   * The source account (and its sequence number), fetched once and shared by
+   * every simulate/invoke call. Cached as a promise so concurrent reads — e.g.
+   * `getStream` and `claimable` issued together — share one `getAccount`.
+   */
+  private account: Promise<Account> | null = null;
 
   constructor(options: StreamsClientOptions) {
     this.options = options;
@@ -65,11 +74,36 @@ export class StreamsClient {
     return this.options.contractId;
   }
 
+  /**
+   * Returns a fresh copy of the cached source account, fetching it on first
+   * use. A copy is handed out because `TransactionBuilder.build()` increments
+   * the sequence number of the account it is given, and simulations must not
+   * advance the cached sequence.
+   */
   private async sourceAccount(): Promise<Account> {
-    if (!this.options.publicKey) {
+    const { publicKey } = this.options;
+    if (!publicKey) {
       throw new Error('A connected wallet (publicKey) is required for this operation.');
     }
-    return this.server.getAccount(this.options.publicKey);
+    if (!this.account) {
+      const pending = this.server.getAccount(publicKey);
+      this.account = pending;
+      // Don't cache failures; the next call should retry the fetch.
+      pending.catch(() => {
+        if (this.account === pending) this.account = null;
+      });
+    }
+    const cached = await this.account;
+    return new Account(cached.accountId(), cached.sequenceNumber());
+  }
+
+  /**
+   * Drops the cached source account so the next call re-fetches it. Called
+   * automatically after every submitted write (its sequence number has been
+   * consumed); call it yourself if the account is used from elsewhere.
+   */
+  invalidateAccount(): void {
+    this.account = null;
   }
 
   /** Simulates a read-only contract call and returns the decoded result. */
@@ -101,26 +135,41 @@ export class StreamsClient {
       throw new Error('A connected wallet is required to submit transactions.');
     }
 
-    const account = await this.sourceAccount();
-    const tx = new TransactionBuilder(account, {
-      fee: '1000000',
-      networkPassphrase,
-    })
-      .addOperation(this.contract.call(method, ...args))
-      .setTimeout(30)
-      .build();
+    // A cached sequence can go stale if the account transacted elsewhere; in
+    // that case re-fetch it once and rebuild instead of failing the call.
+    for (let attempt = 0; ; attempt++) {
+      const account = await this.sourceAccount();
+      const tx = new TransactionBuilder(account, {
+        fee: '1000000',
+        networkPassphrase,
+      })
+        .addOperation(this.contract.call(method, ...args))
+        .setTimeout(30)
+        .build();
 
-    const prepared = await this.server.prepareTransaction(tx);
-    const signedXdr = await signTransaction(prepared.toXDR(), {
-      networkPassphrase,
-      address: publicKey,
-    });
-    const hash = await this.submit(
-      TransactionBuilder.fromXDR(signedXdr, networkPassphrase) as Parameters<
-        SorobanRpc.Server['sendTransaction']
-      >[0],
-    );
-    return this.poll(hash);
+      const prepared = await this.server.prepareTransaction(tx);
+      const signedXdr = await signTransaction(prepared.toXDR(), {
+        networkPassphrase,
+        address: publicKey,
+      });
+
+      let hash: string;
+      try {
+        hash = await this.submit(
+          TransactionBuilder.fromXDR(signedXdr, networkPassphrase) as Parameters<
+            SorobanRpc.Server['sendTransaction']
+          >[0],
+        );
+      } catch (error) {
+        this.invalidateAccount();
+        if (error instanceof StaleSequenceError && attempt === 0) continue;
+        throw error;
+      }
+      // Invalidation point: once the network has accepted the transaction its
+      // sequence number is consumed (whether it later succeeds or fails).
+      this.invalidateAccount();
+      return this.poll(hash);
+    }
   }
 
   private get pollIntervalMs(): number {
@@ -142,6 +191,11 @@ export class StreamsClient {
     for (;;) {
       const submitted = await this.server.sendTransaction(tx);
       if (submitted.status === 'ERROR') {
+        if (submitted.errorResult?.result().switch().name === 'txBadSeq') {
+          throw new StaleSequenceError(
+            `Transaction ${submitted.hash} used a stale sequence number.`,
+          );
+        }
         throw new Error(
           `Transaction ${submitted.hash} was rejected: ${describeTransactionResult(submitted.errorResult)}` +
             describeDiagnostics(submitted.diagnosticEvents),
