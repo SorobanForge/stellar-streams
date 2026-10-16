@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { getStreamStatus, type Stream } from './index';
+import {
+  getStreamStatus,
+  normalizeEscrow,
+  normalizeSplit,
+  normalizeStream,
+  type RawEscrow,
+  type RawSplit,
+  type RawStream,
+  type Stream,
+} from './index';
 
 const START = 1_000;
 const CLIFF = 1_500;
@@ -91,5 +100,103 @@ describe('getStreamStatus', () => {
     it('is completed at end even when the cliff equals the end', () => {
       expect(getStreamStatus(makeStream({ cliffTime: END }), END)).toBe('completed');
     });
+  });
+});
+
+describe('normalizeStream', () => {
+  it('converts the snake_case bigint fields into the camelCase domain shape', () => {
+    const raw: RawStream = {
+      id: 1n,
+      sender: 'GSENDER',
+      recipient: 'GRECIPIENT',
+      token: 'CTOKEN',
+      total_amount: 1_000_000_000n,
+      withdrawn: 250n,
+      start_time: 1_000n,
+      end_time: 2_000n,
+      cliff_time: 1_500n,
+      cancelled: false,
+    };
+    expect(normalizeStream(raw)).toEqual(makeStream({ withdrawn: '250' }));
+  });
+});
+
+function makeRawEscrow(overrides: Partial<RawEscrow> = {}): RawEscrow {
+  return {
+    id: 1n,
+    payer: 'GPAYER',
+    payee: 'GPAYEE',
+    arbiter: 'GARBITER',
+    token: 'CTOKEN',
+    amount: 10_000_000_000n,
+    deadline: 2_000n,
+    status: 1,
+    ...overrides,
+  };
+}
+
+describe('normalizeEscrow', () => {
+  it('converts the u64 / i128 fields to decimal strings', () => {
+    expect(normalizeEscrow(makeRawEscrow())).toEqual({
+      id: '1',
+      payer: 'GPAYER',
+      payee: 'GPAYEE',
+      arbiter: 'GARBITER',
+      token: 'CTOKEN',
+      amount: '10000000000',
+      deadline: '2000',
+      status: 'funded',
+    });
+  });
+
+  it.each([
+    [0, 'created'],
+    [1, 'funded'],
+    [2, 'released'],
+    [3, 'refunded'],
+    [4, 'cancelled'],
+  ])('maps status code %i to %s', (code, status) => {
+    expect(normalizeEscrow(makeRawEscrow({ status: code })).status).toBe(status);
+  });
+
+  it('keeps u64 ids beyond the safe integer range exact', () => {
+    const escrow = normalizeEscrow(makeRawEscrow({ id: 9_007_199_254_740_993n }));
+    expect(escrow.id).toBe('9007199254740993');
+  });
+
+  it('rejects a status code the contract does not define', () => {
+    expect(() => normalizeEscrow(makeRawEscrow({ status: 5 }))).toThrow('Unknown escrow status: 5');
+  });
+});
+
+function makeRawSplit(overrides: Partial<RawSplit> = {}): RawSplit {
+  return {
+    id: 7n,
+    creator: 'GCREATOR',
+    recipients: ['GRECIPIENT1', 'GRECIPIENT2'],
+    shares: [70, 30],
+    total_shares: 100,
+    ...overrides,
+  };
+}
+
+describe('normalizeSplit', () => {
+  it('converts the id to a decimal string and renames total_shares', () => {
+    expect(normalizeSplit(makeRawSplit())).toEqual({
+      id: '7',
+      creator: 'GCREATOR',
+      recipients: ['GRECIPIENT1', 'GRECIPIENT2'],
+      shares: [70, 30],
+      totalShares: 100,
+    });
+  });
+
+  it('copies the recipient and share arrays instead of aliasing them', () => {
+    const raw = makeRawSplit();
+    const split = normalizeSplit(raw);
+    split.recipients.push('GEXTRA');
+    split.shares.push(1);
+    expect(raw.recipients).toHaveLength(2);
+    expect(raw.shares).toHaveLength(2);
   });
 });

@@ -10,7 +10,15 @@ import {
   xdr,
 } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
-import type { CreateStreamParams, Stream, StreamConfig } from '@stellar-starter-kit/types';
+import {
+  normalizeConfig,
+  normalizeStream,
+  type CreateStreamParams,
+  type RawConfig,
+  type RawStream,
+  type Stream,
+  type StreamConfig,
+} from '@stellar-starter-kit/types';
 
 export interface StreamsClientOptions {
   /** The deployed `stream` contract id (C...). */
@@ -298,8 +306,7 @@ export class StreamsClient {
   /** Fetch protocol configuration. Returns `null` if the contract is uninitialized. */
   async getConfig(): Promise<StreamConfig | null> {
     const raw = (await this.simulate('get_config')) as RawConfig | null;
-    if (!raw) return null;
-    return { admin: raw.admin, treasury: raw.treasury, feeBps: Number(raw.fee_bps) };
+    return raw ? normalizeConfig(raw) : null;
   }
 
   /** Currently withdrawable amount for a stream, in the token's smallest unit. */
@@ -369,40 +376,6 @@ export class StreamsClient {
   async cancel(id: bigint | number | string): Promise<{ hash: string }> {
     return this.invoke('cancel', nativeToScVal(BigInt(id), { type: 'u64' }));
   }
-}
-
-interface RawStream {
-  id: bigint;
-  sender: string;
-  recipient: string;
-  token: string;
-  total_amount: bigint;
-  withdrawn: bigint;
-  start_time: bigint;
-  end_time: bigint;
-  cliff_time: bigint;
-  cancelled: boolean;
-}
-
-interface RawConfig {
-  admin: string;
-  treasury: string;
-  fee_bps: number;
-}
-
-function normalizeStream(raw: RawStream): Stream {
-  return {
-    id: raw.id.toString(),
-    sender: raw.sender,
-    recipient: raw.recipient,
-    token: raw.token,
-    totalAmount: raw.total_amount.toString(),
-    withdrawn: raw.withdrawn.toString(),
-    startTime: Number(raw.start_time),
-    endTime: Number(raw.end_time),
-    cliffTime: Number(raw.cliff_time),
-    cancelled: raw.cancelled,
-  };
 }
 
 function assertTokenId(tokenId: string): void {
