@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { EscrowClient } from '@stellar-starter-kit/contracts';
+import { normalizeEscrow, type Escrow, type EscrowStatus } from '@stellar-starter-kit/types';
 import deployments from '../../generated/deployments.json';
 import Header from '../../components/Header';
 import Footer from '../../components/Footer';
@@ -33,15 +34,23 @@ interface LogEntry {
   details: string;
 }
 
-interface EscrowDetails {
-  id: string;
-  payer: string;
-  payee: string;
-  arbiter: string;
-  token: string;
-  amount: string;
-  deadline: string;
-  status: string;
+/** Display labels for the shared `EscrowStatus` values. */
+const ESCROW_STATUS_LABELS: Record<EscrowStatus, string> = {
+  created: 'Created',
+  funded: 'Funded',
+  released: 'Released',
+  refunded: 'Refunded',
+  cancelled: 'Cancelled',
+};
+
+/** Escrowed amount (token's smallest unit) rendered in whole XLM (7 decimals). */
+function toXlm(amount: string): string {
+  return (Number(amount) / 10_000_000).toFixed(7);
+}
+
+/** On-chain unix seconds rendered as a local date-time. */
+function toDeadlineLabel(deadline: string): string {
+  return new Date(Number(deadline) * 1000).toLocaleString();
 }
 
 export default function EscrowDemo() {
@@ -78,7 +87,7 @@ export default function EscrowDemo() {
 
   // Lookup Escrow State
   const [lookupId, setLookupId] = useState<string>('');
-  const [lookupResult, setLookupResult] = useState<EscrowDetails | null>(null);
+  const [lookupResult, setLookupResult] = useState<Escrow | null>(null);
   const [lookupLoading, setLookupLoading] = useState<boolean>(false);
 
   const contractId = deployments.escrow;
@@ -267,27 +276,8 @@ export default function EscrowDemo() {
       const result = await client.get_escrow({ id: escrowId });
 
       if (result.result) {
-        const data = result.result;
-        // Convert status enum to string
-        const statusMap = ['Created', 'Funded', 'Released', 'Refunded', 'Cancelled'];
-        const statusStr = statusMap[data.status] || 'Unknown';
-
-        // Convert amount from Stroops
-        const amountXlm = (Number(data.amount) / 10000000).toFixed(7);
-
-        // Format deadline
-        const deadlineDate = new Date(Number(data.deadline) * 1000).toLocaleString();
-
-        setLookupResult({
-          id: data.id.toString(),
-          payer: data.payer,
-          payee: data.payee,
-          arbiter: data.arbiter,
-          token: data.token,
-          amount: amountXlm,
-          deadline: deadlineDate,
-          status: statusStr,
-        });
+        // Decode the binding's snake_case/bigint struct into the shared domain type.
+        setLookupResult(normalizeEscrow(result.result));
 
         if (!silent) {
           addLog('fetch', 'success', `Fetched details for escrow ID ${escrowId.toString()}`);
@@ -694,16 +684,16 @@ export default function EscrowDemo() {
                             </span>
                             <span
                               className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
-                                lookupResult.status === 'Funded'
+                                lookupResult.status === 'funded'
                                   ? 'border border-yellow-500/20 bg-yellow-500/10 text-yellow-400'
-                                  : lookupResult.status === 'Released'
+                                  : lookupResult.status === 'released'
                                     ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
-                                    : lookupResult.status === 'Created'
+                                    : lookupResult.status === 'created'
                                       ? 'border border-purple-500/20 bg-purple-500/10 text-purple-400'
                                       : 'border border-rose-500/20 bg-rose-500/10 text-rose-400'
                               }`}
                             >
-                              {lookupResult.status}
+                              {ESCROW_STATUS_LABELS[lookupResult.status]}
                             </span>
                           </div>
 
@@ -737,14 +727,16 @@ export default function EscrowDemo() {
                             <div>
                               <div className="text-[10px] text-slate-500 uppercase">Amount</div>
                               <div className="mt-1 text-sm font-bold text-white">
-                                {lookupResult.amount} XLM
+                                {toXlm(lookupResult.amount)} XLM
                               </div>
                             </div>
                             <div>
                               <div className="text-[10px] text-slate-500 uppercase">
                                 Deadline (Refund unlock)
                               </div>
-                              <div className="text-slate-350 mt-1">{lookupResult.deadline}</div>
+                              <div className="text-slate-350 mt-1">
+                                {toDeadlineLabel(lookupResult.deadline)}
+                              </div>
                             </div>
                           </div>
 
