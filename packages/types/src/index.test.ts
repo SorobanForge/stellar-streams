@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { deriveStreamState } from '@stellar-starter-kit/utils';
 import { getStreamStatus, type Stream } from './index';
 
 const START = 1_000;
@@ -94,4 +95,14 @@ describe('getStreamStatus', () => {
       expect(getStreamStatus(makeStream({ cliffTime: END }), END)).toBe('completed');
     });
   });
+});
+
+describe('getStreamStatus delegates to deriveStreamState', () => {
+  it.each([999, START, CLIFF - 1, CLIFF, END - 1, END, END + 1])(
+    'agrees on the status at now=%i',
+    (now) => {
+      const stream = makeStream();
+      expect(getStreamStatus(stream, now)).toBe(deriveStreamState(stream, now).status);
+    },
+  );
 });

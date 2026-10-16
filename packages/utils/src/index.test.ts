@@ -6,6 +6,7 @@ import {
   formatDuration,
   computeVestedAmount,
   computeProgressBps,
+  deriveStreamState,
   formatBps,
   formatTokenAmount,
   parseTokenAmount,
@@ -104,6 +105,92 @@ describe('vesting math', () => {
     expect(computeProgressBps(schedule, 1_000)).toBe(10_000);
     expect(formatBps(5_000)).toBe('50%');
     expect(formatBps(2_550)).toBe('25.5%');
+  });
+});
+
+describe('deriveStreamState', () => {
+  const stream = {
+    totalAmount: '1000',
+    withdrawn: '0',
+    startTime: 1_000,
+    endTime: 2_000,
+    cliffTime: 1_500,
+    cancelled: false,
+  };
+
+  it('cliff exactly at startTime: streaming at start, but nothing vested yet', () => {
+    const atStart = deriveStreamState({ ...stream, cliffTime: 1_000 }, 1_000);
+    expect(atStart).toEqual({
+      status: 'streaming',
+      progressBps: 0,
+      claimable: 0n,
+      remainingSeconds: 1_000,
+    });
+
+    const halfway = deriveStreamState({ ...stream, cliffTime: 1_000 }, 1_500);
+    expect(halfway).toEqual({
+      status: 'streaming',
+      progressBps: 5_000,
+      claimable: 500n,
+      remainingSeconds: 500,
+    });
+  });
+
+  it('cliff exactly at endTime: scheduled with zero progress until the last second', () => {
+    const justBefore = deriveStreamState({ ...stream, cliffTime: 2_000 }, 1_999);
+    expect(justBefore.status).toBe('scheduled');
+    // Time-based progress alone would read 9990bps here — the shared path keeps
+    // progress at 0 for exactly as long as the status says `scheduled`.
+    expect(justBefore.progressBps).toBe(0);
+    expect(justBefore.claimable).toBe(0n);
+    expect(justBefore.remainingSeconds).toBe(1);
+
+    const atEnd = deriveStreamState({ ...stream, cliffTime: 2_000 }, 2_000);
+    expect(atEnd).toEqual({
+      status: 'completed',
+      progressBps: 10_000,
+      claimable: 1_000n,
+      remainingSeconds: 0,
+    });
+  });
+
+  it('derives a cancelled stream as fully vested, mirroring the contract', () => {
+    // `cancel` compresses the schedule on-chain (start = end = cliff = cancel time).
+    const cancelled = deriveStreamState(
+      {
+        ...stream,
+        totalAmount: '600',
+        withdrawn: '100',
+        startTime: 1_500,
+        endTime: 1_500,
+        cliffTime: 1_500,
+        cancelled: true,
+      },
+      1_500,
+    );
+    expect(cancelled.status).toBe('cancelled');
+    expect(cancelled.progressBps).toBe(10_000);
+    expect(cancelled.claimable).toBe(500n); // 600 vested − 100 withdrawn
+    expect(cancelled.remainingSeconds).toBe(0);
+  });
+
+  it('floors claimable at zero and remainingSeconds at zero', () => {
+    const overWithdrawn = deriveStreamState(
+      { ...stream, cliffTime: 1_000, withdrawn: '2000' },
+      1_500,
+    );
+    expect(overWithdrawn.claimable).toBe(0n);
+
+    const past = deriveStreamState(stream, 5_000);
+    expect(past.remainingSeconds).toBe(0);
+  });
+
+  it('accepts bigint amounts as well as decimal strings', () => {
+    const fromBigints = deriveStreamState(
+      { ...stream, totalAmount: 1_000n, withdrawn: 0n, cliffTime: 1_000 },
+      1_500,
+    );
+    expect(fromBigints.claimable).toBe(500n);
   });
 });
 

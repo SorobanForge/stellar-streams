@@ -17,12 +17,12 @@ import {
 } from 'lucide-react';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
-import { getStreamStatus, type Stream } from '@stellar-starter-kit/types';
+import type { Stream } from '@stellar-starter-kit/types';
 import {
   formatAddress,
   formatTokenAmount,
   parseTokenAmount,
-  computeProgressBps,
+  deriveStreamState,
   formatBps,
   formatDuration,
 } from '@stellar-starter-kit/utils';
@@ -58,7 +58,6 @@ export default function StreamsDashboard() {
   // Lookup.
   const [lookupId, setLookupId] = useState('');
   const [stream, setStream] = useState<Stream | null>(null);
-  const [claimable, setClaimable] = useState<bigint>(0n);
   const [streamToken, setStreamToken] = useState<TokenMetadata | null>(null);
   const [loadingStream, setLoadingStream] = useState(false);
 
@@ -91,7 +90,6 @@ export default function StreamsDashboard() {
       try {
         const found = await client.getStream(id);
         setStream(found);
-        setClaimable(found ? await client.claimable(id).catch(() => 0n) : 0n);
         // Amounts are in the token's smallest unit; read its decimals to display them.
         setStreamToken(found ? await client.getTokenMetadata(found.token).catch(() => null) : null);
         if (!found) notify('error', `No stream found with id ${id}.`);
@@ -167,18 +165,13 @@ export default function StreamsDashboard() {
       : `${raw.toString()} (base units)`;
 
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const status = stream ? getStreamStatus(stream, nowSeconds) : null;
-  const progress = stream
-    ? computeProgressBps(
-        {
-          totalAmount: BigInt(stream.totalAmount),
-          startTime: stream.startTime,
-          endTime: stream.endTime,
-          cliffTime: stream.cliffTime,
-        },
-        nowSeconds,
-      )
-    : 0;
+  // One derivation for every field rendered below: status, progress, claimable
+  // and remaining time can no longer disagree about the same stream.
+  const derived = stream ? deriveStreamState(stream, nowSeconds) : null;
+  const status = derived?.status ?? null;
+  const progress = derived?.progressBps ?? 0;
+  const claimable = derived?.claimable ?? 0n;
+  const remainingSeconds = derived?.remainingSeconds ?? 0;
 
   return (
     <div className="min-h-screen bg-[#06060c] text-slate-100 selection:bg-purple-500/30 selection:text-purple-200">
@@ -424,9 +417,7 @@ export default function StreamsDashboard() {
                   </div>
                   <div className="flex justify-between text-[10px] text-slate-500">
                     <span>{formatBps(progress)} vested</span>
-                    <span>
-                      {formatDuration(Math.max(0, stream.endTime - nowSeconds))} remaining
-                    </span>
+                    <span>{formatDuration(remainingSeconds)} remaining</span>
                   </div>
 
                   <dl className="grid grid-cols-2 gap-4 border-t border-slate-900 pt-4">
