@@ -116,3 +116,16 @@ git commit -m "feat(sdk): add Stellar wallet connection hook"
 3. Fill out the PR template completely.
 4. Ensure all CI checks (linting, testing, and building) pass successfully.
 5. Address any review feedback. Once approved, your PR will be merged!
+
+---
+
+## Releasing & Changesets
+
+If your PR **changes a published package** (anything in `packages/*`), you must create a changeset. See [docs/releasing.md](docs/releasing.md) for:
+
+- When to create a changeset
+- How to use `pnpm changeset`
+- What happens during the release process
+- How maintainers cut releases
+
+This ensures all changes are tracked and automatically included in the CHANGELOG and version bumps.

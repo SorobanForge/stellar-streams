@@ -1,0 +1,28 @@
+{
+  "name": "@stellar-starter-kit/config",
+  "version": "0.1.0",
+  "description": "Typed environment configuration and validation for Stellar Streams",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@stellar-starter-kit/tsconfig": "workspace:*",
+    "typescript": "^6.0.3",
+    "vitest": "^3.0.0"
+  }
+}

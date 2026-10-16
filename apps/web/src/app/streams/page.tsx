@@ -26,9 +26,27 @@ import {
   formatBps,
   formatDuration,
 } from '@stellar-starter-kit/utils';
+import { parseEnvironment } from '@stellar-starter-kit/config';
 import Header from '../../components/Header';
 import Footer from '../../components/Footer';
 
+// Parse and validate environment configuration
+const envResult = parseEnvironment();
+if (!envResult.success) {
+  console.error('Environment configuration is invalid:');
+  envResult.errors.forEach((error) => {
+    console.error(`  ${error.field}: ${error.message}`);
+  });
+  throw new Error(
+    `Environment validation failed with ${envResult.errors.length} error(s). Check the console for details.`
+  );
+}
+
+const { config } = envResult;
+const RPC_URL = config.sorobanRpcUrl;
+const NETWORK_PASSPHRASE = config.networkPassphrase;
+const CONTRACT_ID = config.streamContractId ?? '';
+const DEFAULT_TOKEN = config.tokenContractId;
 const RPC_URL = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? 'https://soroban-testnet.stellar.org';
 const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ?? 'Test SDF Network ; September 2015';

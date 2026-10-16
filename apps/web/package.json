@@ -17,6 +17,7 @@
     "@stellar-starter-kit/hooks": "workspace:*",
     "@stellar-starter-kit/types": "workspace:*",
     "@stellar-starter-kit/utils": "workspace:*",
+    "@stellar-starter-kit/config": "workspace:*",
     "next": "16.4.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
