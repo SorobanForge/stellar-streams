@@ -75,6 +75,13 @@ formula lives in `contracts/stream/src/lib.rs` and is mirrored in TypeScript.
 The SDK never assumes a wallet is present: read methods only need a `publicKey` for simulation,
 while write methods require an injected `signTransaction`.
 
+The `hooks` package wraps those calls for React: `useStream` retries a failed refresh with bounded
+exponential backoff, keeps the last successful value on screen, and flags it through `isStale` so a
+dashboard can show a "reconnecting" hint instead of blanking the view. Writes go through
+`useCreateStream`, `useWithdrawStream`, and `useCancelStream`, which each expose
+`{ mutate, status, error, hash, reset }`, allow one transaction in flight at a time, and report the
+confirmed hash through an optional `onSuccess` callback.
+
 ---
 
 ## Application layer (`apps/web`)
