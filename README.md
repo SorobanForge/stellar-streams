@@ -180,6 +180,13 @@ pnpm deploy:splits
 pnpm run node:local     # docker compose up -d (Stellar Quickstart)
 ```
 
+### End-to-end walkthrough
+
+Want the complete path — local node → deploy `stream` → fund accounts → create a stream →
+advance time → withdraw — with every command and its expected output? Follow the
+[end-to-end walkthrough](docs/development-guide.md#3-end-to-end-walkthrough-a-stream-from-zero-to-withdraw)
+in the development guide (verified on Linux).
+
 ---
 
 ## SDK usage
