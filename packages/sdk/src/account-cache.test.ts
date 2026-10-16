@@ -68,6 +68,8 @@ describe('source account cache', () => {
       simulateByMethod({
         get_stream: streamScVal(),
         claimable: nativeToScVal(42n, { type: 'i128' }),
+        // Writes are simulated before being prepared; void is a valid result.
+        withdraw: xdr.ScVal.scvVoid(),
       }),
     );
     rpc.sendTransaction.mockResolvedValue(sendResponse('PENDING'));
