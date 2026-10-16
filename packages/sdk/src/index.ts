@@ -630,7 +630,6 @@ export class StreamsClient extends SorobanClient {
     );
   }
 
-
   /** Withdraw the vested balance of a stream to its recipient. */
   async withdraw(id: bigint | number | string, opts: WriteOptions = {}): Promise<{ hash: string }> {
     return this.invoke('withdraw', [nativeToScVal(BigInt(id), { type: 'u64' })], opts);
