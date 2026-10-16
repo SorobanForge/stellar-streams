@@ -76,6 +76,26 @@ We enforce strict formatting and linting rules using **ESLint** and **Prettier**
 - Check formatting: `pnpm run format:check`
 - Fix formatting: `pnpm run format:write`
 
+### Smart contract tests & snapshots
+
+The Soroban contracts live in `contracts/` and their unit tests commit generated
+ledger state to `contracts/<contract>/test_snapshots/`. Running the tests is
+what regenerates that state:
+
+```bash
+cargo test --manifest-path contracts/Cargo.toml
+```
+
+**Always commit the regenerated snapshots together with the test change that
+produced them.** A snapshot is derived state — a PR that adds or edits a test
+without its `test_snapshots/` files leaves the repository inconsistent, and the
+next contributor to run the tests gets unrelated diffs in their working tree. If
+you rename or delete a test, remove the snapshot it left behind too: the SDK
+only writes snapshots, it never prunes the ones that no longer have a test.
+
+Full details, including how to check for stale and orphaned snapshots, are in
+the [development guide](docs/development-guide.md#test-snapshots).
+
 ### Git Commit Conventions
 
 We follow the **Conventional Commits** specification. Commits must be structured as follows:
