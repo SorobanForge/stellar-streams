@@ -40,40 +40,39 @@ graph TD
 
 Rust workspaces built with [soroban-sdk](https://crates.io/crates/soroban-sdk) `27.x`.
 
-| Crate    | Responsibility                                                                                          |
-| :------- | :------------------------------------------------------------------------------------------------------ |
-| `stream` | **Flagship.** Linear vesting streams with cliffs, cancellation, optional protocol fee, and TTL bumping. |
-| `splits` | Reusable proportional payment splits with duplicate detection and dust handling.                        |
-| `escrow` | Arbiter-based escrow with deadline-driven refunds. [See lifecycle below.](#escrow-lifecycle)             |
+| Crate    | Responsibility                                                                 |
+| :------- | :----------------------------------------------------------------------------- |
+| `stream` | **Flagship.** Linear vesting streams with cliffs, cancellation, and TTL bump. |
+| `splits` | Reusable proportional payment splits with duplicate detection and handling.    |
+| `escrow` | Arbiter-based escrow with deadline-driven refunds. [See lifecycle.](#escrow)   |
 
 Design rules:
 
-1. **Auth first.** Every state-changing entry point calls `require_auth()` on the actor it needs.
-2. **Validate before mutating.** Amounts, time ranges, and cliffs are checked up front.
-3. **Bump TTLs.** Persistent and instance entries are extended on every write so state never
-   unexpectedly expires.
-4. **Emit events.** Each lifecycle transition publishes a topic-tagged event for indexers.
-5. **No panics for user error.** Recoverable problems return a typed `#[contracterror]`.
+1. **Auth first.** Every state-changing entry point calls `require_auth()` on the actor.
+2. **Validate before mutating.** Amounts, time ranges, and cliffs are checked first.
+3. **Bump TTLs.** Persistent and instance entries are extended on every write.
+4. **Emit events.** Each lifecycle transition publishes a topic-tagged event.
+5. **No panics for user error.** Recoverable problems return `#[contracterror]`.
 
-Vesting math is intentionally simple and integer-only to avoid rounding surprises; the exact
-formula lives in `contracts/stream/src/lib.rs` and is mirrored in TypeScript.
+Vesting math is intentionally simple and integer-only. Formula in
+`contracts/stream/src/lib.rs` is mirrored in TypeScript.
 
 ---
 
 ## Client layer (`packages/`)
 
-| Package     | Responsibility                                                             |
-| :---------- | :------------------------------------------------------------------------- |
-| `sdk`       | `StreamsClient` — simulates reads and prepares/signs/submits/polls writes. |
-| `types`     | `Stream`, `StreamConfig`, `CreateStreamParams`, status derivation.         |
-| `utils`     | BigInt stroop formatting/parsing, duration formatting, vesting math.       |
-| `hooks`     | `useStream` — loads a stream + claimable balance with optional polling.    |
-| `wallets`   | Unified React context over Freighter, Albedo, Rabet, and Hana.             |
-| `ui`        | Shared UI primitives and the Tailwind class helper.                        |
-| `contracts` | Generated Soroban TypeScript bindings plus network constants.              |
+| Package     | Responsibility                                              |
+| :---------- | :---------------------------------------------------------- |
+| `sdk`       | `StreamsClient` — prepare, sign, submit, poll transactions. |
+| `types`     | `Stream`, `StreamConfig`, `CreateStreamParams` types.       |
+| `utils`     | Stroop formatting, duration, vesting math.                  |
+| `hooks`     | `useStream` — loads stream + claimable balance.             |
+| `wallets`   | React context over Freighter, Albedo, Rabet, Hana.         |
+| `ui`        | Shared UI primitives and Tailwind helpers.                  |
+| `contracts` | Soroban TypeScript bindings + network constants.            |
 
-The SDK never assumes a wallet is present: read methods only need a `publicKey` for simulation,
-while write methods require an injected `signTransaction`.
+The SDK never assumes a wallet is present: read methods need only `publicKey`, write methods
+require injected `signTransaction`.
 
 ---
 
@@ -90,21 +89,19 @@ A Next.js 15 App Router application:
 
 ## Tooling
 
-- **Turborepo** orchestrates `build`, `lint`, `typecheck`, and `test` across the workspace, with
-  `typecheck` and `build` depending on upstream builds.
+- **Turborepo** orchestrates build, lint, typecheck, test across workspace.
 - **Changesets** manages versioning and changelogs.
-- **Husky + commitlint + lint-staged** enforce Conventional Commits and formatting on commit.
-- **GitHub Actions** runs four jobs: JS lint/format, typecheck, unit tests, and the production
-  build, plus a dedicated `contracts` job (`cargo fmt`, `clippy -D warnings`, `cargo test`).
+- **Husky + commitlint + lint-staged** enforce Conventional Commits on commit.
+- **GitHub Actions** runs JS lint/format, typecheck, tests, build, and contracts job.
 
 
 ---
 
 ## Escrow Lifecycle
 
-The `escrow` contract implements a three-party agreement: **payer** (funds the escrow), **payee**
-(receives funds if released), and **arbiter** (neutral party who can mediate disputes). The state
-machine is defined in [`contracts/escrow/src/lib.rs`](./contracts/escrow/src/lib.rs).
+The `escrow` contract implements a three-party agreement: **payer** (funds), **payee** (receives
+if released), and **arbiter** (neutral mediator). State machine in
+[`contracts/escrow/src/lib.rs`](./contracts/escrow/src/lib.rs).
 
 ### Sequence Diagram
 
@@ -179,11 +176,8 @@ sequenceDiagram
 
 ### Key Design Decisions
 
-1. **Three-party model:** Payer and payee may not agree; arbiter breaks ties.
-2. **Deadline gating:** Cancellation after funding is only allowed once the deadline passes, ensuring
-   payee has time to act.
-3. **No funds until funded:** The `Created` state holds no tokens; cancelling before funding is free.
-4. **Terminal states:** Once an escrow reaches `Released`, `Refunded`, or `Cancelled`, no further
-   transitions are allowed.
-5. **Auth-first:** Every transition requires `require_auth()` on the caller to ensure cryptographic
-   proof of intent.
+1. **Three-party model:** Arbiter mediates payer-payee disputes.
+2. **Deadline gating:** Cancellation after funding only after deadline passes.
+3. **No funds until funded:** `Created` state holds no tokens; cancelling is free.
+4. **Terminal states:** No transitions from `Released`, `Refunded`, or `Cancelled`.
+5. **Auth-first:** Every transition requires `require_auth()` on the caller.

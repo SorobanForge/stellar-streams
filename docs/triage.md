@@ -21,15 +21,15 @@ Labels are organized into six categories to help organize, prioritize, and route
 Describes the nature of the work.
 
 | Label | Color | Description | Use When |
-|-------|-------|-------------|----------|
-| `type: bug` | 🔴 Red | Something isn't working as expected | A defect is reported; existing behavior is incorrect |
-| `type: feature` | 🔵 Cyan | New features, capabilities, or major enhancements | A new capability is requested; something new should be built |
-| `type: documentation` | 🔵 Blue | Improvements or additions to documentation or guides | Docs are missing, outdated, or unclear |
-| `type: chore` | ⚫ Gray | Repository maintenance, dependencies, lints, or minor tweaks | Deps need updating, build scripts need tweaking, housekeeping |
-| `type: performance` | 🔵 Light Blue | Code changes that improve CPU, memory, or bundle size performance | Optimizations are needed; metrics show slowness or bloat |
-| `type: security` | 🔴 Dark Red | Security issues, vulnerability updates, or audits | A vulnerability is found; security best practices apply |
-| `type: refactor` | 🟣 Purple | Code structure refactorings without behavior modifications | Code needs restructuring for clarity or maintainability |
-| `type: test` | 🔴 Light Red | Adding missing tests or improving existing test suites | Test coverage is low; existing tests need improvement |
+| --- | --- | --- | --- |
+| `type: bug` | 🔴 Red | Something isn't working | A defect is reported |
+| `type: feature` | 🔵 Cyan | New features or enhancements | New capability requested |
+| `type: documentation` | 🔵 Blue | Docs improvements | Docs missing/outdated |
+| `type: chore` | ⚫ Gray | Repository maintenance | Dependencies, build scripts |
+| `type: performance` | 🔵 Light Blue | Performance improvements | Optimizations needed |
+| `type: security` | 🔴 Dark Red | Security issues | Vulnerability found |
+| `type: refactor` | 🟣 Purple | Code structure changes | Clarity/maintainability |
+| `type: test` | 🔴 Light Red | Test improvements | Coverage needed |
 
 **Example:** A user reports that the wallet connection hook fails on Firefox → `type: bug`
 
@@ -58,11 +58,11 @@ Indicates which codebase area or package is affected.
 Reflects business and product importance.
 
 | Label | Color | Definition | Timeline |
-|-------|-------|-----------|----------|
-| `priority: critical (p0)` | 🔴 Dark Red | Blocks releases, production deployment, or breaks core APIs | Fix immediately; ASAP |
-| `priority: high (p1)` | 🔴 Orange | Important feature request or high-visibility bug fix | Within 1–2 weeks |
-| `priority: medium (p2)` | 🟡 Yellow | Standard issues, enhancements, or bug fixes | Within 1 month |
-| `priority: low (p3)` | 🟢 Green | Minor bug fixes, nice-to-have features, or chores | When bandwidth available |
+| --- | --- | --- | --- |
+| `priority: critical (p0)` | 🔴 Dark Red | Blocks releases or breaks core APIs | Fix immediately |
+| `priority: high (p1)` | 🔴 Orange | Important feature or high-visibility bug | 1–2 weeks |
+| `priority: medium (p2)` | 🟡 Yellow | Standard issues or enhancements | Within 1 month |
+| `priority: low (p3)` | 🟢 Green | Minor fixes or nice-to-haves | When bandwidth available |
 
 **Example:** The escrow contract has a logic error that loses user funds → `priority: critical (p0)`
 
@@ -89,10 +89,10 @@ Tracks progress through the contribution lifecycle (see [Issue Lifecycle](#issue
 Signals the expected effort and required expertise.
 
 | Label | Color | Qualifications | Example |
-|-------|-------|-----------------|---------|
-| `difficulty: easy` | 🟢 Light Green | Simple task; minimal codebase knowledge | Update a README; fix a typo; add a config option |
-| `difficulty: medium` | 🟡 Yellow | Standard developer task; basic codebase context | Add a new utility function; fix a localized bug; add tests |
-| `difficulty: hard` | 🟠 Light Orange | Complex architecture changes; deep understanding | Redesign state management; refactor contract logic; new SDK pattern |
+| --- | --- | --- | --- |
+| `difficulty: easy` | 🟢 Light Green | Simple; minimal knowledge | Update README; fix typo |
+| `difficulty: medium` | 🟡 Yellow | Standard task; basic context | Add utility; fix localized bug |
+| `difficulty: hard` | 🟠 Light Orange | Complex changes; deep understanding | Redesign state management |
 
 **Examples by Difficulty:**
 
@@ -243,14 +243,14 @@ All issues follow a five-stage lifecycle:
 To maintain a healthy contributor experience, the project follows these response timeframes:
 
 | Issue Type | First Response | Action Expected |
-|-----------|----------------|-----------------|
-| **Bug (p0 critical)** | < 24 hours | Triage started, severity confirmed, assignee identified or help requested |
-| **Bug (p1 high)** | < 2 days | Triage started, severity confirmed |
-| **Bug (p2 medium)** | < 1 week | Issue reviewed and triaged |
-| **Bug (p3 low)** | < 2 weeks | Issue acknowledged |
-| **Feature Request (p1+)** | < 1 week | Feasibility discussed, direction indicated |
-| **Documentation** | < 2 weeks | Merged or feedback provided |
-| **PR Review** | < 3 days | Initial review or feedback |
+| --- | --- | --- |
+| **Bug (p0 critical)** | < 24 hours | Triage, confirm severity, identify assignee |
+| **Bug (p1 high)** | < 2 days | Triage and confirm severity |
+| **Bug (p2 medium)** | < 1 week | Review and triage |
+| **Bug (p3 low)** | < 2 weeks | Acknowledge |
+| **Feature Request (p1+)** | < 1 week | Discuss feasibility |
+| **Documentation** | < 2 weeks | Merge or provide feedback |
+| **PR Review** | < 3 days | Initial review |
 
 ### Response Format
 
