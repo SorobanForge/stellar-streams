@@ -76,6 +76,26 @@ describe('formatDuration', () => {
     expect(formatDuration(90_061)).toBe('1d 1h 1m');
     expect(formatDuration(-5)).toBe('0s');
   });
+
+  it('keeps exact day output through 7 days', () => {
+    expect(formatDuration(6 * 86_400 + 3_600)).toBe('6d 1h');
+    expect(formatDuration(7 * 86_400)).toBe('7d');
+  });
+
+  it('switches to weeks just past 7 days', () => {
+    expect(formatDuration(8 * 86_400)).toBe('1w 1d');
+    expect(formatDuration(7 * 86_400 + 1)).toBe('1w');
+  });
+
+  it('renders a year for 365 days', () => {
+    expect(formatDuration(365 * 86_400)).toBe('1y');
+  });
+
+  it('renders only the two most significant units for long schedules', () => {
+    expect(formatDuration(400 * 86_400)).toBe('1y 1mo');
+    expect(formatDuration(382 * 86_400)).toBe('1y 2w');
+    expect(formatDuration(8 * 86_400 + 5 * 3_600)).toBe('1w 1d');
+  });
 });
 
 describe('vesting math', () => {
