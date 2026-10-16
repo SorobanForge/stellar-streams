@@ -112,6 +112,20 @@ jobs:
       - name: Run Contract Tests
         run: cargo test --manifest-path contracts/Cargo.toml
 
+  cargo-deny:
+    name: Check Dependencies (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Run cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --manifest-path contracts/Cargo.toml
+          rust-version: stable
+
   build:
     name: Verify Production Build
     runs-on: ubuntu-latest

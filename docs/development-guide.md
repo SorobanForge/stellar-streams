@@ -125,6 +125,10 @@ cargo fmt --manifest-path contracts/Cargo.toml --all
 # Run Clippy lints (also available as `pnpm lint:contracts`)
 cargo clippy --manifest-path contracts/Cargo.toml --all-targets -- -D warnings
 
+# Check dependency advisories, licenses, bans, and sources with cargo-deny
+# (config lives in contracts/deny.toml; CI runs the same check)
+cargo deny --manifest-path contracts/Cargo.toml check
+
 # Build optimized WASM for deployment
 cargo build --manifest-path contracts/Cargo.toml --target wasm32v1-none --release
 ```
