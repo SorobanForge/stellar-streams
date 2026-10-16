@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc",
     "lint": "eslint src --ext .ts,.tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@stellar-starter-kit/sdk": "workspace:*",
@@ -19,9 +20,12 @@
   "devDependencies": {
     "@stellar-starter-kit/tsconfig": "workspace:*",
     "@stellar-starter-kit/eslint-config": "workspace:*",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^19.0.0",
+    "jsdom": "^29.1.1",
     "react": "^19.0.0",
-    "typescript": "^6.0.3"
+    "react-dom": "^19.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   }
 }
-
