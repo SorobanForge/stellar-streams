@@ -1,8 +1,7 @@
 #![no_std]
-#![allow(deprecated)]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env, Vec,
+    contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Env, Vec,
 };
 
 const LEDGER_BUMP_THRESHOLD: u32 = 17_280;
@@ -38,6 +37,27 @@ pub struct Split {
 pub enum DataKey {
     Split(u64),
     NextId,
+}
+
+/// Emitted when a split configuration is created.
+#[contractevent(topics = ["splits", "created"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SplitCreated {
+    #[topic]
+    pub id: u64,
+    pub creator: Address,
+    pub total_shares: u32,
+}
+
+/// Emitted when a payment is distributed across a split's recipients.
+#[contractevent(topics = ["splits", "distrib"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SplitDistributed {
+    #[topic]
+    pub id: u64,
+    pub from: Address,
+    pub token: Address,
+    pub amount: i128,
 }
 
 #[contract]
@@ -85,10 +105,7 @@ impl SplitsContract {
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
         env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
 
-        env.events().publish(
-            (symbol_short!("splits"), symbol_short!("created"), id),
-            (split.creator.clone(), total_shares),
-        );
+        SplitCreated { id, creator: split.creator.clone(), total_shares }.publish(&env);
 
         Ok(id)
     }
@@ -133,10 +150,7 @@ impl SplitsContract {
             distributed += portion;
         }
 
-        env.events().publish(
-            (symbol_short!("splits"), symbol_short!("distrib"), split_id),
-            (from, token, amount),
-        );
+        SplitDistributed { id: split_id, from, token, amount }.publish(&env);
 
         Ok(())
     }
