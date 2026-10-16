@@ -135,6 +135,86 @@ export function computeProgressBps(schedule: VestingSchedule, now: number): numb
   return Number(((elapsed * 10_000n) / duration).valueOf());
 }
 
+/**
+ * Lifecycle status of a stream, as displayed to users. Defined next to the
+ * derivation that produces it and re-exported by `@stellar-starter-kit/types`
+ * for back-compat.
+ */
+export type StreamStatus = 'scheduled' | 'streaming' | 'completed' | 'cancelled';
+
+/**
+ * The subset of a `Stream` that drives every derived field. Deliberately
+ * structural (no import from `@stellar-starter-kit/types`) so the shared
+ * `types` package can delegate here without a dependency cycle.
+ */
+export interface StreamStateInput {
+  /** Total amount in the token's smallest unit (decimal string or bigint). */
+  totalAmount: string | bigint;
+  /** Already-withdrawn amount in the token's smallest unit (decimal string or bigint). */
+  withdrawn: string | bigint;
+  startTime: number;
+  endTime: number;
+  cliffTime: number;
+  cancelled: boolean;
+}
+
+/** Everything the UI renders about a stream, derived once at one timestamp. */
+export interface StreamState {
+  status: StreamStatus;
+  /** Vested fraction in basis points (0–10000); 0 exactly while `scheduled`. */
+  progressBps: number;
+  /** What the recipient can withdraw now: `max(0, vested − withdrawn)`, mirroring the contract's `claimable()`. */
+  claimable: bigint;
+  /** Seconds until `endTime`, clamped at 0. */
+  remainingSeconds: number;
+}
+
+/** Status at `now`, with the contract's precedence: cancelled, then the time gates, then completion. */
+function deriveStatus(stream: StreamStateInput, now: number): StreamStatus {
+  if (stream.cancelled) return 'cancelled';
+  if (now < stream.startTime || now < stream.cliffTime) return 'scheduled';
+  if (now >= stream.endTime) return 'completed';
+  return 'streaming';
+}
+
+/**
+ * Derives a stream's status, progress, claimable amount and remaining time
+ * from a single point in time, so two packages can never disagree about the
+ * same stream (e.g. around the cliff, where time-based progress used to run
+ * while the status still read `scheduled`).
+ *
+ * All four fields mirror the on-chain `stream` contract:
+ * - `status` follows `get_stream`'s time gates (cancelled takes precedence);
+ * - `progressBps` is 0 while `scheduled`, 10000 at/after `endTime`, and the
+ *   time-based `computeProgressBps` in between;
+ * - `claimable` matches `claimable()`: `max(0, vested_amount(now) − withdrawn)`
+ *   (`cancel` compresses the schedule on-chain, so a cancelled stream derives
+ *   as fully vested);
+ * - `remainingSeconds` is `max(0, endTime − now)`.
+ */
+export function deriveStreamState(stream: StreamStateInput, now: number): StreamState {
+  const status = deriveStatus(stream, now);
+  const schedule: VestingSchedule = {
+    totalAmount: BigInt(stream.totalAmount),
+    startTime: stream.startTime,
+    endTime: stream.endTime,
+    cliffTime: stream.cliffTime,
+  };
+
+  let progressBps: number;
+  if (status === 'scheduled') progressBps = 0;
+  else if (now >= stream.endTime) progressBps = 10_000;
+  else progressBps = computeProgressBps(schedule, now);
+
+  const claimable = computeVestedAmount(schedule, now) - BigInt(stream.withdrawn);
+  return {
+    status,
+    progressBps,
+    claimable: claimable > 0n ? claimable : 0n,
+    remainingSeconds: Math.max(0, stream.endTime - now),
+  };
+}
+
 /** Formats basis points as a percentage string (e.g. 2550 -> "25.5%"). */
 export function formatBps(bps: number): string {
   const clamped = Math.max(0, Math.min(10_000, bps));

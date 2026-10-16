@@ -1,3 +1,5 @@
+import { deriveStreamState, type StreamStatus } from '@stellar-starter-kit/utils';
+
 export type StellarNetwork = 'local' | 'testnet' | 'mainnet';
 
 export interface StellarConfig {
@@ -54,12 +56,18 @@ export interface CreateStreamParams {
   cliffTime: number;
 }
 
-export type StreamStatus = 'scheduled' | 'streaming' | 'completed' | 'cancelled';
+/**
+ * Lifecycle status of a stream. Defined next to the shared derivation in
+ * `@stellar-starter-kit/utils` and re-exported here so existing imports of
+ * `StreamStatus` from this package keep working.
+ */
+export type { StreamStatus };
 
-/** Derives a human-facing status for a stream at a given timestamp. */
+/**
+ * Derives a human-facing status for a stream at a given timestamp.
+ * Back-compat wrapper: status now shares one derivation path with progress in
+ * `deriveStreamState`, so this simply delegates to it.
+ */
 export function getStreamStatus(stream: Stream, now: number): StreamStatus {
-  if (stream.cancelled) return 'cancelled';
-  if (now < stream.startTime || now < stream.cliffTime) return 'scheduled';
-  if (now >= stream.endTime) return 'completed';
-  return 'streaming';
+  return deriveStreamState(stream, now).status;
 }
