@@ -1,9 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import {
+  ContractShapeError,
   getStreamStatus,
+  isConfig,
+  isEscrow,
+  isSplit,
+  isStream,
+  normalizeConfig,
   normalizeEscrow,
   normalizeSplit,
   normalizeStream,
+  type RawConfig,
   type RawEscrow,
   type RawSplit,
   type RawStream,
@@ -198,5 +205,136 @@ describe('normalizeSplit', () => {
     split.shares.push(1);
     expect(raw.recipients).toHaveLength(2);
     expect(raw.shares).toHaveLength(2);
+  });
+});
+
+function makeRawStream(overrides: Partial<RawStream> = {}): RawStream {
+  return {
+    id: 1n,
+    sender: 'GSENDER',
+    recipient: 'GRECIPIENT',
+    token: 'CTOKEN',
+    total_amount: 1_000_000_000n,
+    withdrawn: 250n,
+    start_time: 1_000n,
+    end_time: 2_000n,
+    cliff_time: 1_500n,
+    cancelled: false,
+    ...overrides,
+  };
+}
+
+function makeRawConfig(overrides: Partial<RawConfig> = {}): RawConfig {
+  return { admin: 'GADMIN', treasury: 'GTREASURY', fee_bps: 30, ...overrides };
+}
+
+/** Runs `fn` and returns the error it threw, or `undefined` when it did not throw. */
+function caught(fn: () => unknown): unknown {
+  try {
+    fn();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
+
+describe('runtime guards', () => {
+  it('accepts valid payloads for every entity', () => {
+    expect(isStream(makeRawStream())).toBe(true);
+    expect(isConfig(makeRawConfig())).toBe(true);
+    expect(isEscrow(makeRawEscrow())).toBe(true);
+    expect(isSplit(makeRawSplit())).toBe(true);
+  });
+
+  it('rejects payloads with a missing field', () => {
+    const withoutCliff: Partial<RawStream> = { ...makeRawStream() };
+    delete withoutCliff.cliff_time;
+    expect(isStream(withoutCliff)).toBe(false);
+
+    const withoutFeeBps: Partial<RawConfig> = { admin: 'GADMIN', treasury: 'GTREASURY' };
+    expect(isConfig(withoutFeeBps)).toBe(false);
+
+    const withoutDeadline: Partial<RawEscrow> = { ...makeRawEscrow() };
+    delete withoutDeadline.deadline;
+    expect(isEscrow(withoutDeadline)).toBe(false);
+
+    const withoutTotalShares: Partial<RawSplit> = { ...makeRawSplit() };
+    delete withoutTotalShares.total_shares;
+    expect(isSplit(withoutTotalShares)).toBe(false);
+  });
+
+  it('rejects wrong-typed fields', () => {
+    // Decimal string where the contract decodes a u64 / i128 as bigint.
+    expect(isStream({ ...makeRawStream(), total_amount: '1000000000' })).toBe(false);
+    expect(isStream({ ...makeRawStream(), cancelled: 'false' })).toBe(false);
+    expect(isConfig({ ...makeRawConfig(), fee_bps: '30' })).toBe(false);
+    expect(isEscrow({ ...makeRawEscrow(), status: '1' })).toBe(false);
+    expect(isSplit({ ...makeRawSplit(), recipients: ['GRECIPIENT1', 42] })).toBe(false);
+    expect(isSplit({ ...makeRawSplit(), shares: [70, '30'] })).toBe(false);
+  });
+
+  it('rejects payloads that are not objects at all', () => {
+    expect(isStream(null)).toBe(false);
+    expect(isStream(undefined)).toBe(false);
+    expect(isStream('Stream')).toBe(false);
+    expect(isEscrow(7)).toBe(false);
+  });
+});
+
+describe('normalizers call the guards', () => {
+  it('throws ContractShapeError naming the missing field', () => {
+    const broken: Partial<RawStream> = { ...makeRawStream() };
+    delete broken.total_amount;
+
+    const error = caught(() => normalizeStream(broken as RawStream));
+    expect(error).toBeInstanceOf(ContractShapeError);
+    const shape = error as ContractShapeError;
+    expect(shape.name).toBe('ContractShapeError');
+    expect(shape.entity).toBe('Stream');
+    expect(shape.field).toBe('total_amount');
+    expect(shape.message).toContain('"total_amount"');
+    expect(shape.message).toContain('expected bigint');
+  });
+
+  it('names a wrong-typed config field', () => {
+    const error = caught(() =>
+      normalizeConfig({ ...makeRawConfig(), fee_bps: '30' } as unknown as RawConfig),
+    );
+    expect(error).toBeInstanceOf(ContractShapeError);
+    const shape = error as ContractShapeError;
+    expect(shape.entity).toBe('Config');
+    expect(shape.field).toBe('fee_bps');
+  });
+
+  it('names a missing escrow field', () => {
+    const broken: Partial<RawEscrow> = { ...makeRawEscrow() };
+    delete broken.deadline;
+
+    const error = caught(() => normalizeEscrow(broken as RawEscrow));
+    expect(error).toBeInstanceOf(ContractShapeError);
+    const shape = error as ContractShapeError;
+    expect(shape.entity).toBe('Escrow');
+    expect(shape.field).toBe('deadline');
+  });
+
+  it('names a wrong-typed split field', () => {
+    const error = caught(() =>
+      normalizeSplit({ ...makeRawSplit(), total_shares: '100' } as unknown as RawSplit),
+    );
+    expect(error).toBeInstanceOf(ContractShapeError);
+    const shape = error as ContractShapeError;
+    expect(shape.entity).toBe('Split');
+    expect(shape.field).toBe('total_shares');
+  });
+
+  it('passes valid payloads straight through to conversion', () => {
+    expect(normalizeStream(makeRawStream()).id).toBe('1');
+    expect(normalizeConfig(makeRawConfig()).feeBps).toBe(30);
+    expect(normalizeEscrow(makeRawEscrow()).status).toBe('funded');
+    expect(normalizeSplit(makeRawSplit()).totalShares).toBe(100);
+  });
+
+  it('keeps throwing the status-range error after the guard passes', () => {
+    expect(() => normalizeEscrow(makeRawEscrow({ status: 5 }))).toThrow('Unknown escrow status: 5');
   });
 });
