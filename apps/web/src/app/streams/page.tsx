@@ -2,12 +2,11 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { motion, AnimatePresence } from 'framer-motion';
+import dynamic from 'next/dynamic';
 import {
   ArrowLeft,
   Loader2,
   AlertCircle,
-  CheckCircle2,
   ExternalLink,
   Droplets,
   Ban,
@@ -28,6 +27,12 @@ import {
 } from '@stellar-starter-kit/utils';
 import Header from '../../components/Header';
 import Footer from '../../components/Footer';
+
+// framer-motion stays out of the initial route bundle; the banner only loads
+// when an error/success message is shown.
+const NotificationBanner = dynamic(() => import('../../components/NotificationBanner'), {
+  ssr: false,
+});
 
 const RPC_URL = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? 'https://soroban-testnet.stellar.org';
 const NETWORK_PASSPHRASE =
@@ -259,27 +264,12 @@ export default function StreamsDashboard() {
           )}
         </div>
 
-        <AnimatePresence>
-          {(error || success) && (
-            <motion.div
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className={`mb-6 flex items-start gap-3 rounded-xl border p-4 text-sm ${
-                error
-                  ? 'border-rose-500/20 bg-rose-500/5 text-rose-300'
-                  : 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300'
-              }`}
-            >
-              {error ? (
-                <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-              ) : (
-                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
-              )}
-              <p className="font-light">{error ?? success}</p>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <NotificationBanner
+          kind={error ? 'error' : success ? 'success' : null}
+          message={error ?? success ?? ''}
+          className="mb-6"
+          enterFrom="top"
+        />
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
           {/* Create */}
