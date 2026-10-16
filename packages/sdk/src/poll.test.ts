@@ -1,47 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { xdr } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
-import { makeClient, mockRpc, sendResponse, txResponse } from './test-helpers';
+import {
+  contractErrorEvent,
+  makeClient,
+  mockRpc,
+  sendResponse,
+  simulationSuccess,
+  trappedResult,
+  txResponse,
+} from './test-helpers';
 
 const { GetTransactionStatus } = SorobanRpc.Api;
-
-function trappedResult(): xdr.TransactionResult {
-  return new xdr.TransactionResult({
-    feeCharged: xdr.Int64.fromString('100'),
-    result: xdr.TransactionResultResult.txFailed([
-      xdr.OperationResult.opInner(
-        xdr.OperationResultTr.invokeHostFunction(
-          xdr.InvokeHostFunctionResult.invokeHostFunctionTrapped(),
-        ),
-      ),
-    ]),
-    ext: new xdr.TransactionResultExt(0),
-  });
-}
-
-function contractErrorEvent(code: number, message: string): xdr.DiagnosticEvent {
-  return new xdr.DiagnosticEvent({
-    inSuccessfulContractCall: false,
-    event: new xdr.ContractEvent({
-      ext: new xdr.ExtensionPoint(0),
-      contractId: null,
-      type: xdr.ContractEventType.diagnostic(),
-      body: new xdr.ContractEventBody(
-        0,
-        new xdr.ContractEventV0({
-          topics: [xdr.ScVal.scvSymbol('error'), xdr.ScVal.scvError(xdr.ScError.sceContract(code))],
-          data: xdr.ScVal.scvString(message),
-        }),
-      ),
-    }),
-  });
-}
 
 describe('transaction submission and polling', () => {
   let rpc: ReturnType<typeof mockRpc>;
 
   beforeEach(() => {
     rpc = mockRpc();
+    // Writes simulate before being prepared; these tests only exercise what
+    // happens after a simulation succeeds.
+    rpc.simulateTransaction.mockResolvedValue(simulationSuccess(xdr.ScVal.scvVoid()));
   });
 
   afterEach(() => {

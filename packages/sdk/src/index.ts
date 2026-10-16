@@ -26,6 +26,12 @@ export interface StreamsClientOptions {
     xdr: string,
     opts: { networkPassphrase: string; address: string },
   ) => Promise<string>;
+  /**
+   * Skip the pre-flight simulation write calls run before asking for a
+   * signature, e.g. when the same call was just simulated elsewhere. Errors
+   * are then only discovered once the transaction is submitted.
+   */
+  skipSimulation?: boolean;
   /** Base delay between confirmation polls and submission retries. Defaults to 1s. */
   pollIntervalMs?: number;
   /** How long to wait for a submitted transaction to confirm. Defaults to 30s. */
@@ -78,10 +84,66 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 /** Raised when the network rejects a submission because its sequence number is stale. */
 class StaleSequenceError extends Error {}
 
+/** Stable identifiers for the stream contract's `StreamError` enum. */
+export type StreamErrorCode =
+  | 'INVALID_AMOUNT'
+  | 'INVALID_TIME_RANGE'
+  | 'INVALID_CLIFF'
+  | 'STREAM_NOT_FOUND'
+  | 'NOTHING_TO_WITHDRAW'
+  | 'UNAUTHORIZED'
+  | 'INVALID_FEE'
+  | 'ALREADY_CANCELLED'
+  | 'ALREADY_INITIALIZED'
+  | 'TREASURY_NOT_SET'
+  | 'METADATA_TOO_LONG';
+
+/**
+ * The one place the contract's numeric codes are named. Must stay in sync with
+ * the `StreamError` enum in `contracts/stream/src/lib.rs`; codes outside this
+ * table fall back to the raw error message instead of failing the mapping.
+ */
+const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
+  1: 'INVALID_AMOUNT',
+  2: 'INVALID_TIME_RANGE',
+  3: 'INVALID_CLIFF',
+  4: 'STREAM_NOT_FOUND',
+  5: 'NOTHING_TO_WITHDRAW',
+  6: 'UNAUTHORIZED',
+  7: 'INVALID_FEE',
+  8: 'ALREADY_CANCELLED',
+  9: 'ALREADY_INITIALIZED',
+  10: 'TREASURY_NOT_SET',
+  11: 'METADATA_TOO_LONG',
+};
+
+/**
+ * Raised when a call fails with one of the stream contract's own errors, e.g.
+ * withdrawing from a stream with nothing vested. `code` is a stable identifier
+ * that survives contract redeploys; `contractCode` is the raw numeric code.
+ * Both are undefined when the failure is not a known contract error, in which
+ * case `message` carries the raw diagnostics.
+ */
+export class StreamsError extends Error {
+  /** Stable identifier for the contract error, e.g. `STREAM_NOT_FOUND`. */
+  readonly code?: StreamErrorCode;
+  /** The raw numeric code from the contract's `StreamError` enum. */
+  readonly contractCode?: number;
+
+  constructor(message: string, contractCode?: number) {
+    super(message);
+    this.name = 'StreamsError';
+    this.contractCode = contractCode;
+    this.code = contractCode === undefined ? undefined : STREAM_ERROR_CODES[contractCode];
+  }
+}
+
 /**
  * A typed client for the Stellar Streams protocol. Read calls simulate against
- * Soroban RPC; write calls are prepared, signed by the injected wallet signer,
- * submitted, and polled to completion.
+ * Soroban RPC. Write calls are simulated first — aborting with a readable
+ * `StreamsError` before any wallet prompt when the contract would reject them
+ * — then prepared, signed by the injected wallet signer, submitted, and polled
+ * to completion.
  */
 export class StreamsClient {
   private readonly server: SorobanRpc.Server;
@@ -168,7 +230,7 @@ export class StreamsClient {
 
     const response = await this.server.simulateTransaction(tx);
     if (SorobanRpc.Api.isSimulationError(response)) {
-      throw new Error(`Simulation of ${method} failed: ${response.error}`);
+      throw simulationFailure(method, response.error);
     }
     const retval = response.result?.retval;
     if (!retval) {
@@ -195,6 +257,16 @@ export class StreamsClient {
         .addOperation(this.contract.call(method, ...args))
         .setTimeout(30)
         .build();
+
+      // Simulate before preparing so a call that cannot succeed fails with the
+      // contract's own error instead of an opaque failure mid-assembly — and
+      // without opening a wallet prompt for a doomed transaction.
+      if (!this.options.skipSimulation) {
+        const simulated = await this.server.simulateTransaction(tx);
+        if (SorobanRpc.Api.isSimulationError(simulated)) {
+          throw simulationFailure(method, simulated.error);
+        }
+      }
 
       const prepared = await this.server.prepareTransaction(tx);
       const signedXdr = await signTransaction(prepared.toXDR(), {
@@ -245,9 +317,10 @@ export class StreamsClient {
             `Transaction ${submitted.hash} used a stale sequence number.`,
           );
         }
-        throw new Error(
+        throw new StreamsError(
           `Transaction ${submitted.hash} was rejected: ${describeTransactionResult(submitted.errorResult)}` +
             describeDiagnostics(submitted.diagnosticEvents),
+          contractErrorCodeFromEvents(submitted.diagnosticEvents),
         );
       }
       if (submitted.status !== 'TRY_AGAIN_LATER') {
@@ -548,4 +621,48 @@ function formatScVal(value: xdr.ScVal): string {
   } catch {
     return value.switch().name;
   }
+}
+
+/** The contract error code inside a host error string, e.g. `Error(Contract, #4)`. */
+function contractErrorCode(message: string): number | undefined {
+  const match = /Error\(Contract,\s*#(\d+)\)/.exec(message);
+  return match ? Number(match[1]) : undefined;
+}
+
+/** The first contract error code among the host's diagnostic events, if any. */
+function contractErrorCodeFromEvents(
+  events: xdr.DiagnosticEvent[] | undefined,
+): number | undefined {
+  for (const event of events ?? []) {
+    try {
+      const [first, second] = event.event().body().v0().topics();
+      if (
+        first?.switch().name === 'scvSymbol' &&
+        first.sym().toString() === 'error' &&
+        second?.switch().name === 'scvError' &&
+        second.error().switch().name === 'sceContract'
+      ) {
+        return second.error().contractCode();
+      }
+    } catch {
+      // Undecodable events are skipped; the message still carries the raw result.
+    }
+  }
+  return undefined;
+}
+
+/**
+ * A `StreamsError` for a failed simulation. Known contract codes are named in
+ * the message; unknown ones keep the raw error text untouched.
+ */
+function simulationFailure(method: string, error: string): StreamsError {
+  const contractCode = contractErrorCode(error);
+  const code = contractCode === undefined ? undefined : STREAM_ERROR_CODES[contractCode];
+  if (code === undefined || contractCode === undefined) {
+    return new StreamsError(`Simulation of ${method} failed: ${error}`, contractCode);
+  }
+  return new StreamsError(
+    `Simulation of ${method} failed: ${code} (contract error #${contractCode}) — ${error}`,
+    contractCode,
+  );
 }

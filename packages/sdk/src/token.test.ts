@@ -44,6 +44,8 @@ describe('arbitrary token contracts', () => {
         claimable: nativeToScVal(250_000n, { type: 'i128' }),
         decimals: nativeToScVal(6, { type: 'u32' }),
         symbol: nativeToScVal('USDC', { type: 'string' }),
+        // Writes are simulated before being prepared; void is a valid result.
+        create_stream: xdr.ScVal.scvVoid(),
       }),
     );
   });
