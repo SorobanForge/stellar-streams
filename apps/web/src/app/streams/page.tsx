@@ -463,9 +463,7 @@ export default function StreamsDashboard() {
                       {formatDuration(Math.max(0, stream.endTime - nowSeconds))} remaining
                     </span>
                   </div>
-                  <p className="text-[10px] text-slate-500">
-                    {streamTimeline(stream, nowSeconds)}
-                  </p>
+                  <p className="text-[10px] text-slate-500">{streamTimeline(stream, nowSeconds)}</p>
 
                   <dl className="grid grid-cols-2 gap-4 border-t border-slate-900 pt-4">
                     <div>
