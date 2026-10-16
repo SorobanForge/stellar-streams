@@ -8,6 +8,7 @@ import {
   makeClient,
   mockRpc,
   sendResponse,
+  simulationSuccess,
   txResponse,
 } from './test-helpers';
 
@@ -145,6 +146,8 @@ describe('createStream metadata', () => {
 
   beforeEach(() => {
     rpc = mockRpc();
+    // Writes are simulated before being prepared; void is a valid result.
+    rpc.simulateTransaction.mockResolvedValue(simulationSuccess(xdr.ScVal.scvVoid()));
     rpc.sendTransaction.mockResolvedValue(sendResponse('PENDING'));
     rpc.getTransaction.mockResolvedValue(txResponse(GetTransactionStatus.SUCCESS));
   });
