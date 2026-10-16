@@ -86,6 +86,25 @@ jobs:
       - name: Run Tests
         run: pnpm run test
 
+      - name: Run Tests with Coverage
+        run: pnpm run test -- -- --coverage
+
+      - name: Upload Coverage Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-reports
+          path: packages/*/coverage
+          retention-days: 5
+
+      - name: Comment PR with Coverage Summary
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF: ${{ github.ref }}
+        run: node scripts/post-coverage-comment.js
+
   contracts:
     name: Test Soroban Contracts
     runs-on: ubuntu-latest
@@ -111,6 +130,106 @@ jobs:
 
       - name: Run Contract Tests
         run: cargo test --manifest-path contracts/Cargo.toml
+
+  contract-size-budget:
+    name: Check Contract WASM Size Budget
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check if contracts were modified
+        id: check-contracts
+        run: |
+          # For PRs, check if contracts/ or related build scripts changed
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            git diff --quiet --exit-code origin/${{ github.base_ref }}...HEAD -- contracts/ scripts/build-contracts.* scripts/optimize-contracts.* .github/workflows/ci.yml || echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            # For push events, always run to be safe
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install Rust toolchain
+        if: steps.check-contracts.outputs.changed == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        if: steps.check-contracts.outputs.changed == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts
+
+      - name: Install Stellar CLI
+        if: steps.check-contracts.outputs.changed == 'true'
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://soroban.stellar.org/install | bash
+          $HOME/.local/bin/stellar --version
+
+      - name: Build Contracts
+        if: steps.check-contracts.outputs.changed == 'true'
+        run: cargo build --manifest-path contracts/Cargo.toml --target wasm32v1-none --release
+
+      - name: Optimize Contracts
+        if: steps.check-contracts.outputs.changed == 'true'
+        run: |
+          for contract in stream splits escrow; do
+            wasm_file="contracts/target/wasm32v1-none/release/${contract}.wasm"
+            if [ -f "$wasm_file" ]; then
+              "$HOME/.local/bin/stellar" contract optimize --wasm "$wasm_file"
+            fi
+          done
+
+      - name: Check Contract WASM Sizes
+        if: steps.check-contracts.outputs.changed == 'true'
+        run: |
+          # Define size budgets (in bytes) for each contract
+          # These thresholds are set with headroom above typical optimized sizes
+          declare -A BUDGETS
+          BUDGETS[stream]=350000    # ~335KB typical, 15KB headroom
+          BUDGETS[splits]=200000    # ~185KB typical, 15KB headroom
+          BUDGETS[escrow]=200000    # ~180KB typical, 20KB headroom
+
+          release_dir="contracts/target/wasm32v1-none/release"
+          failed=0
+
+          echo ""
+          echo "========================================="
+          echo "Contract WASM Size Budget Check"
+          echo "========================================="
+          echo ""
+
+          for contract in stream splits escrow; do
+            wasm_file="$release_dir/${contract}.wasm"
+            if [ -f "$wasm_file" ]; then
+              size=$(stat -c%s "$wasm_file")
+              budget=${BUDGETS[$contract]}
+              status="✓ PASS"
+              
+              if [ "$size" -gt "$budget" ]; then
+                status="✗ FAIL"
+                failed=1
+              fi
+              
+              printf "%s: %8d bytes (budget: %8d bytes) [%s]\n" "$contract" "$size" "$budget" "$status"
+            fi
+          done
+
+          echo ""
+          echo "========================================="
+          
+          if [ $failed -eq 1 ]; then
+            echo "FAILURE: One or more contracts exceeded their size budget."
+            echo "To increase a budget, update BUDGETS in the 'Check Contract WASM Sizes'"
+            echo "step and document the change in the pull request with justification."
+            exit 1
+          fi
+          
+          echo "SUCCESS: All contracts within size budget."
+          exit 0
 
   build:
     name: Verify Production Build

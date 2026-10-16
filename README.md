@@ -182,6 +182,17 @@ pnpm run node:local     # docker compose up -d (Stellar Quickstart)
 
 ---
 
+## CI
+
+This repository uses GitHub Actions for continuous integration and supply-chain security:
+
+- **Dependency Review** (on pull requests): Scans each PR for newly introduced dependencies with known vulnerabilities or license issues. Fails on high-severity vulnerabilities by default, enforced via branch protection on `main`.
+- **Dependency Audit** (daily + manual): Runs `pnpm audit --prod` on a daily schedule (02:00 UTC) and can be triggered manually via `workflow_dispatch`. Fails on high-severity and above findings, and explicitly surfaces tool-level errors rather than silently skipping them.
+
+Both checks complement the main CI pipeline (`lint`, `typecheck`, `test`, `contracts`, `build`) and are managed in [.github/workflows/](https://github.com/SorobanForge/stellar-streams/tree/main/.github/workflows).
+
+---
+
 ## SDK usage
 
 ```typescript

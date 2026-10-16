@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@stellar-starter-kit/types": "workspace:*",
     "@stellar/stellar-sdk": "^14.5.0",
     "buffer": "6.0.3"
   },
