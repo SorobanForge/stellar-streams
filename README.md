@@ -292,6 +292,13 @@ Security reports go through [SECURITY.md](SECURITY.md), not public issues.
 
 Testnet contract ids and explorer links are recorded in [docs/deployments.md](docs/deployments.md).
 
+## Troubleshooting
+
+Seeing `Freighter wallet extension is not installed or enabled.`, `No stream contract id
+configured.`, `Account not found`, or `RPC kept answering TRY_AGAIN_LATER ...`? Each known
+symptom with its cause and fix is listed in [docs/troubleshooting.md](docs/troubleshooting.md),
+along with how to confirm the deployment state via the contract ids page.
+
 ## Contributing
 
 We welcome contributions of all sizes. Start with [CONTRIBUTING.md](CONTRIBUTING.md) and the
