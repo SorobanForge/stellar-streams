@@ -69,6 +69,17 @@ export function simulationSuccess(retval: xdr.ScVal) {
   } as unknown as SorobanRpc.Api.SimulateTransactionResponse;
 }
 
+/** A failed simulation whose RPC error message is `error`. */
+export function simulationError(error: string) {
+  return {
+    id: '1',
+    latestLedger: 1,
+    events: [],
+    _parsed: true,
+    error,
+  } as unknown as SorobanRpc.Api.SimulateTransactionErrorResponse;
+}
+
 export function sendResponse(
   status: SorobanRpc.Api.SendTransactionStatus,
   extra: Partial<SorobanRpc.Api.SendTransactionResponse> = {},
@@ -95,7 +106,9 @@ export function streamScVal(overrides: Partial<Record<string, unknown>> = {}): x
     cliff_time: 1_500n,
     end_time: 2_000n,
     id: 1n,
+    label: '',
     recipient: PUBLIC_KEY,
+    reference: '',
     sender: PUBLIC_KEY,
     start_time: 1_000n,
     token: CONTRACT_ID,
@@ -109,13 +122,49 @@ export function streamScVal(overrides: Partial<Record<string, unknown>> = {}): x
       cliff_time: ['symbol', 'u64'],
       end_time: ['symbol', 'u64'],
       id: ['symbol', 'u64'],
+      label: ['symbol', 'string'],
       recipient: ['symbol', 'address'],
+      reference: ['symbol', 'string'],
       sender: ['symbol', 'address'],
       start_time: ['symbol', 'u64'],
       token: ['symbol', 'address'],
       total_amount: ['symbol', 'i128'],
       withdrawn: ['symbol', 'i128'],
     },
+  });
+}
+
+/** A `txFailed` result whose operation was a trapped contract invocation. */
+export function trappedResult(): xdr.TransactionResult {
+  return new xdr.TransactionResult({
+    feeCharged: xdr.Int64.fromString('100'),
+    result: xdr.TransactionResultResult.txFailed([
+      xdr.OperationResult.opInner(
+        xdr.OperationResultTr.invokeHostFunction(
+          xdr.InvokeHostFunctionResult.invokeHostFunctionTrapped(),
+        ),
+      ),
+    ]),
+    ext: new xdr.TransactionResultExt(0),
+  });
+}
+
+/** A host diagnostic event reporting `Error(Contract, #code)` and a message. */
+export function contractErrorEvent(code: number, message: string): xdr.DiagnosticEvent {
+  return new xdr.DiagnosticEvent({
+    inSuccessfulContractCall: false,
+    event: new xdr.ContractEvent({
+      ext: new xdr.ExtensionPoint(0),
+      contractId: null,
+      type: xdr.ContractEventType.diagnostic(),
+      body: new xdr.ContractEventBody(
+        0,
+        new xdr.ContractEventV0({
+          topics: [xdr.ScVal.scvSymbol('error'), xdr.ScVal.scvError(xdr.ScError.sceContract(code))],
+          data: xdr.ScVal.scvString(message),
+        }),
+      ),
+    }),
   });
 }
 
