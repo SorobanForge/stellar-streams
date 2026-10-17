@@ -46,6 +46,11 @@ Rust workspaces built with [soroban-sdk](https://crates.io/crates/soroban-sdk) `
 | `splits` | Reusable proportional payment splits with duplicate detection and handling.    |
 | `escrow` | Arbiter-based escrow with deadline-driven refunds. [See lifecycle.](#escrow)   |
 
+The interfaces behind those crates — entry points with argument and return types, every error
+variant with its numeric code, and every event topic with its payload shape — are written out in
+[docs/contracts.md](docs/contracts.md). Rules 1, 4 and 5 below are the shape that document
+describes in detail, so read the two together.
+
 Design rules:
 
 1. **Auth first.** Every state-changing entry point calls `require_auth()` on the actor.
@@ -53,6 +58,18 @@ Design rules:
 3. **Bump TTLs.** Persistent and instance entries are extended on every write.
 4. **Emit events.** Each lifecycle transition publishes a topic-tagged event.
 5. **No panics for user error.** Recoverable problems return `#[contracterror]`.
+1. **Auth first.** Every state-changing entry point calls `require_auth()` on the actor it needs.
+   A missing or wrong signature is a host-level `Context` error, not one of the contract's own
+   codes — see the cross-contract notes in [docs/contracts.md](docs/contracts.md).
+2. **Validate before mutating.** Amounts, time ranges, and cliffs are checked up front.
+3. **Bump TTLs.** Persistent and instance entries are extended on every write so state never
+   unexpectedly expires.
+4. **Emit events.** Each lifecycle transition publishes a topic-tagged event for indexers: three
+   topics of `(contract tag, action, id)` plus a payload of the remaining fields, declared with
+   `#[contractevent]` so the payload is a named map rather than positional slots. The per-event
+   shapes are in [docs/contracts.md](docs/contracts.md).
+5. **No panics for user error.** Recoverable problems return a typed `#[contracterror]`, with
+   numbers that are append-only because the generated TypeScript bindings embed them.
 
 Vesting math is intentionally simple and integer-only. Formula in
 `contracts/stream/src/lib.rs` is mirrored in TypeScript.
