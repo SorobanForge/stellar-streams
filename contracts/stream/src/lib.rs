@@ -1,9 +1,8 @@
 #![no_std]
-#![allow(deprecated)]
 #![allow(clippy::too_many_arguments)]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env,
+    contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Env, String,
 };
 
 /// Number of ledgers before a persistent entry is bumped (~1 day at 5s ledgers).
@@ -12,6 +11,10 @@ const LEDGER_BUMP_THRESHOLD: u32 = 17_280;
 const LEDGER_BUMP_LIMIT: u32 = 518_400;
 /// Hard cap on the protocol fee (10%).
 const MAX_FEE_BPS: u32 = 1_000;
+/// Longest accepted stream label, in bytes. Bounded so rent stays predictable.
+const MAX_LABEL_LEN: u32 = 64;
+/// Longest accepted external reference (invoice, grant or payroll id), in bytes.
+const MAX_REFERENCE_LEN: u32 = 128;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -27,10 +30,14 @@ pub enum StreamError {
     AlreadyCancelled = 8,
     AlreadyInitialized = 9,
     TreasuryNotSet = 10,
+    MetadataTooLong = 11,
 }
 
 /// A single linear payment stream. Tokens are locked in the contract and vest
 /// continuously between `start_time` and `end_time`, with an optional cliff.
+///
+/// `label` and `reference` are optional metadata: they are stored as empty
+/// strings when the creator does not supply them and never affect vesting.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Stream {
@@ -43,6 +50,8 @@ pub struct Stream {
     pub start_time: u64,
     pub end_time: u64,
     pub cliff_time: u64,
+    pub label: String,
+    pub reference: String,
     pub cancelled: bool,
 }
 
@@ -62,6 +71,43 @@ pub enum DataKey {
     Admin,
     Treasury,
     FeeBps,
+}
+
+/// Emitted when a stream is created.
+#[contractevent(topics = ["stream", "created"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamCreated {
+    #[topic]
+    pub id: u64,
+    pub sender: Address,
+    pub recipient: Address,
+    /// Amount locked, in the token's smallest unit.
+    pub amount: i128,
+    pub label: String,
+    pub reference: String,
+}
+
+/// Emitted when the recipient withdraws a stream's vested balance.
+#[contractevent(topics = ["stream", "withdrawn"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamWithdrawn {
+    #[topic]
+    pub id: u64,
+    pub recipient: Address,
+    /// Amount sent to the recipient, after any protocol fee.
+    pub amount: i128,
+    pub fee: i128,
+}
+
+/// Emitted when the sender cancels a stream.
+#[contractevent(topics = ["stream", "cancelled"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamCancelled {
+    #[topic]
+    pub id: u64,
+    pub sender: Address,
+    /// Unvested amount refunded to the sender.
+    pub refunded: i128,
 }
 
 #[contract]
@@ -113,6 +159,11 @@ impl StreamContract {
 
     /// Lock `amount` of `token` and begin streaming it from `sender` to `recipient`.
     /// Returns the new stream id.
+    ///
+    /// `label` and `reference` carry optional human-readable metadata (a payroll
+    /// label, an invoice or grant id). Pass empty strings to omit them; they are
+    /// capped at [`MAX_LABEL_LEN`] and [`MAX_REFERENCE_LEN`] bytes so the stream's
+    /// rent stays predictable.
     pub fn create_stream(
         env: Env,
         sender: Address,
@@ -122,6 +173,8 @@ impl StreamContract {
         start_time: u64,
         end_time: u64,
         cliff_time: u64,
+        label: String,
+        reference: String,
     ) -> Result<u64, StreamError> {
         sender.require_auth();
 
@@ -133,6 +186,9 @@ impl StreamContract {
         }
         if cliff_time < start_time || cliff_time > end_time {
             return Err(StreamError::InvalidCliff);
+        }
+        if label.len() > MAX_LABEL_LEN || reference.len() > MAX_REFERENCE_LEN {
+            return Err(StreamError::MetadataTooLong);
         }
 
         // Pull the full stream amount into the contract up front.
@@ -150,6 +206,8 @@ impl StreamContract {
             start_time,
             end_time,
             cliff_time,
+            label,
+            reference,
             cancelled: false,
         };
 
@@ -158,10 +216,15 @@ impl StreamContract {
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
         env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
 
-        env.events().publish(
-            (symbol_short!("stream"), symbol_short!("created"), id),
-            (stream.sender.clone(), stream.recipient.clone(), amount),
-        );
+        StreamCreated {
+            id,
+            sender: stream.sender.clone(),
+            recipient: stream.recipient.clone(),
+            amount,
+            label: stream.label.clone(),
+            reference: stream.reference.clone(),
+        }
+        .publish(&env);
 
         Ok(id)
     }
@@ -200,10 +263,8 @@ impl StreamContract {
         env.storage().persistent().set(&key, &stream);
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
 
-        env.events().publish(
-            (symbol_short!("stream"), symbol_short!("withdrawn"), stream_id),
-            (stream.recipient.clone(), net, fee),
-        );
+        StreamWithdrawn { id: stream_id, recipient: stream.recipient.clone(), amount: net, fee }
+            .publish(&env);
 
         Ok(net)
     }
@@ -240,10 +301,8 @@ impl StreamContract {
         env.storage().persistent().set(&key, &stream);
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
 
-        env.events().publish(
-            (symbol_short!("stream"), symbol_short!("cancelled"), stream_id),
-            (stream.sender.clone(), unvested),
-        );
+        StreamCancelled { id: stream_id, sender: stream.sender.clone(), refunded: unvested }
+            .publish(&env);
 
         Ok(())
     }
