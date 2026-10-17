@@ -7,6 +7,7 @@ import Logo from '../../components/Logo';
 import Link from 'next/link';
 import { BookOpen, Terminal, Shield, CheckCircle, Code, ArrowLeft, Layers } from 'lucide-react';
 import { cn } from '@stellar-starter-kit/ui';
+import { REPO_URL } from '../../lib/constants';
 
 const DOCS_SECTIONS = {
   intro: {
@@ -58,7 +59,7 @@ const DOCS_SECTIONS = {
 
         <h3 className="mb-3 text-lg font-bold text-white">1. Clone & Install</h3>
         <pre className="mb-6 overflow-x-auto rounded-xl border border-slate-900 bg-[#08080f] p-5 font-mono text-xs leading-relaxed text-slate-300">
-          {`git clone https://github.com/SorobanForge/stellar-streams.git
+          {`git clone ${REPO_URL}.git
 cd stellar-streams
 pnpm install
 pnpm build`}

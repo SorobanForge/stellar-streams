@@ -67,7 +67,9 @@ Design rules:
    numbers that are append-only because the generated TypeScript bindings embed them.
 
 Vesting math is intentionally simple and integer-only to avoid rounding surprises; the exact
-formula lives in `contracts/stream/src/lib.rs` and is mirrored in TypeScript.
+formula lives in `contracts/stream/src/lib.rs` and is mirrored in TypeScript. The precision
+guarantees and the Rust/TypeScript parity contract — which files must change together — are
+documented in [packages/utils/README.md](packages/utils/README.md).
 
 ---
 
@@ -86,6 +88,9 @@ formula lives in `contracts/stream/src/lib.rs` and is mirrored in TypeScript.
 The SDK never assumes a wallet is present: read methods only need a `publicKey` for simulation,
 while write methods require an injected `signTransaction`.
 
+Every helper exported from `packages/utils` — with examples, truncation/rounding rules, and the
+supported maximum amount — is documented in [packages/utils/README.md](packages/utils/README.md).
+
 ---
 
 ## Application layer (`apps/web`)
@@ -96,6 +101,7 @@ A Next.js 15 App Router application:
 - `/streams` — create, inspect, withdraw from, and cancel streams.
 - `/escrow` — interact with the escrow primitive.
 - `/docs` — setup and reference documentation.
+- `/ui` — internal component gallery for design review (not linked in the header).
 
 ---
 

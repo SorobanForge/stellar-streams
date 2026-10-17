@@ -3,8 +3,9 @@
 import React from 'react';
 import { Star, Github } from 'lucide-react';
 import Logo from './Logo';
+import { REPO_URL } from '../lib/constants';
 
-const REPO = 'https://github.com/SorobanForge/stellar-streams';
+const REPO = REPO_URL;
 
 export default function Footer() {
   return (

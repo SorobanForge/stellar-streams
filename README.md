@@ -27,8 +27,10 @@ Everything runs on [Soroban](https://soroban.stellar.org) smart contracts writte
 typed TypeScript SDK and an open web dashboard.
 
 > **Project status:** pre-1.0. The contracts are implemented, unit-tested, and build clean under
-> `clippy` / `rustfmt`. They have **not** been audited or deployed to Mainnet. See the
-> [Roadmap](ROADMAP.md) for what's next.
+> `clippy` / `rustfmt`. They have **not** been audited or deployed to Mainnet. Before integrating,
+> read the [security model and trust assumptions](SECURITY.md#security-model) — who can cancel,
+> who holds fees, what the arbiter may do, and the inherent risks (no upgradeability, unaudited
+> contracts, admin key custody, TTL expiry). See the [Roadmap](ROADMAP.md) for what's next.
 
 ---
 
