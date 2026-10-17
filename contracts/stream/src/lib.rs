@@ -191,7 +191,8 @@ impl StreamContract {
             return Err(StreamError::MetadataTooLong);
         }
 
-        // Pull the full stream amount into the contract up front.
+        // Pull the full stream amount into the contract up front, so a stream is
+        // never recorded without the funds that back it.
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&sender, env.current_contract_address(), &amount);
 
@@ -247,21 +248,21 @@ impl StreamContract {
 
         let fee = claimable * fee_bps(&env) as i128 / 10_000;
         let net = claimable - fee;
+        let treasury = if fee > 0 { Some(treasury(&env)?) } else { None };
 
-        let token_client = token::Client::new(&env, &stream.token);
-        if fee > 0 {
-            let treasury: Address = env
-                .storage()
-                .instance()
-                .get(&DataKey::Treasury)
-                .ok_or(StreamError::TreasuryNotSet)?;
-            token_client.transfer(&env.current_contract_address(), &treasury, &fee);
-        }
-        token_client.transfer(&env.current_contract_address(), &stream.recipient, &net);
-
+        // Record the withdrawal before calling out to the token, so a token that
+        // calls back into this contract can only ever see the stream already
+        // debited. A failed transfer still rolls this write back with the rest
+        // of the invocation.
         stream.withdrawn += claimable;
         env.storage().persistent().set(&key, &stream);
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+
+        let token_client = token::Client::new(&env, &stream.token);
+        if let Some(treasury) = treasury {
+            token_client.transfer(&env.current_contract_address(), &treasury, &fee);
+        }
+        token_client.transfer(&env.current_contract_address(), &stream.recipient, &net);
 
         StreamWithdrawn { id: stream_id, recipient: stream.recipient.clone(), amount: net, fee }
             .publish(&env);
@@ -286,12 +287,8 @@ impl StreamContract {
         let vested = vested_amount(&stream, now);
         let unvested = stream.total_amount - vested;
 
-        if unvested > 0 {
-            let token_client = token::Client::new(&env, &stream.token);
-            token_client.transfer(&env.current_contract_address(), &stream.sender, &unvested);
-        }
-
-        // Compress the schedule so the vested remainder becomes fully withdrawable.
+        // Compress the schedule so the vested remainder becomes fully withdrawable,
+        // and persist it before the refund leaves the contract (see `withdraw`).
         stream.total_amount = vested;
         stream.start_time = now;
         stream.end_time = now;
@@ -300,6 +297,11 @@ impl StreamContract {
 
         env.storage().persistent().set(&key, &stream);
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+
+        if unvested > 0 {
+            let token_client = token::Client::new(&env, &stream.token);
+            token_client.transfer(&env.current_contract_address(), &stream.sender, &unvested);
+        }
 
         StreamCancelled { id: stream_id, sender: stream.sender.clone(), refunded: unvested }
             .publish(&env);
@@ -372,6 +374,10 @@ fn next_id(env: &Env) -> u64 {
 
 fn fee_bps(env: &Env) -> u32 {
     env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0)
+}
+
+fn treasury(env: &Env) -> Result<Address, StreamError> {
+    env.storage().instance().get(&DataKey::Treasury).ok_or(StreamError::TreasuryNotSet)
 }
 
 mod test;

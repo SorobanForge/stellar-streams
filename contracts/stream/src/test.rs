@@ -1,11 +1,11 @@
 #![cfg(test)]
 #![allow(elided_lifetimes_in_paths, mismatched_lifetime_syntaxes)]
 use super::*;
-use soroban_sdk::{testutils::Events as _, Env, Event, String};
+use soroban_sdk::{testutils::Events as _, vec, Env, Event, IntoVal, String};
 
 #[path = "../../test-support/test_support.rs"]
 mod support;
-use support::{account, advance_time, empty_string, TestToken};
+use support::{account, advance_time, empty_string, reentry_rejected, HostileToken, TestToken};
 
 fn register(env: &Env) -> StreamContractClient<'_> {
     StreamContractClient::new(env, &env.register(StreamContract, ()))
@@ -484,4 +484,164 @@ fn test_metadata_length_limits() {
 
     // The rejections happened before any transfer.
     assert_eq!(token.balance(&sender), 1000);
+}
+
+/// A 1000-token stream over `[0, 1000]` denominated in a [`HostileToken`].
+///
+/// Non-root auth is allowed so a reentrant call would clear `require_auth`:
+/// the host's reentry check is the only thing left standing in its way.
+fn hostile_stream(
+    env: &Env,
+) -> (HostileToken<'_>, Address, Address, StreamContractClient<'_>, u64) {
+    env.mock_all_auths_allowing_non_root_auth();
+    let token = HostileToken::deploy(env);
+    let sender = account(env);
+    let recipient = account(env);
+    let client = register(env);
+    token.mint(&sender, 1000);
+    let id = create(env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    (token, sender, recipient, client, id)
+}
+
+#[test]
+fn test_withdraw_rejects_reentrant_withdraw() {
+    let env = Env::default();
+    let (token, _, recipient, client, id) = hostile_stream(&env);
+    advance_time(&env, 400);
+
+    token.arm(&client.address, "withdraw", vec![&env, id.into_val(&env)], true);
+    assert_eq!(client.withdraw(&id), 400);
+
+    // The callback was refused, and the vested 400 left the contract once.
+    assert_eq!(token.last_reentry(), Some(reentry_rejected()));
+    assert_eq!(token.balance(&recipient), 400);
+    assert_eq!(token.balance(&client.address), 600);
+    assert_eq!(client.get_stream(&id).unwrap().withdrawn, 400);
+    assert_eq!(client.claimable(&id), 0);
+}
+
+#[test]
+fn test_withdraw_rejects_reentrant_cancel() {
+    let env = Env::default();
+    let (token, sender, recipient, client, id) = hostile_stream(&env);
+    advance_time(&env, 400);
+
+    token.arm(&client.address, "cancel", vec![&env, id.into_val(&env)], true);
+    assert_eq!(client.withdraw(&id), 400);
+
+    assert_eq!(token.last_reentry(), Some(reentry_rejected()));
+    assert!(!client.get_stream(&id).unwrap().cancelled);
+    assert_eq!(token.balance(&sender), 0);
+
+    // Nothing was left half-applied: an ordinary cancel still refunds exactly
+    // the unvested 600.
+    client.cancel(&id);
+    assert_eq!(token.balance(&sender), 600);
+    assert_eq!(token.balance(&recipient), 400);
+    assert_eq!(token.balance(&client.address), 0);
+}
+
+#[test]
+fn test_withdraw_fee_leg_rejects_reentrant_withdraw() {
+    let env = Env::default();
+    let (token, _, recipient, client, id) = hostile_stream(&env);
+    let treasury = account(&env);
+    client.initialize(&account(&env), &treasury, &100); // 1%
+    advance_time(&env, 1000);
+
+    // The fee transfer to the treasury is the first call out, so it is the one
+    // that reenters.
+    token.arm(&client.address, "withdraw", vec![&env, id.into_val(&env)], true);
+    assert_eq!(client.withdraw(&id), 990);
+
+    assert_eq!(token.last_reentry(), Some(reentry_rejected()));
+    assert_eq!(token.balance(&treasury), 10);
+    assert_eq!(token.balance(&recipient), 990);
+    assert_eq!(token.balance(&client.address), 0);
+    assert_eq!(client.get_stream(&id).unwrap().withdrawn, 1000);
+}
+
+#[test]
+fn test_cancel_rejects_reentrant_withdraw() {
+    let env = Env::default();
+    let (token, sender, recipient, client, id) = hostile_stream(&env);
+    advance_time(&env, 300);
+
+    token.arm(&client.address, "withdraw", vec![&env, id.into_val(&env)], true);
+    client.cancel(&id);
+
+    assert_eq!(token.last_reentry(), Some(reentry_rejected()));
+    assert_eq!(token.balance(&sender), 700);
+    assert_eq!(token.balance(&recipient), 0);
+
+    // The recipient still collects the vested 300, once.
+    assert_eq!(client.withdraw(&id), 300);
+    assert_eq!(token.balance(&recipient), 300);
+    assert_eq!(token.balance(&client.address), 0);
+    assert!(client.try_withdraw(&id).is_err());
+}
+
+#[test]
+fn test_cancel_rejects_reentrant_cancel() {
+    let env = Env::default();
+    let (token, sender, _, client, id) = hostile_stream(&env);
+    advance_time(&env, 300);
+
+    token.arm(&client.address, "cancel", vec![&env, id.into_val(&env)], true);
+    client.cancel(&id);
+
+    assert_eq!(token.last_reentry(), Some(reentry_rejected()));
+    assert_eq!(token.balance(&sender), 700);
+    assert_eq!(token.balance(&client.address), 300);
+    let stream = client.get_stream(&id).unwrap();
+    assert!(stream.cancelled);
+    assert_eq!(stream.total_amount, 300);
+}
+
+#[test]
+fn test_propagated_reentry_rolls_back_the_whole_withdraw() {
+    let env = Env::default();
+    let (token, _, recipient, client, id) = hostile_stream(&env);
+    advance_time(&env, 400);
+
+    token.arm(&client.address, "withdraw", vec![&env, id.into_val(&env)], false);
+    assert!(client.try_withdraw(&id).is_err());
+
+    // `withdrawn` is written before the transfer, but the failed transfer takes
+    // that write down with it: the stream is exactly as it was.
+    assert_eq!(client.get_stream(&id).unwrap().withdrawn, 0);
+    assert_eq!(client.claimable(&id), 400);
+    assert_eq!(token.balance(&recipient), 0);
+    assert_eq!(token.balance(&client.address), 1000);
+    assert_eq!(token.last_reentry(), None);
+}
+
+#[test]
+fn test_callback_into_another_contract_is_not_blocked() {
+    // Control for the tests above: the same callback aimed at a second stream
+    // contract, one that is not on the call stack, goes through. The refusals
+    // are the host's reentry check, not a quirk of the hostile token.
+    let env = Env::default();
+    let (token, _, recipient, client, id) = hostile_stream(&env);
+    let (other_token, other_sender, other_recipient, other_client) = setup(&env);
+    other_token.mint(&other_sender, 1000);
+    let other_id = create(
+        &env,
+        &other_client,
+        &other_sender,
+        &other_recipient,
+        &other_token.id,
+        1000,
+        0,
+        1000,
+        0,
+    );
+    advance_time(&env, 400);
+
+    token.arm(&other_client.address, "withdraw", vec![&env, other_id.into_val(&env)], true);
+    assert_eq!(client.withdraw(&id), 400);
+
+    assert_eq!(token.last_reentry(), Some(support::ReentryOutcome::Succeeded));
+    assert_eq!(token.balance(&recipient), 400);
+    assert_eq!(other_token.balance(&other_recipient), 400);
 }
