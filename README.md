@@ -63,7 +63,7 @@ stellar/
 ├── apps/
 │   └── web/                  # Next.js dashboard (/streams, /escrow, /docs)
 ├── scripts/                  # cross-platform build/deploy/invoke scripts
-└── docs/                     # development guide
+└── docs/                     # development guide + contract reference
 ```
 
 ---
@@ -136,6 +136,19 @@ must be the same length, every share must be non-zero, and duplicate recipients 
 rounding remainder to the final recipient, so no dust is stranded. Each call requires the payer's
 signature and emits a `splits`-tagged event for indexers.
 See [`contracts/splits/src/lib.rs`](contracts/splits/src/lib.rs).
+
+---
+
+## Contract reference
+
+Every entry point with its argument and return types, every error variant with its numeric code and
+the condition that raises it, and every event topic with its payload shape, for all three contracts:
+**[docs/contracts.md](docs/contracts.md)**.
+
+The sections above are orientation. That page is what an integrator mapping a failure to a
+user-facing message, or an indexer decoding an event, should actually be reading — including the
+cases the Rust does not advertise: two error codes that are defined but never returned, and an
+`escrow` `cancelled` event that carries no amount.
 
 ---
 
