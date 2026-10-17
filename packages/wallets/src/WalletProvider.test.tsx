@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, act, screen } from '@testing-library/react';
+import { render, act, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { WalletProvider, useWallet } from './WalletProvider';
 import * as freighter from '@stellar/freighter-api';
@@ -28,6 +28,7 @@ function TestComponent() {
     activeProvider,
     isConnected,
     isConnecting,
+    isRestoring,
     error,
     connect,
     disconnect,
@@ -40,6 +41,7 @@ function TestComponent() {
       <div data-testid="provider">{activeProvider || 'null'}</div>
       <div data-testid="connected">{isConnected ? 'true' : 'false'}</div>
       <div data-testid="connecting">{isConnecting ? 'true' : 'false'}</div>
+      <div data-testid="restoring">{isRestoring ? 'true' : 'false'}</div>
       <div data-testid="error">{error || 'null'}</div>
       <button onClick={() => connect('freighter')}>Connect Freighter</button>
       <button onClick={() => connect('albedo')}>Connect Albedo</button>
@@ -70,9 +72,10 @@ describe('WalletProvider', () => {
     expect(screen.getByTestId('address').textContent).toBe('null');
     expect(screen.getByTestId('provider').textContent).toBe('null');
     expect(screen.getByTestId('connected').textContent).toBe('false');
+    expect(screen.getByTestId('restoring').textContent).toBe('false');
   });
 
-  it('should auto-reconnect from localStorage on mount', () => {
+  it('should not report a stored session as connected until verified', async () => {
     localStorage.setItem('stellar_starter_kit_wallet_provider', 'freighter');
     localStorage.setItem('stellar_starter_kit_wallet_address', 'GA123...');
 
@@ -82,9 +85,94 @@ describe('WalletProvider', () => {
       </WalletProvider>,
     );
 
+    // While verification is pending the stored address must not be exposed.
+    expect(screen.getByTestId('connected').textContent).toBe('false');
+    expect(screen.getByTestId('restoring').textContent).toBe('true');
+  });
+
+  it('should auto-reconnect from localStorage after verifying the session', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.getAddress).mockResolvedValue({ address: 'GA123...' });
+
+    localStorage.setItem('stellar_starter_kit_wallet_provider', 'freighter');
+    localStorage.setItem('stellar_starter_kit_wallet_address', 'GA123...');
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('connected').textContent).toBe('true');
+    });
+
     expect(screen.getByTestId('address').textContent).toBe('GA123...');
     expect(screen.getByTestId('provider').textContent).toBe('freighter');
-    expect(screen.getByTestId('connected').textContent).toBe('true');
+    expect(screen.getByTestId('restoring').textContent).toBe('false');
+  });
+
+  it('should clear the stored session when the extension is missing', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: false });
+
+    localStorage.setItem('stellar_starter_kit_wallet_provider', 'freighter');
+    localStorage.setItem('stellar_starter_kit_wallet_address', 'GA123...');
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('connected').textContent).toBe('false');
+    });
+
+    expect(screen.getByTestId('address').textContent).toBe('null');
+    expect(screen.getByTestId('provider').textContent).toBe('null');
+    expect(localStorage.getItem('stellar_starter_kit_wallet_provider')).toBeNull();
+  });
+
+  it('should not report connected when the wallet is unavailable', async () => {
+    vi.mocked(freighter.isConnected).mockRejectedValue(new Error('network down'));
+
+    localStorage.setItem('stellar_starter_kit_wallet_provider', 'freighter');
+    localStorage.setItem('stellar_starter_kit_wallet_address', 'GA123...');
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('connected').textContent).toBe('false');
+    });
+
+    expect(screen.getByTestId('address').textContent).toBe('null');
+    expect(screen.getByTestId('provider').textContent).toBe('null');
+  });
+
+  it('should invalidate a stored session whose address no longer matches', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.getAddress).mockResolvedValue({ address: 'GB_DIFFERENT' });
+
+    localStorage.setItem('stellar_starter_kit_wallet_provider', 'freighter');
+    localStorage.setItem('stellar_starter_kit_wallet_address', 'GA123...');
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('connected').textContent).toBe('false');
+    });
+
+    expect(screen.getByTestId('address').textContent).toBe('null');
+    expect(screen.getByTestId('provider').textContent).toBe('null');
+    expect(localStorage.getItem('stellar_starter_kit_wallet_address')).toBeNull();
   });
 
   it('should connect to Freighter successfully', async () => {
@@ -175,13 +263,18 @@ describe('WalletProvider', () => {
     localStorage.setItem('stellar_starter_kit_wallet_provider', 'freighter');
     localStorage.setItem('stellar_starter_kit_wallet_address', 'GA123...');
 
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.getAddress).mockResolvedValue({ address: 'GA123...' });
+
     render(
       <WalletProvider>
         <TestComponent />
       </WalletProvider>,
     );
 
-    expect(screen.getByTestId('connected').textContent).toBe('true');
+    await waitFor(() => {
+      expect(screen.getByTestId('connected').textContent).toBe('true');
+    });
 
     await act(async () => {
       screen.getByText('Disconnect').click();

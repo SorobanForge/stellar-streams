@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import {
   isConnected as checkFreighterConnected,
   getAddress as getFreighterAddress,
@@ -35,6 +35,7 @@ export interface WalletContextType {
   activeProvider: WalletType | null;
   isConnected: boolean;
   isConnecting: boolean;
+  isRestoring: boolean;
   network: string;
   error: string | null;
   connect: (provider: WalletType) => Promise<void>;
@@ -57,19 +58,80 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [network, setNetwork] = useState<string>('TESTNET');
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  /** True while a persisted session is being verified against the extension. */
+  const [isRestoring, setIsRestoring] = useState<boolean>(false);
+  /** Monotonically increasing id used to discard stale restore results. */
+  const restoreId = useRef(0);
 
-  // Auto-reconnect from localStorage on mount
+  // Verify a persisted session before reporting the wallet as connected. The
+  // stored address is never exposed as connected until the extension confirms
+  // it still controls that key.
   useEffect(() => {
     const savedProvider = localStorage.getItem(LOCAL_STORAGE_KEY_PROVIDER) as WalletType | null;
     const savedAddress = localStorage.getItem(LOCAL_STORAGE_KEY_ADDRESS);
 
-    if (savedProvider && savedAddress) {
-      setActiveProvider(savedProvider);
-      setActiveAddress(savedAddress);
-    }
+    if (!savedProvider || !savedAddress) return;
+
+    const id = ++restoreId.current;
+    let active = true;
+    setIsRestoring(true);
+
+    (async () => {
+      let currentKey: string | null = null;
+      try {
+        if (savedProvider === 'freighter') {
+          const connection = await checkFreighterConnected();
+          if (!connection.isConnected) {
+            throw new Error('Freighter wallet extension is not available.');
+          }
+          const res = await getFreighterAddress();
+          currentKey = res.address;
+        } else if (savedProvider === 'albedo') {
+          const res = await albedo.publicKey({});
+          currentKey = res.pubkey;
+        } else if (savedProvider === 'rabe') {
+          const rabet = (window as Window & { rabet?: RabetInterface }).rabet;
+          if (!rabet) {
+            throw new Error('Rabet wallet extension is not available.');
+          }
+          const res = await rabet.connect();
+          currentKey = res.publicKey;
+        } else if (savedProvider === 'hana') {
+          const hana = (window as Window & { hanaWallet?: HanaInterface }).hanaWallet;
+          if (!hana) {
+            throw new Error('Hana wallet extension is not available.');
+          }
+          const res = await hana.send('stellar:getPublicKey');
+          currentKey = typeof res === 'string' ? res : res.publicKey || '';
+        } else {
+          throw new Error(`Unsupported wallet provider: ${savedProvider}`);
+        }
+
+        if (!active || id !== restoreId.current) return;
+        if (!currentKey || currentKey !== savedAddress) {
+          throw new Error('Stored address does not match the wallet.');
+        }
+
+        setActiveProvider(savedProvider);
+        setActiveAddress(savedAddress);
+      } catch {
+        if (!active || id !== restoreId.current) return;
+        // Extension missing, disconnected, or unverifiable: clear the stale
+        // persisted session and expose the disconnected state.
+        disconnect();
+      } finally {
+        if (active && id === restoreId.current) setIsRestoring(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   const connect = useCallback(async (provider: WalletType) => {
+    // Invalidate any in-flight restore so it cannot override a new session.
+    restoreId.current++;
     setIsConnecting(true);
     setError(null);
     try {
@@ -90,14 +152,14 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         const res = await albedo.publicKey({});
         publicKey = res.pubkey;
       } else if (provider === 'rabe') {
-        const rabet = window.rabet;
+        const rabet = (window as Window & { rabet?: RabetInterface }).rabet;
         if (!rabet) {
           throw new Error('Rabet wallet extension is not installed.');
         }
         const res = await rabet.connect();
         publicKey = res.publicKey;
       } else if (provider === 'hana') {
-        const hana = window.hanaWallet;
+        const hana = (window as Window & { hanaWallet?: HanaInterface }).hanaWallet;
         if (!hana) {
           throw new Error('Hana wallet extension is not installed.');
         }
@@ -127,6 +189,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const disconnect = useCallback(() => {
+    // Invalidate any in-flight restore so it cannot resurrect this session.
+    restoreId.current++;
     setActiveAddress(null);
     setActiveProvider(null);
     setError(null);
@@ -160,11 +224,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
           });
           return res.signed_envelope_xdr;
         } else if (activeProvider === 'rabe') {
-          const rabet = window.rabet;
+          const rabet = (window as Window & { rabet?: RabetInterface }).rabet;
           if (!rabet) throw new Error('Rabet extension is missing.');
           return await rabet.sign(xdr, network.toLowerCase());
         } else if (activeProvider === 'hana') {
-          const hana = window.hanaWallet;
+          const hana = (window as Window & { hanaWallet?: HanaInterface }).hanaWallet;
           if (!hana) throw new Error('Hana extension is missing.');
           const res = await hana.send('stellar:signTransaction', {
             xdr,
@@ -203,6 +267,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         activeProvider,
         isConnected: !!activeAddress,
         isConnecting,
+        isRestoring,
         network,
         error,
         connect,
