@@ -8,4 +8,6 @@ export const WALLET_PROVIDERS = {
 
 export type WalletProviderType = (typeof WALLET_PROVIDERS)[keyof typeof WALLET_PROVIDERS];
 
-export * from './WalletProvider';
+// Explicit extension: the emitted dist keeps the specifier as written, and
+// Node's ESM resolver rejects an extensionless relative import.
+export * from './WalletProvider.js';
