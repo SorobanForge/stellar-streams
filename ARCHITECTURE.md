@@ -67,7 +67,7 @@ formula lives in `contracts/stream/src/lib.rs` and is mirrored in TypeScript.
 | `sdk`       | `StreamsClient` — simulates reads and prepares/signs/submits/polls writes. |
 | `types`     | `Stream`, `StreamConfig`, `CreateStreamParams`, status derivation.         |
 | `utils`     | BigInt stroop formatting/parsing, duration formatting, vesting math.       |
-| `hooks`     | `useStream` — loads a stream + claimable balance with optional polling.    |
+| `hooks`     | [`useStream` + `useStellarNetworkStatus`](packages/hooks/README.md) — loads a stream + claimable balance with optional polling. |
 | `wallets`   | Unified React context over Freighter, Albedo, Rabet, and Hana.             |
 | `ui`        | Shared UI primitives and the Tailwind class helper.                        |
 | `contracts` | Generated Soroban TypeScript bindings plus network constants.              |
