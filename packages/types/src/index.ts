@@ -28,6 +28,10 @@ export interface Stream {
   startTime: number;
   endTime: number;
   cliffTime: number;
+  /** Optional human-readable metadata; an empty string when none was set. */
+  label: string;
+  /** Optional external reference (invoice or grant id); empty when none was set. */
+  reference: string;
   cancelled: boolean;
 }
 
@@ -52,6 +56,10 @@ export interface CreateStreamParams {
   startTime: number;
   endTime: number;
   cliffTime: number;
+  /** Short human-readable label. At most 64 bytes; defaults to no label. */
+  label?: string;
+  /** External reference such as an invoice or grant id. At most 128 bytes. */
+  reference?: string;
 }
 
 export type StreamStatus = 'scheduled' | 'streaming' | 'completed' | 'cancelled';
