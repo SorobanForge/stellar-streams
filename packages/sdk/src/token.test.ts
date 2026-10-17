@@ -38,10 +38,14 @@ describe('arbitrary token contracts', () => {
           token: USDC_TOKEN,
           total_amount: 2_500_000n,
           withdrawn: 500_000n,
+          label: 'Q4 payroll',
+          reference: 'INV-2026-0042',
         }),
         claimable: nativeToScVal(250_000n, { type: 'i128' }),
         decimals: nativeToScVal(6, { type: 'u32' }),
         symbol: nativeToScVal('USDC', { type: 'string' }),
+        // Writes are simulated before being prepared; void is a valid result.
+        create_stream: xdr.ScVal.scvVoid(),
       }),
     );
   });
@@ -56,6 +60,8 @@ describe('arbitrary token contracts', () => {
     const stream = await client.getStream(1);
     expect(stream?.token).toBe(USDC_TOKEN);
     expect(stream?.totalAmount).toBe('2500000');
+    expect(stream?.label).toBe('Q4 payroll');
+    expect(stream?.reference).toBe('INV-2026-0042');
 
     const metadata = await client.getTokenMetadata(stream!.token);
     expect(metadata).toEqual({ contractId: USDC_TOKEN, decimals: 6, symbol: 'USDC' });

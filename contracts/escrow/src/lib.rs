@@ -1,8 +1,7 @@
 #![no_std]
-#![allow(deprecated)]
 #![allow(clippy::too_many_arguments)]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token, Address, Env,
+    contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Env,
 };
 
 #[contracterror]
@@ -48,8 +47,58 @@ pub enum DataKey {
     Escrow(u64),
 }
 
-const BUMP_THRESHOLD: u32 = 10000; // ~1.5 days of ledgers
-const BUMP_LIMIT: u32 = 50000; // ~7 days of ledgers
+const BUMP_THRESHOLD: u32 = 17_280; // ~1 day of ledgers
+const BUMP_LIMIT: u32 = 518_400; // ~30 days of ledgers
+
+/// Emitted when an escrow agreement is created.
+#[contractevent(topics = ["escrow", "created"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EscrowCreated {
+    #[topic]
+    pub id: u64,
+    pub payer: Address,
+    pub amount: i128,
+}
+
+/// Emitted when an escrow is funded.
+#[contractevent(topics = ["escrow", "funded"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EscrowFunded {
+    #[topic]
+    pub id: u64,
+    pub amount: i128,
+}
+
+/// Emitted when escrowed funds are released to the payee.
+#[contractevent(topics = ["escrow", "released"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EscrowReleased {
+    #[topic]
+    pub id: u64,
+    pub caller: Address,
+    pub payee: Address,
+    pub amount: i128,
+}
+
+/// Emitted when escrowed funds are refunded to the payer.
+#[contractevent(topics = ["escrow", "refunded"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EscrowRefunded {
+    #[topic]
+    pub id: u64,
+    pub caller: Address,
+    pub payer: Address,
+    pub amount: i128,
+}
+
+/// Emitted when an escrow is cancelled.
+#[contractevent(topics = ["escrow", "cancelled"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EscrowCancelled {
+    #[topic]
+    pub id: u64,
+    pub payer: Address,
+}
 
 #[contract]
 pub struct EscrowContract;
@@ -92,9 +141,7 @@ impl EscrowContract {
         env.storage().persistent().set(&key, &escrow);
         env.storage().persistent().extend_ttl(&key, BUMP_THRESHOLD, BUMP_LIMIT);
 
-        // Emit creation event
-        env.events()
-            .publish((symbol_short!("escrow"), symbol_short!("created"), id), (payer, amount));
+        EscrowCreated { id, payer, amount }.publish(&env);
 
         Ok(())
     }
@@ -119,8 +166,7 @@ impl EscrowContract {
         env.storage().persistent().set(&key, &escrow);
         env.storage().persistent().extend_ttl(&key, BUMP_THRESHOLD, BUMP_LIMIT);
 
-        // Emit funding event
-        env.events().publish((symbol_short!("escrow"), symbol_short!("funded"), id), escrow.amount);
+        EscrowFunded { id, amount: escrow.amount }.publish(&env);
 
         Ok(())
     }
@@ -152,11 +198,8 @@ impl EscrowContract {
         env.storage().persistent().set(&key, &escrow);
         env.storage().persistent().extend_ttl(&key, BUMP_THRESHOLD, BUMP_LIMIT);
 
-        // Emit release event
-        env.events().publish(
-            (symbol_short!("escrow"), symbol_short!("released"), id),
-            (caller, escrow.payee.clone(), escrow.amount),
-        );
+        EscrowReleased { id, caller, payee: escrow.payee.clone(), amount: escrow.amount }
+            .publish(&env);
 
         Ok(())
     }
@@ -188,11 +231,8 @@ impl EscrowContract {
         env.storage().persistent().set(&key, &escrow);
         env.storage().persistent().extend_ttl(&key, BUMP_THRESHOLD, BUMP_LIMIT);
 
-        // Emit refund event
-        env.events().publish(
-            (symbol_short!("escrow"), symbol_short!("refunded"), id),
-            (caller, escrow.payer.clone(), escrow.amount),
-        );
+        EscrowRefunded { id, caller, payer: escrow.payer.clone(), amount: escrow.amount }
+            .publish(&env);
 
         Ok(())
     }
@@ -238,11 +278,7 @@ impl EscrowContract {
         env.storage().persistent().set(&key, &escrow);
         env.storage().persistent().extend_ttl(&key, BUMP_THRESHOLD, BUMP_LIMIT);
 
-        // Emit cancel event
-        env.events().publish(
-            (symbol_short!("escrow"), symbol_short!("cancelled"), id),
-            escrow.payer.clone(),
-        );
+        EscrowCancelled { id, payer: escrow.payer.clone() }.publish(&env);
 
         Ok(())
     }

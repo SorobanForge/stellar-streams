@@ -37,6 +37,7 @@ const CONTRACT_ID = process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID ?? '';
 const DEFAULT_TOKEN =
   process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ||
   'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
+const EXPERT_URL = process.env.NEXT_PUBLIC_STELLAR_EXPERT_URL ?? 'https://stellar.expert';
 
 const DAY = 86_400;
 
@@ -111,7 +112,11 @@ export default function StreamsDashboard() {
       setError(null);
       try {
         const { hash } = await action();
-        notify('success', `${label} submitted successfully. Tx ${formatAddress(hash, 6)}`);
+        const expertLink = `${EXPERT_URL}/tx/${hash}`;
+        notify(
+          'success',
+          `${label} submitted successfully. Tx ${formatAddress(hash, 6)} ${expertLink ? '• <a href="' + expertLink + '" target="_blank" rel="noreferrer">View on explorer</a>' : ''}`,
+        );
         await loadStream(id);
       } catch (err) {
         notify('error', err instanceof Error ? err.message : `${label} failed.`);
@@ -152,7 +157,11 @@ export default function StreamsDashboard() {
         endTime,
         cliffTime,
       });
-      notify('success', `Stream created. Tx ${formatAddress(hash, 6)}`);
+      const expertLink = `${EXPERT_URL}/tx/${hash}`;
+      notify(
+        'success',
+        `Stream created. Tx ${formatAddress(hash, 6)} ${expertLink ? '• <a href="' + expertLink + '" target="_blank" rel="noreferrer">View on explorer</a>' : ''}`,
+      );
       setRecipient('');
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Failed to create stream.');
