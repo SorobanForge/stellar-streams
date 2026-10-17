@@ -478,9 +478,7 @@ export default function StreamsDashboard() {
                           </dd>
                         </div>
                         <div>
-                          <dt className="text-[10px] text-slate-500 uppercase">
-                            Net amount
-                          </dt>
+                          <dt className="text-[10px] text-slate-500 uppercase">Net amount</dt>
                           <dd className="mt-1 font-bold text-cyan-300">
                             {formatAmount(netAmount)}
                           </dd>
@@ -488,13 +486,9 @@ export default function StreamsDashboard() {
                       </>
                     ) : (
                       <div>
-                        <dt className="text-[10px] text-slate-500 uppercase">
-                          Claimable
-                        </dt>
-                        <dd className="mt-1 font-bold text-cyan-300">
-                          {formatAmount(netAmount)}
-                        </dd>
-                      </>
+                        <dt className="text-[10px] text-slate-500 uppercase">Claimable</dt>
+                        <dd className="mt-1 font-bold text-cyan-300">{formatAmount(netAmount)}</dd>
+                      </div>
                     )}
                   </dl>
 
