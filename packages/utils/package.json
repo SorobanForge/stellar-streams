@@ -13,6 +13,7 @@
   "devDependencies": {
     "@stellar-starter-kit/tsconfig": "workspace:*",
     "@stellar-starter-kit/eslint-config": "workspace:*",
+    "fast-check": "^4.10.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   }

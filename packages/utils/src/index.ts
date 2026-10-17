@@ -101,6 +101,45 @@ export function formatDuration(seconds: number): string {
   return parts.join(' ');
 }
 
+const MINUTE_SECONDS = 60;
+const HOUR_SECONDS = 3_600;
+const DAY_SECONDS = 86_400;
+
+/**
+ * Formats the gap between two unix timestamps (seconds) as a short relative
+ * string: `in 3d`, `2h ago`, or `just now` for anything under a minute (and for
+ * a zero delta). Deltas larger than a day are kept in days so the output stays
+ * unambiguous for long vesting schedules.
+ *
+ * `now` is always passed in — the helper never reads the clock itself, so the
+ * output is deterministic and cheap to test. Negative deltas describe the past
+ * (`ago`), positive ones the future (`in`). Non-finite inputs fall back to
+ * `just now` instead of rendering `NaN` into the UI.
+ *
+ *      formatRelativeTime(cliffTime, now) // "in 3d"
+ *      formatRelativeTime(startTime, now) // "2h ago"
+ */
+export function formatRelativeTime(from: number, now: number): string {
+  const delta = Math.trunc(from) - Math.trunc(now);
+  if (!Number.isFinite(delta)) return 'just now';
+
+  const magnitude = Math.abs(delta);
+  if (magnitude < MINUTE_SECONDS) return 'just now';
+
+  let unit = 'd';
+  let secondsPerUnit = DAY_SECONDS;
+  if (magnitude < HOUR_SECONDS) {
+    unit = 'm';
+    secondsPerUnit = MINUTE_SECONDS;
+  } else if (magnitude < DAY_SECONDS) {
+    unit = 'h';
+    secondsPerUnit = HOUR_SECONDS;
+  }
+  const value = Math.floor(magnitude / secondsPerUnit);
+
+  return delta > 0 ? `in ${value}${unit}` : `${value}${unit} ago`;
+}
+
 /** A linear vesting schedule, mirroring the on-chain `Stream` time fields. */
 export interface VestingSchedule {
   totalAmount: bigint;

@@ -18,6 +18,7 @@ import {
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
 import { getStreamStatus, type Stream } from '@stellar-starter-kit/types';
+import { useCancelStream, useCreateStream, useWithdrawStream } from '@stellar-starter-kit/hooks';
 import {
   formatAddress,
   formatTokenAmount,
@@ -25,6 +26,7 @@ import {
   computeProgressBps,
   formatBps,
   formatDuration,
+  formatRelativeTime,
 } from '@stellar-starter-kit/utils';
 import Header from '../../components/Header';
 import Footer from '../../components/Footer';
@@ -40,13 +42,26 @@ const DEFAULT_TOKEN =
 
 const DAY = 86_400;
 
+/** One-line vesting timeline for the inspected stream, expressed in relative time. */
+function streamTimeline(stream: Stream, nowSeconds: number): string {
+  if (stream.cancelled) {
+    return 'Cancelled - the unvested balance was refunded to the sender.';
+  }
+  if (nowSeconds < stream.cliffTime) {
+    return `Cliff ends ${formatRelativeTime(stream.cliffTime, nowSeconds)}`;
+  }
+  if (nowSeconds >= stream.endTime) {
+    return `Fully vested ${formatRelativeTime(stream.endTime, nowSeconds)}`;
+  }
+  return `Ends ${formatRelativeTime(stream.endTime, nowSeconds)}`;
+}
+
 export default function StreamsDashboard() {
   const { activeAddress, isConnected, isConnecting, connect, disconnect, signTransaction } =
     useWallet();
 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
 
   // Create form.
   const [recipient, setRecipient] = useState('');
@@ -104,23 +119,48 @@ export default function StreamsDashboard() {
     [client, notify],
   );
 
-  const runAction = useCallback(
-    async (label: string, action: () => Promise<{ hash: string }>, id: string) => {
-      setBusy(true);
-      setSuccess(null);
-      setError(null);
-      try {
-        const { hash } = await action();
-        notify('success', `${label} submitted successfully. Tx ${formatAddress(hash, 6)}`);
-        await loadStream(id);
-      } catch (err) {
-        notify('error', err instanceof Error ? err.message : `${label} failed.`);
-      } finally {
-        setBusy(false);
-      }
+  // The mutation hooks own the pending/error/hash state that used to be
+  // hand-rolled here, and refresh the inspected stream once a write confirms.
+  const createStream = useCreateStream(client, {
+    onSuccess: ({ hash }) => {
+      notify('success', `Stream created. Tx ${formatAddress(hash, 6)}`);
+      setRecipient('');
     },
-    [loadStream, notify],
-  );
+    onError: (message) => notify('error', message),
+  });
+
+  const withdrawStream = useWithdrawStream(client, {
+    onSuccess: ({ hash }) => {
+      notify('success', `Withdraw submitted successfully. Tx ${formatAddress(hash, 6)}`);
+      if (stream) void loadStream(stream.id);
+    },
+    onError: (message) => notify('error', message),
+  });
+
+  const cancelStream = useCancelStream(client, {
+    onSuccess: ({ hash }) => {
+      notify('success', `Cancel submitted successfully. Tx ${formatAddress(hash, 6)}`);
+      if (stream) void loadStream(stream.id);
+    },
+    onError: (message) => notify('error', message),
+  });
+
+  // One mutation per hook instance is allowed at a time; `busy` mirrors that for
+  // the buttons that must not start a second write.
+  const busy =
+    createStream.status === 'pending' ||
+    withdrawStream.status === 'pending' ||
+    cancelStream.status === 'pending';
+
+  const runWithdraw = () => {
+    if (!stream) return;
+    void withdrawStream.mutate(stream.id);
+  };
+
+  const runCancel = () => {
+    if (!stream) return;
+    void cancelStream.mutate(stream.id);
+  };
 
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -133,9 +173,6 @@ export default function StreamsDashboard() {
       return;
     }
 
-    setBusy(true);
-    setError(null);
-    setSuccess(null);
     try {
       const now = Math.floor(Date.now() / 1000);
       const startTime = now;
@@ -143,7 +180,7 @@ export default function StreamsDashboard() {
       const cliffTime = now + Math.floor(Number(cliffDays) * DAY);
 
       const { decimals } = await client.getTokenMetadata(token.trim());
-      const { hash } = await client.createStream({
+      await createStream.mutate({
         sender: activeAddress,
         recipient,
         token: token.trim(),
@@ -152,12 +189,10 @@ export default function StreamsDashboard() {
         endTime,
         cliffTime,
       });
-      notify('success', `Stream created. Tx ${formatAddress(hash, 6)}`);
-      setRecipient('');
     } catch (err) {
+      // Reading the token metadata can fail before the mutation is submitted;
+      // the hook reports submission failures through its own `onError`.
       notify('error', err instanceof Error ? err.message : 'Failed to create stream.');
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -428,6 +463,7 @@ export default function StreamsDashboard() {
                       {formatDuration(Math.max(0, stream.endTime - nowSeconds))} remaining
                     </span>
                   </div>
+                  <p className="text-[10px] text-slate-500">{streamTimeline(stream, nowSeconds)}</p>
 
                   <dl className="grid grid-cols-2 gap-4 border-t border-slate-900 pt-4">
                     <div>
@@ -450,16 +486,14 @@ export default function StreamsDashboard() {
 
                   <div className="flex flex-wrap gap-3 border-t border-slate-900 pt-4">
                     <button
-                      onClick={() =>
-                        runAction('Withdraw', () => client.withdraw(stream.id), stream.id)
-                      }
+                      onClick={runWithdraw}
                       disabled={busy || !isConnected || claimable <= 0n || stream.cancelled}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-900 disabled:pointer-events-none disabled:opacity-40"
                     >
                       <Droplets className="h-3.5 w-3.5 text-cyan-400" /> Withdraw
                     </button>
                     <button
-                      onClick={() => runAction('Cancel', () => client.cancel(stream.id), stream.id)}
+                      onClick={runCancel}
                       disabled={busy || !isConnected || stream.cancelled}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-900 disabled:pointer-events-none disabled:opacity-40"
                     >

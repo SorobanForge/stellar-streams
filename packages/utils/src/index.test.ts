@@ -4,6 +4,7 @@ import {
   formatStroopsToXlm,
   parseXlmToStroops,
   formatDuration,
+  formatRelativeTime,
   computeVestedAmount,
   computeProgressBps,
   formatBps,
@@ -75,6 +76,50 @@ describe('formatDuration', () => {
     expect(formatDuration(3_661)).toBe('1h 1m');
     expect(formatDuration(90_061)).toBe('1d 1h 1m');
     expect(formatDuration(-5)).toBe('0s');
+  });
+});
+
+describe('formatRelativeTime', () => {
+  // A fixed clock keeps every expectation below independent of the real date.
+  const now = 1_700_000_000;
+
+  it('describes future deltas', () => {
+    expect(formatRelativeTime(now + 3 * 86_400, now)).toBe('in 3d');
+    expect(formatRelativeTime(now + 2 * 3_600, now)).toBe('in 2h');
+    expect(formatRelativeTime(now + 45 * 60, now)).toBe('in 45m');
+  });
+
+  it('describes past deltas', () => {
+    expect(formatRelativeTime(now - 2 * 3_600, now)).toBe('2h ago');
+    expect(formatRelativeTime(now - 7 * 86_400, now)).toBe('7d ago');
+    expect(formatRelativeTime(now - 90 * 60, now)).toBe('1h ago');
+  });
+
+  it('collapses sub-minute and zero deltas to "just now"', () => {
+    expect(formatRelativeTime(now, now)).toBe('just now');
+    expect(formatRelativeTime(now - 59, now)).toBe('just now');
+    expect(formatRelativeTime(now + 59, now)).toBe('just now');
+  });
+
+  it('rounds down to the largest whole unit', () => {
+    expect(formatRelativeTime(now + 60, now)).toBe('in 1m');
+    expect(formatRelativeTime(now + 86_400, now)).toBe('in 1d');
+    expect(formatRelativeTime(now + 10 * 86_400 + 5 * 3_600, now)).toBe('in 10d');
+  });
+
+  it('is deterministic for a fixed now', () => {
+    // The same inputs always produce the same string: the helper never reads
+    // the clock itself, so a UI clock change cannot move the boundary.
+    const endTime = now + 3 * 86_400;
+    expect(formatRelativeTime(endTime, now)).toBe(formatRelativeTime(endTime, now));
+    expect(formatRelativeTime(endTime, now + 1)).toBe('in 2d');
+  });
+
+  it('handles negative and zero deltas without throwing', () => {
+    expect(() => formatRelativeTime(0, 0)).not.toThrow();
+    expect(() => formatRelativeTime(-1, 0)).not.toThrow();
+    expect(formatRelativeTime(Number.NaN, now)).toBe('just now');
+    expect(formatRelativeTime(now, Number.POSITIVE_INFINITY)).toBe('just now');
   });
 });
 
