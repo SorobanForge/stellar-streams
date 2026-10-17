@@ -58,8 +58,8 @@ const DOCS_SECTIONS = {
 
         <h3 className="mb-3 text-lg font-bold text-white">1. Clone & Install</h3>
         <pre className="mb-6 overflow-x-auto rounded-xl border border-slate-900 bg-[#08080f] p-5 font-mono text-xs leading-relaxed text-slate-300">
-          {`git clone https://github.com/SorobanForge/stellar-starter-kit.git
-cd stellar-starter-kit
+          {`git clone https://github.com/SorobanForge/stellar-streams.git
+cd stellar-streams
 pnpm install
 pnpm build`}
         </pre>
