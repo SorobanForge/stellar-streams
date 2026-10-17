@@ -91,7 +91,7 @@ export default function Header() {
 
         <div className="flex items-center gap-4">
           <a
-            href="https://github.com/SorobanForge/stellar-starter-kit"
+            href="https://github.com/SorobanForge/stellar-streams"
             target="_blank"
             rel="noreferrer"
             className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-800 bg-slate-900/50 text-slate-300 transition-colors hover:bg-slate-900 hover:text-white"
