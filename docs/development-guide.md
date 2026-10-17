@@ -128,3 +128,52 @@ cargo clippy --manifest-path contracts/Cargo.toml --all-targets -- -D warnings
 # Build optimized WASM for deployment
 cargo build --manifest-path contracts/Cargo.toml --target wasm32v1-none --release
 ```
+
+### Test snapshots
+
+Each contract commits the Soroban test ledger state produced by its unit tests
+under `contracts/<contract>/test_snapshots/test/<test_name>.1.json`. The
+soroban-test SDK writes these files during `cargo test`, so **running the tests
+is the regeneration command** — there is no separate generate step:
+
+```bash
+# Regenerate every snapshot for every contract
+cargo test --manifest-path contracts/Cargo.toml
+
+# Regenerate only one crate's snapshots
+cargo test --manifest-path contracts/Cargo.toml -p stream
+```
+
+A snapshot is a record of the ledgers, storage, events and token balances a test
+left behind, so it changes whenever the behaviour under test changes: adding a
+storage write, bumping a TTL, or editing an event payload rewrites the affected
+files. It also changes when a test's *setup* changes, because the accounts a
+test uses are derived from the order in which they are registered — moving a
+`register_contract`/`AccountProvider::generate()` call rewrites every address,
+contract id and nonce in that crate's snapshots. Commit the rewritten files
+together with the test that produced them — see
+[CONTRIBUTING.md](../CONTRIBUTING.md).
+
+To confirm the committed snapshots are current, run the tests and check that
+nothing is dirty:
+
+```bash
+cargo test --manifest-path contracts/Cargo.toml && git status --short contracts/*/test_snapshots
+```
+
+An empty output means the snapshots on disk match what the tests generate.
+Files listed as modified are stale; files listed as *untracked* are new
+snapshots for tests that did not exist before.
+
+Orphaned snapshots — a file whose test has since been deleted or renamed — are
+not removed automatically; the SDK only ever writes. `test_snapshots/test/`
+should contain exactly one `<name>.1.json` per `#[test]` in `src/test.rs`, so
+diff the two sets to find leftovers and delete them by hand:
+
+```bash
+ls contracts/stream/test_snapshots/test | sed 's/\.1\.json$//' | sort
+grep -oP '(?<=fn )\w+(?=\(\))' contracts/stream/src/test.rs | sort
+```
+
+A name in the first list but not the second is an orphan; in the second but not
+the first means the snapshot is simply missing and one test run will create it.
