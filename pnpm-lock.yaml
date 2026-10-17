@@ -270,6 +270,9 @@ importers:
       '@stellar-starter-kit/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@stellar-starter-kit/types':
+        specifier: workspace:*
+        version: link:../types
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
