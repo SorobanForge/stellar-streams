@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `transfer_recipient` on the `stream` contract, letting the current recipient hand an active stream
+  to a new address (key rotation, sale). Emits a `("stream", "transferred")` event and adds the
+  `SameRecipient` error (code `12`); exposed in the SDK as `StreamsClient.transferRecipient`.
 - Flagship modular Counter smart contract containing `initialize(owner)`, `increment()`, `decrement()`, `reset()`, `get_count()`, and `get_owner()` across dedicated files (`lib.rs`, `storage.rs`, `event.rs`, `error.rs`).
 - Robust unit tests in `contracts/counter/src/test.rs` verifying contract errors, bounds limits, state manipulation, and event audits.
 - CLI automation command scripts `scripts/invoke-counter.ps1` and `scripts/invoke-counter.sh` to initialize, query, and mutate contract states on Testnet.

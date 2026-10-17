@@ -96,7 +96,8 @@ export type StreamErrorCode =
   | 'ALREADY_CANCELLED'
   | 'ALREADY_INITIALIZED'
   | 'TREASURY_NOT_SET'
-  | 'METADATA_TOO_LONG';
+  | 'METADATA_TOO_LONG'
+  | 'SAME_RECIPIENT';
 
 /** Stable identifiers for the splits contract's `SplitError` enum. */
 export type SplitErrorCode =
@@ -124,6 +125,7 @@ const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
   9: 'ALREADY_INITIALIZED',
   10: 'TREASURY_NOT_SET',
   11: 'METADATA_TOO_LONG',
+  12: 'SAME_RECIPIENT',
 };
 
 /**
@@ -470,6 +472,32 @@ export class StreamsClient {
   async cancel(id: bigint | number | string): Promise<{ hash: string }> {
     return this.invoke('cancel', nativeToScVal(BigInt(id), { type: 'u64' }));
   }
+
+  /**
+   * Hand a stream off to `newRecipient`, e.g. after a key rotation or a sale.
+   * The connected wallet signs as the contract's `caller` and must be the
+   * stream's current recipient, otherwise the call fails with `UNAUTHORIZED`.
+   *
+   * Everything not yet withdrawn — including a balance that has vested but was
+   * never claimed — becomes withdrawable by `newRecipient` only, so call
+   * `withdraw` first to keep what has already vested.
+   */
+  async transferRecipient(
+    id: bigint | number | string,
+    newRecipient: string,
+  ): Promise<{ hash: string }> {
+    const { publicKey } = this.options;
+    if (!publicKey) {
+      throw new Error('A connected wallet is required to submit transactions.');
+    }
+    assertAddress(newRecipient, 'newRecipient');
+    return this.invoke(
+      'transfer_recipient',
+      nativeToScVal(BigInt(id), { type: 'u64' }),
+      addressToScVal(publicKey),
+      addressToScVal(newRecipient),
+    );
+  }
 }
 
 interface RawStream {
@@ -516,7 +544,7 @@ function assertTokenId(tokenId: string): void {
   }
 }
 
-function assertAddress(address: string, field: 'sender' | 'recipient'): void {
+function assertAddress(address: string, field: 'sender' | 'recipient' | 'newRecipient'): void {
   if (!StrKey.isValidEd25519PublicKey(address) && !StrKey.isValidContract(address)) {
     throw new Error(
       `Invalid ${field}: ${address}. Expected a G... account address or C... contract address.`,

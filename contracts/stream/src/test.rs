@@ -485,3 +485,154 @@ fn test_metadata_length_limits() {
     // The rejections happened before any transfer.
     assert_eq!(token.balance(&sender), 1000);
 }
+
+#[test]
+fn test_transfer_recipient_mid_stream() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+    let new_recipient = account(&env);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    // The original recipient claims what has vested so far, then hands off.
+    advance_time(&env, 300);
+    assert_eq!(client.withdraw(&id), 300);
+    client.transfer_recipient(&id, &recipient, &new_recipient);
+
+    // Checked first: the event log only holds the most recent invocation's events.
+    assert_eq!(
+        env.events().all().filter_by_contract(&client.address),
+        [StreamRecipientTransferred {
+            id,
+            old_recipient: recipient.clone(),
+            new_recipient: new_recipient.clone(),
+        }
+        .to_xdr(&env, &client.address)],
+    );
+
+    // Only the recipient changes; the withdrawn amount and schedule are kept.
+    let stream = client.get_stream(&id).unwrap();
+    assert_eq!(stream.recipient, new_recipient);
+    assert_eq!(stream.sender, sender);
+    assert_eq!(stream.withdrawn, 300);
+    assert_eq!(stream.total_amount, 1000);
+    assert_eq!((stream.start_time, stream.end_time, stream.cliff_time), (0, 1000, 0));
+
+    // Future withdrawals accrue to the new recipient.
+    advance_time(&env, 200);
+    assert_eq!(client.claimable(&id), 200);
+    assert_eq!(client.withdraw(&id), 200);
+    assert_eq!(token.balance(&new_recipient), 200);
+    assert_eq!(token.balance(&recipient), 300);
+
+    advance_time(&env, 500);
+    assert_eq!(client.withdraw(&id), 500);
+    assert_eq!(token.balance(&new_recipient), 700);
+    assert_eq!(token.balance(&recipient), 300);
+    assert_eq!(token.balance(&client.address), 0);
+}
+
+#[test]
+fn test_transfer_recipient_moves_unclaimed_vested_balance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+    let new_recipient = account(&env);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    // Vested but never withdrawn: it is part of the remaining balance and moves.
+    advance_time(&env, 400);
+    client.transfer_recipient(&id, &recipient, &new_recipient);
+    assert_eq!(client.withdraw(&id), 400);
+    assert_eq!(token.balance(&new_recipient), 400);
+    assert_eq!(token.balance(&recipient), 0);
+}
+
+#[test]
+fn test_transfer_recipient_after_cancel_moves_vested_remainder() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+    let new_recipient = account(&env);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 250);
+    client.cancel(&id);
+
+    client.transfer_recipient(&id, &recipient, &new_recipient);
+    assert_eq!(client.withdraw(&id), 250);
+    assert_eq!(token.balance(&new_recipient), 250);
+    assert_eq!(token.balance(&sender), 750);
+}
+
+#[test]
+fn test_transfer_recipient_rejects_non_recipient() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+    let outsider = account(&env);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    // Neither a third party nor the stream's own sender may redirect it.
+    assert_eq!(
+        client.try_transfer_recipient(&id, &outsider, &outsider),
+        Err(Ok(StreamError::Unauthorized)),
+    );
+    assert_eq!(
+        client.try_transfer_recipient(&id, &sender, &outsider),
+        Err(Ok(StreamError::Unauthorized)),
+    );
+    assert_eq!(client.get_stream(&id).unwrap().recipient, recipient);
+}
+
+#[test]
+fn test_transfer_recipient_requires_recipient_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+    let new_recipient = account(&env);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    // Naming the recipient as `caller` is not enough without their signature.
+    env.mock_auths(&[]);
+    assert!(client.try_transfer_recipient(&id, &recipient, &new_recipient).is_err());
+
+    env.mock_all_auths();
+    assert_eq!(client.get_stream(&id).unwrap().recipient, recipient);
+}
+
+#[test]
+fn test_transfer_recipient_to_same_address_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    assert_eq!(
+        client.try_transfer_recipient(&id, &recipient, &recipient),
+        Err(Ok(StreamError::SameRecipient)),
+    );
+}
+
+#[test]
+fn test_transfer_recipient_unknown_stream() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register(&env);
+    let caller = account(&env);
+    let new_recipient = account(&env);
+    assert_eq!(
+        client.try_transfer_recipient(&99, &caller, &new_recipient),
+        Err(Ok(StreamError::StreamNotFound)),
+    );
+}
