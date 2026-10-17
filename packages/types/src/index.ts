@@ -85,3 +85,41 @@ export function getStreamStatus(stream: Stream, now: number): StreamStatus {
   if (now >= stream.endTime) return 'completed';
   return 'streaming';
 }
+
+/**
+ * The statuses of the escrow contract's `EscrowStatus`, as readable names
+ * (the `EscrowClient` maps the contract's numeric discriminants onto these).
+ */
+export type EscrowStatus = 'created' | 'funded' | 'released' | 'refunded' | 'cancelled';
+
+/**
+ * An escrow agreement, mirroring the `escrow` Soroban contract. `u64` / `i128`
+ * fields are carried as decimal strings because they exceed JavaScript's safe
+ * integer range.
+ */
+export interface Escrow {
+  id: string;
+  payer: string;
+  payee: string;
+  arbiter: string;
+  token: string;
+  amount: string;
+  deadline: number;
+  status: EscrowStatus;
+}
+
+/**
+ * Inputs for `create_escrow`. `id` is chosen by the caller (the escrow
+ * contract does not allocate ids), and `amount` is a decimal string in the
+ * token's smallest unit — scale it by the token's own `decimals()`, which is
+ * 7 for XLM and SACs but not for every token.
+ */
+export interface CreateEscrowParams {
+  id: string;
+  payer: string;
+  payee: string;
+  arbiter: string;
+  token: string;
+  amount: string;
+  deadline: number;
+}
