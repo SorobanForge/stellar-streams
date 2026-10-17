@@ -23,6 +23,8 @@ import {
   formatTokenAmount,
   parseTokenAmount,
   computeProgressBps,
+  computeClaimable,
+  computeProtocolFee,
   formatBps,
   formatDuration,
 } from '@stellar-starter-kit/utils';
@@ -59,6 +61,7 @@ export default function StreamsDashboard() {
   const [lookupId, setLookupId] = useState('');
   const [stream, setStream] = useState<Stream | null>(null);
   const [claimable, setClaimable] = useState<bigint>(0n);
+  const [feeBps, setFeeBps] = useState<number>(0);
   const [streamToken, setStreamToken] = useState<TokenMetadata | null>(null);
   const [loadingStream, setLoadingStream] = useState(false);
 
@@ -91,7 +94,10 @@ export default function StreamsDashboard() {
       try {
         const found = await client.getStream(id);
         setStream(found);
-        setClaimable(found ? await client.claimable(id).catch(() => 0n) : 0n);
+        const now = Math.floor(Date.now() / 1000);
+        setClaimable(found ? computeClaimable(found, now) : 0n);
+        const config = await client.getConfig().catch(() => null);
+        setFeeBps(config ? config.feeBps : 0);
         // Amounts are in the token's smallest unit; read its decimals to display them.
         setStreamToken(found ? await client.getTokenMetadata(found.token).catch(() => null) : null);
         if (!found) notify('error', `No stream found with id ${id}.`);
@@ -179,6 +185,9 @@ export default function StreamsDashboard() {
         nowSeconds,
       )
     : 0;
+
+  const protocolFee = stream ? computeProtocolFee(claimable, feeBps) : 0n;
+  const netClaimable = claimable - protocolFee;
 
   return (
     <div className="min-h-screen bg-[#06060c] text-slate-100 selection:bg-purple-500/30 selection:text-purple-200">
@@ -443,8 +452,12 @@ export default function StreamsDashboard() {
                       <dd className="mt-1 text-slate-300">{formatAmount(stream.withdrawn)}</dd>
                     </div>
                     <div>
-                      <dt className="text-[10px] text-slate-500 uppercase">Claimable</dt>
-                      <dd className="mt-1 font-bold text-cyan-300">{formatAmount(claimable)}</dd>
+                      <dt className="text-[10px] text-slate-500 uppercase">Claimable (net)</dt>
+                      <dd className="mt-1 font-bold text-cyan-300">{formatAmount(netClaimable)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[10px] text-slate-500 uppercase">Protocol fee</dt>
+                      <dd className="mt-1 text-slate-400">{formatAmount(protocolFee)}</dd>
                     </div>
                   </dl>
 

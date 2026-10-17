@@ -3,6 +3,8 @@
  * All monetary math is done with `bigint` to avoid IEEE-754 precision loss.
  */
 
+import type { Stream } from '@stellar-starter-kit/types';
+
 /** Decimal places of native XLM and of every Stellar Asset Contract (SAC). */
 export const XLM_DECIMALS = 7;
 
@@ -121,6 +123,40 @@ export function computeVestedAmount(schedule: VestingSchedule, now: number): big
   const elapsed = BigInt(now - startTime);
   const duration = BigInt(endTime - startTime);
   return (totalAmount * elapsed) / duration;
+}
+
+/**
+ * Computes the amount claimable by the recipient at `now`, mirroring the
+ * `claimable` view and the claimable calculation inside `withdraw` in the
+ * `stream` Soroban contract (contracts/stream/src/lib.rs):
+ *
+ * claimable = max(vested - withdrawn, 0)
+ *
+ * The vested amount uses the same integer arithmetic as `computeVestedAmount`.
+ */
+export function computeClaimable(stream: Stream, now: number): bigint {
+  const vested = computeVestedAmount(
+    {
+      totalAmount: BigInt(stream.totalAmount),
+      startTime: stream.startTime,
+      endTime: stream.endTime,
+      cliffTime: stream.cliffTime,
+    },
+    now,
+  );
+  const withdrawn = BigInt(stream.withdrawn);
+  const claimable = vested - withdrawn;
+  return claimable > 0n ? claimable : 0n;
+}
+
+/**
+ * Computes the protocol fee on a claimable amount, mirroring the `withdraw`
+ * logic in the `stream` Soroban contract (contracts/stream/src/lib.rs):
+ *
+ * fee = claimable * feeBps / 10_000   (integer division, truncated toward zero)
+ */
+export function computeProtocolFee(claimable: bigint, feeBps: number): bigint {
+  return (claimable * BigInt(feeBps)) / 10_000n;
 }
 
 /** How much of the stream has vested, expressed in basis points (0–10000). */
