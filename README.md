@@ -4,7 +4,7 @@
 
 **Continuous payment streams, linear vesting, and payment splits on Stellar & Soroban.**
 
-[![CI](https://img.shields.io/github/actions/workflow/status/SorobanForge/stellar-starter-kit/ci.yml?branch=main&style=for-the-badge&logo=github&logoColor=white)](https://github.com/SorobanForge/stellar-starter-kit/actions)
+[![CI](https://img.shields.io/github/actions/workflow/status/SorobanForge/stellar-streams/ci.yml?branch=main&style=for-the-badge&logo=github&logoColor=white)](https://github.com/SorobanForge/stellar-streams/actions)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Rust](https://img.shields.io/badge/Soroban-soroban--sdk%2027-orange?style=for-the-badge&logo=rust&logoColor=white)](contracts)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?style=for-the-badge&logo=typescript&logoColor=white)](packages)

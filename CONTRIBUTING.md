@@ -32,8 +32,8 @@ To contribute to this project, you will need:
 
 1. Fork and clone the repository:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/stellar-starter-kit.git
-   cd stellar-starter-kit
+   git clone https://github.com/YOUR_USERNAME/stellar-streams.git
+   cd stellar-streams
    ```
 2. Install dependencies:
    ```bash
