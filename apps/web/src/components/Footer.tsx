@@ -4,7 +4,7 @@ import React from 'react';
 import { Star, Github } from 'lucide-react';
 import Logo from './Logo';
 
-const REPO = 'https://github.com/SorobanForge/stellar-starter-kit';
+const REPO = 'https://github.com/SorobanForge/stellar-streams';
 
 export default function Footer() {
   return (

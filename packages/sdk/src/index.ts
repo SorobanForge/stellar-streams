@@ -98,6 +98,15 @@ export type StreamErrorCode =
   | 'TREASURY_NOT_SET'
   | 'METADATA_TOO_LONG';
 
+/** Stable identifiers for the splits contract's `SplitError` enum. */
+export type SplitErrorCode =
+  | 'EmptyRecipients'
+  | 'LengthMismatch'
+  | 'InvalidShares'
+  | 'InvalidAmount'
+  | 'DuplicateRecipient'
+  | 'SplitNotFound'
+  | 'Unauthorized';
 /**
  * The one place the contract's numeric codes are named. Must stay in sync with
  * the `StreamError` enum in `contracts/stream/src/lib.rs`; codes outside this

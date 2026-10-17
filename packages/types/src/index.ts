@@ -61,8 +61,22 @@ export interface CreateStreamParams {
   /** External reference such as an invoice or grant id. At most 128 bytes. */
   reference?: string;
 }
-
 export type StreamStatus = 'scheduled' | 'streaming' | 'completed' | 'cancelled';
+
+/** A split configuration, mirroring the `Split` Soroban contract struct. */
+export interface SplitConfig {
+  admin: string;
+  totalShares: number;
+}
+
+/** A single split configuration: a set of recipients with proportional shares. */
+export interface Split {
+  id: string;
+  creator: string;
+  recipients: string[];
+  shares: number[];
+  totalShares: number;
+}
 
 /** Derives a human-facing status for a stream at a given timestamp. */
 export function getStreamStatus(stream: Stream, now: number): StreamStatus {
