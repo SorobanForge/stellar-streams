@@ -1,12 +1,17 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import {
-  isConnected as checkFreighterConnected,
-  getAddress as getFreighterAddress,
-  signTransaction as signFreighterTransaction,
-  requestAccess as requestFreighterAccess,
-} from '@stellar/freighter-api';
+// @stellar/freighter-api ships CommonJS, so a default import is the only form
+// Node's ESM resolver can load; named imports from it work under a bundler but
+// throw at runtime everywhere else.
+import freighterApi from '@stellar/freighter-api';
+
+const {
+  isConnected: checkFreighterConnected,
+  getAddress: getFreighterAddress,
+  signTransaction: signFreighterTransaction,
+  requestAccess: requestFreighterAccess,
+} = freighterApi;
 import albedo from '@albedo-link/intent';
 
 interface RabetInterface {
