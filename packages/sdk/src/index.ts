@@ -3,7 +3,9 @@ import {
   Address,
   Asset,
   Contract,
+  FeeBumpTransaction,
   StrKey,
+  Transaction,
   TransactionBuilder,
   nativeToScVal,
   scValToNative,
@@ -36,6 +38,32 @@ export interface StreamsClientOptions {
   pollIntervalMs?: number;
   /** How long to wait for a submitted transaction to confirm. Defaults to 30s. */
   pollTimeoutMs?: number;
+  /**
+   * Sponsor the submission fees of every write with a fee-bump transaction.
+   * The connected wallet still signs the inner transaction, so the contract
+   * sees the user as the source account; only the fee comes from `feeSource`.
+   * Leave this unset to submit the wallet-signed transaction unchanged.
+   */
+  feeBump?: FeeBumpOptions;
+}
+
+/** Configuration for {@link StreamsClientOptions.feeBump}. */
+export interface FeeBumpOptions {
+  /** Account that pays the fees, e.g. a faucet or the dashboard's treasury. */
+  feeSource: string;
+  /** Signer for `feeSource`. Receives the fee-bump envelope, not the inner one. */
+  signTransaction: (
+    xdr: string,
+    opts: { networkPassphrase: string; address: string },
+  ) => Promise<string>;
+  /**
+   * Fee the sponsor pays per included operation, in stroops — the same meaning
+   * as `TransactionBuilder.buildFeeBumpTransaction`'s second argument. Must be
+   * at least the inner transaction's own fee rate. Defaults to that rate, so
+   * the sponsor pays the rate the user's transaction already committed to for
+   * the inner operations plus the fee-bump envelope itself.
+   */
+  baseFee?: string | number;
 }
 
 /** On-chain metadata of a SEP-41 token contract (any SAC or custom Soroban token). */
@@ -78,8 +106,15 @@ const MAX_BACKOFF_MS = 8_000;
 const MAX_LABEL_BYTES = 64;
 /** Must match `MAX_REFERENCE_LEN` in the stream contract. */
 const MAX_REFERENCE_BYTES = 128;
+/** `getStream` calls {@link StreamsClient.listStreams} runs at a time. */
+const STREAM_FETCH_CONCURRENCY = 8;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Integer division rounded up, for splitting a total fee across operations. */
+function ceilDiv(total: bigint, parts: bigint): bigint {
+  return (total + parts - 1n) / parts;
+}
 
 /** Raised when the network rejects a submission because its sequence number is stale. */
 class StaleSequenceError extends Error {}
@@ -145,6 +180,45 @@ export class StreamsError extends Error {
     this.contractCode = contractCode;
     this.code = contractCode === undefined ? undefined : STREAM_ERROR_CODES[contractCode];
   }
+}
+
+/** Events requested per `getEvents` call when {@link StreamsClient.listStreams} pages. */
+export const DEFAULT_EVENT_PAGE_SIZE = 100;
+
+/**
+ * Ledgers scanned by {@link StreamsClient.listStreams} when no `startLedger` is
+ * given: 1000 ledgers is roughly two hours of slots and stays inside the event
+ * window a public Soroban RPC node retains. Pass an explicit range to look
+ * further back.
+ */
+export const DEFAULT_EVENT_LOOKBACK_LEDGERS = 1000;
+
+/** `getEvents` topic matcher for "any ScVal at this position". */
+const ANY_TOPIC = '*';
+
+/**
+ * Arguments for {@link StreamsClient.listStreams}.
+ */
+export interface ListStreamsOptions {
+  /** Address to find streams for, as either the sender or the recipient. */
+  address: string;
+  /**
+   * First ledger to scan, inclusive. Defaults to
+   * `latestLedger - DEFAULT_EVENT_LOOKBACK_LEDGERS`, read from the RPC node.
+   * Must be within the node's event retention window; earlier ledgers are not
+   * recoverable from `getEvents` and need an indexer.
+   */
+  startLedger?: number;
+  /**
+   * Last ledger to scan, inclusive. Defaults to the chain tip when the scan
+   * starts, so concurrent creations are not picked up mid-call.
+   */
+  endLedger?: number;
+  /**
+   * Events per RPC page. Defaults to {@link DEFAULT_EVENT_PAGE_SIZE}. Lower it
+   * if the node rejects the request or the payloads are large.
+   */
+  pageSize?: number;
 }
 
 /**
@@ -282,14 +356,11 @@ export class StreamsClient {
         networkPassphrase,
         address: publicKey,
       });
+      const inner = TransactionBuilder.fromXDR(signedXdr, networkPassphrase) as Transaction;
 
       let hash: string;
       try {
-        hash = await this.submit(
-          TransactionBuilder.fromXDR(signedXdr, networkPassphrase) as Parameters<
-            SorobanRpc.Server['sendTransaction']
-          >[0],
-        );
+        hash = await this.submit(this.options.feeBump ? await this.bumpFees(inner) : inner);
       } catch (error) {
         this.invalidateAccount();
         if (error instanceof StaleSequenceError && attempt === 0) continue;
@@ -300,6 +371,50 @@ export class StreamsClient {
       this.invalidateAccount();
       return this.poll(hash);
     }
+  }
+
+  /**
+   * Wraps a wallet-signed inner transaction in a fee-bump transaction signed by
+   * the configured sponsor. The inner transaction keeps the user as its source
+   * account and signature, so the contract still attributes the call to them;
+   * the sponsor only adds an envelope that pays the fee.
+   *
+   * @throws StreamsError when the sponsor's signer returns something other than
+   * a signed fee-bump envelope.
+   */
+  private async bumpFees(inner: Transaction): Promise<FeeBumpTransaction> {
+    const { feeBump } = this.options;
+    if (!feeBump) {
+      throw new Error('bumpFees called without a feeBump hook.');
+    }
+    const { networkPassphrase } = this.options;
+    const { feeSource, signTransaction, baseFee } = feeBump;
+    // `buildFeeBumpTransaction` rejects a rate below the inner transaction's
+    // own, so borrowing that rate is both the cheapest and the always-valid
+    // default: the sponsor pays it once per inner operation and once for the
+    // fee-bump envelope itself.
+    const rate =
+      baseFee === undefined
+        ? ceilDiv(BigInt(inner.fee), BigInt(inner.operations.length)).toString()
+        : String(baseFee);
+
+    const unsigned = TransactionBuilder.buildFeeBumpTransaction(
+      feeSource,
+      rate,
+      inner,
+      networkPassphrase,
+    );
+    const signedXdr = await signTransaction(unsigned.toXDR(), {
+      networkPassphrase,
+      address: feeSource,
+    });
+    const signed = TransactionBuilder.fromXDR(signedXdr, networkPassphrase);
+    if (!(signed instanceof FeeBumpTransaction)) {
+      throw new StreamsError(
+        `feeBump.signTransaction for ${feeSource} must return the signed fee-bump envelope it was given.`,
+      );
+    }
+    return signed;
   }
 
   private get pollIntervalMs(): number {
@@ -321,7 +436,7 @@ export class StreamsClient {
     for (;;) {
       const submitted = await this.server.sendTransaction(tx);
       if (submitted.status === 'ERROR') {
-        if (submitted.errorResult?.result().switch().name === 'txBadSeq') {
+        if (innermostResult(submitted.errorResult?.result())?.switch().name === 'txBadSeq') {
           throw new StaleSequenceError(
             `Transaction ${submitted.hash} used a stale sequence number.`,
           );
@@ -401,6 +516,98 @@ export class StreamsClient {
   /** The id the next stream will receive. */
   async nextStreamId(): Promise<bigint> {
     return (await this.simulate('next_stream_id')) as bigint;
+  }
+
+  /**
+   * Find the streams involving an address by scanning the contract's
+   * `("stream", "created", id)` events and loading each match with
+   * {@link StreamsClient.getStream}.
+   *
+   * This is a stopgap until a real indexer exists: `getEvents` only serves a
+   * node's retained event window (about 1000 ledgers on the public endpoints),
+   * so `startLedger` has to fall inside it, and an empty result means "nothing
+   * created in the scanned range" rather than "no streams".
+   *
+   * @param options - the address to search for, as sender or recipient, plus
+   * the ledger window and page size to scan it with.
+   * @returns the matching streams, ordered by the ledger their `created` event
+   * landed in, oldest first. Streams whose storage entry has been archived are
+   * skipped.
+   * @throws Error when `address` is not a Stellar address or the ledger range
+   * is empty or unusable.
+   * @throws StreamsError when a `getStream` lookup for a matched event fails.
+   */
+  async listStreams(options: ListStreamsOptions): Promise<Stream[]> {
+    const { address } = options;
+    assertStreamAddress(address);
+    const pageSize = options.pageSize ?? DEFAULT_EVENT_PAGE_SIZE;
+    if (pageSize < 1) {
+      throw new Error(`pageSize must be at least 1, got: ${pageSize}.`);
+    }
+
+    let startLedger = options.startLedger;
+    let endLedger = options.endLedger;
+    if (startLedger === undefined) {
+      // Anchor the default window on the node's own tip: that is the only
+      // reference guaranteed to keep the scan inside its event retention.
+      const { sequence } = await this.server.getLatestLedger();
+      startLedger = Math.max(1, sequence - DEFAULT_EVENT_LOOKBACK_LEDGERS);
+      if (endLedger === undefined) endLedger = sequence;
+    }
+    if (endLedger !== undefined && endLedger < startLedger) {
+      throw new Error(`endLedger ${endLedger} precedes startLedger ${startLedger}.`);
+    }
+
+    const filters = [
+      {
+        type: 'contract' as const,
+        contractIds: [this.contract.contractId()],
+        topics: [[topicSymbol('stream'), topicSymbol('created'), ANY_TOPIC]],
+      },
+    ];
+
+    const ids: bigint[] = [];
+    const seen = new Set<string>();
+    /** Reads one page of events; returns whether the scan has reached its end. */
+    const collect = (events: SorobanRpc.Api.EventResponse[]): boolean => {
+      for (const event of events) {
+        if (endLedger !== undefined && event.ledger > endLedger) return true;
+        const id = createdStreamId(event, address);
+        if (id === null) continue;
+        const key = id.toString();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        ids.push(id);
+      }
+      return false;
+    };
+
+    // Soroban RPC rejects a getEvents request that mixes a cursor with a ledger
+    // range, so the scan opens in ledger mode and continues from the returned
+    // cursor, honouring endLedger on this side of the wire instead.
+    let page = await this.server.getEvents({
+      filters,
+      startLedger,
+      ...(endLedger === undefined ? {} : { endLedger }),
+      limit: pageSize,
+    });
+    for (;;) {
+      if (collect(page.events)) break;
+      // Freeze the tip at the first response so streams created while this call
+      // runs cannot appear on a later page and shift the end from under it.
+      if (endLedger === undefined) endLedger = page.latestLedger;
+      if (page.events.length === 0 || !page.cursor) break;
+      page = await this.server.getEvents({ filters, cursor: page.cursor, limit: pageSize });
+    }
+
+    const streams: Stream[] = [];
+    for (let i = 0; i < ids.length; i += STREAM_FETCH_CONCURRENCY) {
+      const batch = await Promise.all(
+        ids.slice(i, i + STREAM_FETCH_CONCURRENCY).map((id) => this.getStream(id)),
+      );
+      streams.push(...batch.filter((stream): stream is Stream => stream !== null));
+    }
+    return streams;
   }
 
   /**
@@ -524,6 +731,21 @@ function assertAddress(address: string, field: 'sender' | 'recipient'): void {
   }
 }
 
+/**
+ * Throws unless `address` decodes as a Stellar account, muxed account, or
+ * contract.
+ *
+ * Unlike the write-path validator this has no sender/recipient to name: listing
+ * streams takes one address and matches it against both sides of an event.
+ */
+function assertStreamAddress(address: string): void {
+  try {
+    new Address(address);
+  } catch {
+    throw new Error(`Invalid address: ${address}. Expected a G..., M..., or C... address.`);
+  }
+}
+
 /** Parses `params.amount` and enforces the contract's `amount > 0`. */
 function parseAmount(amount: string): bigint {
   let value: bigint;
@@ -567,6 +789,41 @@ function assertMetadata(label: string, reference: string): void {
   }
 }
 
+/** A topic value, in the base64 XDR encoding `getEvents` filters expect. */
+function topicSymbol(symbol: string): string {
+  return xdr.ScVal.scvSymbol(symbol).toXDR('base64');
+}
+
+function isScSymbol(value: xdr.ScVal | undefined, symbol: string): boolean {
+  return value?.switch().name === 'scvSymbol' && value.sym().toString() === symbol;
+}
+
+/**
+ * The id announced by a `("stream", "created", id)` event, or `null` when the
+ * event is not one or does not involve `address`.
+ *
+ * The address check uses the event's own `(sender, recipient, amount)` payload
+ * rather than a follow-up read, so a busy contract's unrelated streams cost no
+ * RPC round trips per address.
+ */
+function createdStreamId(event: SorobanRpc.Api.EventResponse, address: string): bigint | null {
+  if (!event.inSuccessfulContractCall) return null;
+  const [tag, action, id] = event.topic;
+  if (!isScSymbol(tag, 'stream') || !isScSymbol(action, 'created')) return null;
+  if (id?.switch().name !== 'scvU64') return null;
+  let parties: unknown;
+  try {
+    parties = scValToNative(event.value);
+  } catch {
+    // A payload from a future contract version this client cannot decode is
+    // not a match; the id-only fallback would list streams for the wrong user.
+    return null;
+  }
+  const [sender, recipient] = parties as [string, string];
+  if (sender !== address && recipient !== address) return null;
+  return BigInt(id.u64().toString());
+}
+
 function addressToScVal(address: string): xdr.ScVal {
   return new Address(address).toScVal();
 }
@@ -575,11 +832,32 @@ function formatElapsed(ms: number): string {
   return `${(ms / 1_000).toFixed(1)}s`;
 }
 
-/** Summarises a `TransactionResult` as its result code plus the first operation's code. */
+/**
+ * The result code that actually describes what happened to the contract call.
+ * A fee-bump envelope reports its inner transaction one level down
+ * (`txFeeBumpInnerFailed`), and failures like a stale sequence number belong to
+ * that inner transaction rather than to the sponsor's envelope.
+ */
+function innermostResult(
+  result: xdr.TransactionResultResult | undefined,
+): xdr.TransactionResultResult | xdr.InnerTransactionResultResult | undefined {
+  if (!result) return undefined;
+  const name = result.switch().name;
+  if (name === 'txFeeBumpInnerFailed' || name === 'txFeeBumpInnerSuccess') {
+    return result.innerResultPair().result().result();
+  }
+  return result;
+}
+
+/**
+ * Summarises a `TransactionResult` as its result code plus the first
+ * operation's code. For a fee-bump envelope the inner transaction's code is
+ * reported, since that is the failure the caller cares about.
+ */
 function describeTransactionResult(result: xdr.TransactionResult | undefined): string {
   if (!result) return 'no result returned';
   try {
-    const inner = result.result();
+    const inner = innermostResult(result.result()) ?? result.result();
     const code = inner.switch().name;
     const opResults = code === 'txFailed' || code === 'txSuccess' ? inner.results() : [];
     const op = opResults[0];
