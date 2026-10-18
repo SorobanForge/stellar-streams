@@ -82,6 +82,10 @@ const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_POLL_TIMEOUT_MS = 30_000;
 /** Upper bound for the exponential backoff applied to `TRY_AGAIN_LATER`. */
 const MAX_BACKOFF_MS = 8_000;
+/** Must match `MAX_LABEL_LEN` in the stream contract. */
+const MAX_LABEL_BYTES = 64;
+/** Must match `MAX_REFERENCE_LEN` in the stream contract. */
+const MAX_REFERENCE_BYTES = 128;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -102,6 +106,15 @@ export type StreamErrorCode =
   | 'TREASURY_NOT_SET'
   | 'METADATA_TOO_LONG';
 
+/** Stable identifiers for the splits contract's `SplitError` enum. */
+export type SplitErrorCode =
+  | 'EmptyRecipients'
+  | 'LengthMismatch'
+  | 'InvalidShares'
+  | 'InvalidAmount'
+  | 'DuplicateRecipient'
+  | 'SplitNotFound'
+  | 'Unauthorized';
 /**
  * The one place the contract's numeric codes are named. Must stay in sync with
  * the `StreamError` enum in `contracts/stream/src/lib.rs`; codes outside this
@@ -425,18 +438,33 @@ export class StreamsClient {
    * Lock tokens and open a new stream. `params.token` may be any token
    * contract id; `params.amount` is in that token's smallest unit, so scale it
    * by the token's own `decimals` (see `getTokenMetadata`), not by 7.
+   *
+   * Inputs are validated before the transaction is built: an invalid address,
+   * a non-positive amount, an inconsistent schedule or oversized metadata
+   * throws a field-named error without spending a network round trip or a
+   * wallet signature. `params.label` and `params.reference` default to no
+   * metadata (empty strings).
    */
   async createStream(params: CreateStreamParams): Promise<{ hash: string }> {
+    const label = params.label ?? '';
+    const reference = params.reference ?? '';
+    assertAddress(params.sender, 'sender');
+    assertAddress(params.recipient, 'recipient');
     assertTokenId(params.token);
+    const amount = parseAmount(params.amount);
+    assertSchedule(params.startTime, params.endTime, params.cliffTime);
+    assertMetadata(label, reference);
     return this.invoke(
       'create_stream',
       addressToScVal(params.sender),
       addressToScVal(params.recipient),
       addressToScVal(params.token),
-      nativeToScVal(BigInt(params.amount), { type: 'i128' }),
+      nativeToScVal(amount, { type: 'i128' }),
       nativeToScVal(BigInt(params.startTime), { type: 'u64' }),
       nativeToScVal(BigInt(params.endTime), { type: 'u64' }),
       nativeToScVal(BigInt(params.cliffTime), { type: 'u64' }),
+      nativeToScVal(label, { type: 'string' }),
+      nativeToScVal(reference, { type: 'string' }),
     );
   }
 
@@ -451,9 +479,98 @@ export class StreamsClient {
   }
 }
 
+interface RawStream {
+  id: bigint;
+  sender: string;
+  recipient: string;
+  token: string;
+  total_amount: bigint;
+  withdrawn: bigint;
+  start_time: bigint;
+  end_time: bigint;
+  cliff_time: bigint;
+  label: string;
+  reference: string;
+  cancelled: boolean;
+}
+
+interface RawConfig {
+  admin: string;
+  treasury: string;
+  fee_bps: number;
+}
+
+function normalizeStream(raw: RawStream): Stream {
+  return {
+    id: raw.id.toString(),
+    sender: raw.sender,
+    recipient: raw.recipient,
+    token: raw.token,
+    totalAmount: raw.total_amount.toString(),
+    withdrawn: raw.withdrawn.toString(),
+    startTime: Number(raw.start_time),
+    endTime: Number(raw.end_time),
+    cliffTime: Number(raw.cliff_time),
+    label: raw.label,
+    reference: raw.reference,
+    cancelled: raw.cancelled,
+  };
+}
+
 function assertTokenId(tokenId: string): void {
   if (!StrKey.isValidContract(tokenId)) {
     throw new Error(`Invalid token contract id: ${tokenId}. Expected a C... contract address.`);
+  }
+}
+
+function assertAddress(address: string, field: 'sender' | 'recipient'): void {
+  if (!StrKey.isValidEd25519PublicKey(address) && !StrKey.isValidContract(address)) {
+    throw new Error(
+      `Invalid ${field}: ${address}. Expected a G... account address or C... contract address.`,
+    );
+  }
+}
+
+/** Parses `params.amount` and enforces the contract's `amount > 0`. */
+function parseAmount(amount: string): bigint {
+  let value: bigint;
+  try {
+    value = BigInt(amount);
+  } catch {
+    throw new Error(`Invalid amount: ${amount}. Expected a decimal integer string.`);
+  }
+  if (value <= 0n) {
+    throw new Error(`Invalid amount: ${amount}. Must be greater than 0.`);
+  }
+  return value;
+}
+
+/** Mirrors the contract's schedule checks: `start < end` and `cliff` within. */
+function assertSchedule(startTime: number, endTime: number, cliffTime: number): void {
+  if (endTime <= startTime) {
+    throw new Error(`Invalid endTime: ${endTime}. Must be greater than startTime (${startTime}).`);
+  }
+  if (cliffTime < startTime || cliffTime > endTime) {
+    throw new Error(
+      `Invalid cliffTime: ${cliffTime}. Must be between startTime (${startTime}) and endTime (${endTime}).`,
+    );
+  }
+}
+
+/**
+ * Caps `label`/`reference` the way the contract does: the stored strings are
+ * bounded in UTF-8 bytes so a stream's rent stays predictable.
+ */
+function assertMetadata(label: string, reference: string): void {
+  const labelBytes = new TextEncoder().encode(label).length;
+  if (labelBytes > MAX_LABEL_BYTES) {
+    throw new Error(`Invalid label: ${labelBytes} bytes. Must be at most ${MAX_LABEL_BYTES}.`);
+  }
+  const referenceBytes = new TextEncoder().encode(reference).length;
+  if (referenceBytes > MAX_REFERENCE_BYTES) {
+    throw new Error(
+      `Invalid reference: ${referenceBytes} bytes. Must be at most ${MAX_REFERENCE_BYTES}.`,
+    );
   }
 }
 

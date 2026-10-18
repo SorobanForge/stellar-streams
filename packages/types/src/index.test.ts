@@ -25,6 +25,8 @@ function makeStream(overrides: Partial<Stream> = {}): Stream {
     startTime: START,
     endTime: END,
     cliffTime: CLIFF,
+    label: '',
+    reference: '',
     cancelled: false,
     ...overrides,
   };

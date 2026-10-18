@@ -28,6 +28,10 @@ export interface Stream {
   startTime: number;
   endTime: number;
   cliffTime: number;
+  /** Optional human-readable metadata; an empty string when none was set. */
+  label: string;
+  /** Optional external reference (invoice or grant id); empty when none was set. */
+  reference: string;
   cancelled: boolean;
 }
 
@@ -52,9 +56,27 @@ export interface CreateStreamParams {
   startTime: number;
   endTime: number;
   cliffTime: number;
+  /** Short human-readable label. At most 64 bytes; defaults to no label. */
+  label?: string;
+  /** External reference such as an invoice or grant id. At most 128 bytes. */
+  reference?: string;
+}
+export type StreamStatus = 'scheduled' | 'streaming' | 'completed' | 'cancelled';
+
+/** A split configuration, mirroring the `Split` Soroban contract struct. */
+export interface SplitConfig {
+  admin: string;
+  totalShares: number;
 }
 
-export type StreamStatus = 'scheduled' | 'streaming' | 'completed' | 'cancelled';
+/** A single split configuration: a set of recipients with proportional shares. */
+export interface Split {
+  id: string;
+  creator: string;
+  recipients: string[];
+  shares: number[];
+  totalShares: number;
+}
 
 /** Derives a human-facing status for a stream at a given timestamp. */
 export function getStreamStatus(stream: Stream, now: number): StreamStatus {
