@@ -273,7 +273,7 @@ fn test_fee_cap_boundary() {
     // Test 1: fee_bps == 1000 (the 10% cap) withdraws correctly.
     client.initialize(&admin, &treasury, &1000); // 10% fee
     let id = create(&env, &client, &sender, &recipient, &token.id, 10000, 0, 10000, 0);
-    advance_time(&env, 1000);
+    advance_time(&env, 10000);
     // 10% of 10000 = 1000 to treasury, 9000 to recipient.
     assert_eq!(client.withdraw(&id), 9000);
     assert_eq!(token.balance(&recipient), 9000);
@@ -287,32 +287,34 @@ fn test_fee_cap_boundary() {
     assert_eq!(res, Err(Ok(StreamError::InvalidFee)));
 
     // Test 3: cliff_time == end_time releases everything at end_time.
-    let client3 = register(&env);
     let (token3, sender3, recipient3, client3_) = setup(&env);
     token3.mint(&sender3, 1000);
     let admin3 = account(&env);
     let treasury3 = account(&env);
     client3_.initialize(&admin3, &treasury3, &100);
-    let id3 = create(&env, &client3_, &sender3, &recipient3, &token3.id, 1000, 0, 1000, 0);
-    // cliff_time == end_time == 1000, so at t=0 nothing is vested, at t=1000 everything is vested.
+    let now3 = env.ledger().timestamp();
+    let id3 =
+        create(&env, &client3_, &sender3, &recipient3, &token3.id, 1000, now3, now3 + 1000, now3);
+    // Nothing is vested at the start; the whole schedule vests by end_time.
     assert_eq!(client3_.claimable(&id3), 0);
     advance_time(&env, 1000);
     assert_eq!(client3_.claimable(&id3), 1000);
-    assert_eq!(client3_.withdraw(&id3), 900); // 10% fee
-    assert_eq!(token3.balance(&recipient3), 900);
-    assert_eq!(token3.balance(&treasury3), 100);
+    assert_eq!(client3_.withdraw(&id3), 990); // 1% fee
+    assert_eq!(token3.balance(&recipient3), 990);
+    assert_eq!(token3.balance(&treasury3), 10);
 
     // Test 4: withdrawing the full amount twice returns NothingToWithdraw the second time.
-    let client4 = register(&env);
     let (token4, sender4, recipient4, client4_) = setup(&env);
     token4.mint(&sender4, 1000);
     let admin4 = account(&env);
     let treasury4 = account(&env);
     client4_.initialize(&admin4, &treasury4, &100);
-    let id4 = create(&env, &client4_, &sender4, &recipient4, &token4.id, 1000, 0, 1000, 0);
+    let now4 = env.ledger().timestamp();
+    let id4 =
+        create(&env, &client4_, &sender4, &recipient4, &token4.id, 1000, now4, now4 + 1000, now4);
     advance_time(&env, 1000);
     // First withdraw: full amount minus fee.
-    assert_eq!(client4_.withdraw(&id4), 900);
+    assert_eq!(client4_.withdraw(&id4), 990);
     // Second withdraw: nothing left to withdraw.
     assert!(client4_.try_withdraw(&id4).is_err());
 }
@@ -484,4 +486,204 @@ fn test_metadata_length_limits() {
 
     // The rejections happened before any transfer.
     assert_eq!(token.balance(&sender), 1000);
+}
+
+/// Property tests fuzzing the coupled `create_stream` argument bounds
+/// (`start_time`, `cliff_time`, `end_time` and `amount`). Kept in their own
+/// module so the deterministic tests above stay easy to read.
+mod prop_bounds {
+    use super::*;
+    use proptest::prelude::*;
+    use proptest::test_runner::RngSeed;
+    use soroban_sdk::testutils::{EnvTestConfig, Ledger as _};
+
+    // The crate is `#![no_std]`; the test harness still links `std`, so pull it
+    // in explicitly for the RNG seeding / logging below.
+    extern crate std;
+
+    /// Bounded iteration count: the whole suite must stay fast under
+    /// `cargo test`. Overridable per-run with `PROPTEST_CASES`.
+    const CASES: u32 = 256;
+    /// Upper bound on generated timestamps, keeping every derived arithmetic
+    /// operation far away from `u64` overflow.
+    const MAX_TIME: u64 = 1_000_000;
+    /// Upper bound on generated deposits, keeping `amount * elapsed` far away
+    /// from `i128` overflow.
+    const MAX_DEPOSIT: i128 = 1_000_000_000;
+
+    /// The four coupled arguments under test.
+    #[derive(Clone, Copy, Debug)]
+    struct Params {
+        amount: i128,
+        start: u64,
+        end: u64,
+        cliff: u64,
+    }
+
+    /// Moves the ledger clock to an absolute `timestamp`.
+    fn set_time(env: &Env, timestamp: u64) {
+        let mut ledger = env.ledger().get();
+        ledger.timestamp = timestamp;
+        env.ledger().set(ledger);
+    }
+
+    /// A fresh env that does not write one `test_snapshots` file per generated
+    /// case. Property tests run hundreds of cases, so persisting each one would
+    /// flood the repository with non-deterministic snapshots.
+    fn new_env() -> Env {
+        Env::new_with_config(EnvTestConfig { capture_snapshot_at_drop: false })
+    }
+
+    /// A proptest config whose RNG seed is logged before the run. The seed is
+    /// printed with (or just before) the minimal counterexample, so a failing
+    /// run can be replayed exactly with `PROPTEST_RNG_SEED=<seed>`. The seed is
+    /// derived from the clock unless `PROPTEST_RNG_SEED` is already set.
+    fn logged_config() -> ProptestConfig {
+        let seed = std::env::var("PROPTEST_RNG_SEED")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or_else(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos() as u64)
+                    .unwrap_or_default()
+            });
+        std::eprintln!("proptest: rng seed = {seed} (reproduce with PROPTEST_RNG_SEED={seed})");
+
+        ProptestConfig { cases: CASES, rng_seed: RngSeed::Fixed(seed), ..Default::default() }
+    }
+
+    /// Generates argument tuples that always satisfy the contract's structural
+    /// preconditions: positive deposit, `start < end` and `start <= cliff <= end`.
+    fn valid_params() -> impl Strategy<Value = Params> {
+        (1i128..=MAX_DEPOSIT, 0u64..MAX_TIME, 1u64..=MAX_TIME)
+            .prop_map(|(amount, start, len)| {
+                let end = start + len;
+                (amount, start, end)
+            })
+            .prop_flat_map(|(amount, start, end)| {
+                (Just(amount), Just(start), Just(end), start..=end)
+            })
+            .prop_map(|(amount, start, end, cliff)| Params { amount, start, end, cliff })
+    }
+
+    /// Generates unconstrained argument tuples, including amounts at or below
+    /// zero and out-of-order / out-of-range schedules.
+    fn arbitrary_params() -> impl Strategy<Value = Params> {
+        (
+            -1_000_000i128..=MAX_DEPOSIT,
+            0u64..(MAX_TIME * 2),
+            0u64..(MAX_TIME * 2),
+            0u64..(MAX_TIME * 2),
+        )
+            .prop_map(|(amount, start, end, cliff)| Params { amount, start, end, cliff })
+    }
+
+    proptest! {
+        #![proptest_config(logged_config())]
+
+        /// Every stream the contract accepts must satisfy the core solvency
+        /// invariant at every point in its schedule: the vested amount can never
+        /// exceed the deposit, and `claimable <= vested`.
+        #[test]
+        fn prop_vested_never_exceeds_deposit(params in valid_params()) {
+            let env = new_env();
+            env.mock_all_auths();
+            let (token, sender, recipient, client) = setup(&env);
+            token.mint(&sender, params.amount);
+
+            let id = create(
+                &env,
+                &client,
+                &sender,
+                &recipient,
+                &token.id,
+                params.amount,
+                params.start,
+                params.end,
+                params.cliff,
+            );
+
+            let span = params.end - params.start;
+            let checkpoints = [
+                params.start,
+                params.cliff,
+                params.start + span / 2,
+                params.end,
+                params.end + 1_000,
+            ];
+            for t in checkpoints {
+                set_time(&env, t);
+                let vested = client.vested(&id);
+                let claimable = client.claimable(&id);
+                prop_assert!(vested >= 0, "negative vested {} at t={}", vested, t);
+                prop_assert!(
+                    vested <= params.amount,
+                    "vested {} exceeds deposit {} at t={}",
+                    vested,
+                    params.amount,
+                    t
+                );
+                prop_assert!(
+                    claimable <= vested,
+                    "claimable {} exceeds vested {} at t={}",
+                    claimable,
+                    vested,
+                    t
+                );
+            }
+
+            set_time(&env, params.end);
+            prop_assert_eq!(client.vested(&id), params.amount);
+        }
+
+        /// Invalid argument combinations must always surface as the expected
+        /// typed `StreamError` and never panic. Valid combinations must produce
+        /// a stream that upholds the vested-amount invariant.
+        #[test]
+        fn prop_invalid_combinations_return_typed_errors(params in arbitrary_params()) {
+            let env = new_env();
+            env.mock_all_auths();
+            let (token, sender, recipient, client) = setup(&env);
+            let no_metadata = empty_string(&env);
+            if params.amount > 0 {
+                token.mint(&sender, params.amount);
+            }
+
+            let result = client.try_create_stream(
+                &sender,
+                &recipient,
+                &token.id,
+                &params.amount,
+                &params.start,
+                &params.end,
+                &params.cliff,
+                &no_metadata,
+                &no_metadata,
+            );
+
+            let structurally_valid = params.amount > 0
+                && params.end > params.start
+                && params.cliff >= params.start
+                && params.cliff <= params.end;
+
+            if structurally_valid {
+                let id = result
+                    .expect("valid arguments must not fail at invocation")
+                    .expect("valid arguments must return a stream id");
+                set_time(&env, params.end);
+                prop_assert!(client.vested(&id) <= params.amount);
+            } else {
+                // Mirror the contract's validation order to name the exact code.
+                let expected = if params.amount <= 0 {
+                    StreamError::InvalidAmount
+                } else if params.end <= params.start {
+                    StreamError::InvalidTimeRange
+                } else {
+                    StreamError::InvalidCliff
+                };
+                prop_assert_eq!(result, Err(Ok(expected)));
+            }
+        }
+    }
 }
