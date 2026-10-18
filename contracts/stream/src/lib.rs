@@ -31,6 +31,7 @@ pub enum StreamError {
     AlreadyInitialized = 9,
     TreasuryNotSet = 10,
     MetadataTooLong = 11,
+    InvalidStartTime = 12,
 }
 
 /// A single linear payment stream. Tokens are locked in the contract and vest
@@ -164,6 +165,9 @@ impl StreamContract {
     /// label, an invoice or grant id). Pass empty strings to omit them; they are
     /// capped at [`MAX_LABEL_LEN`] and [`MAX_REFERENCE_LEN`] bytes so the stream's
     /// rent stays predictable.
+    ///
+    /// `start_time` must not be in the past: it has to be at or after the current
+    /// ledger timestamp, otherwise [`StreamError::InvalidStartTime`] is returned.
     pub fn create_stream(
         env: Env,
         sender: Address,
@@ -180,6 +184,9 @@ impl StreamContract {
 
         if amount <= 0 {
             return Err(StreamError::InvalidAmount);
+        }
+        if start_time < env.ledger().timestamp() {
+            return Err(StreamError::InvalidStartTime);
         }
         if end_time <= start_time {
             return Err(StreamError::InvalidTimeRange);

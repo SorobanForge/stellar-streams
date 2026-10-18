@@ -209,6 +209,53 @@ fn test_invalid_parameters() {
 }
 
 #[test]
+fn test_start_time_in_the_past_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+    let no_metadata = empty_string(&env);
+
+    // Move the ledger clock forward so a `start_time` can be genuinely past.
+    advance_time(&env, 500);
+
+    assert_eq!(
+        client.try_create_stream(
+            &sender,
+            &recipient,
+            &token.id,
+            &1000,
+            &499,
+            &1500,
+            &499,
+            &no_metadata,
+            &no_metadata
+        ),
+        Err(Ok(StreamError::InvalidStartTime)),
+    );
+
+    // The rejection happens before any tokens move and before an id is handed out.
+    assert_eq!(token.balance(&sender), 1000);
+    assert_eq!(token.balance(&client.address), 0);
+    assert_eq!(client.next_stream_id(), 1);
+}
+
+#[test]
+fn test_start_time_equal_to_now_accepted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    // `start_time == ledger timestamp` is the inclusive boundary and must pass.
+    advance_time(&env, 500);
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 500, 1500, 500);
+
+    assert_eq!(id, 1);
+    assert_eq!(token.balance(&client.address), 1000);
+}
+
+#[test]
 fn test_stream_not_found() {
     let env = Env::default();
     env.mock_all_auths();
@@ -273,7 +320,7 @@ fn test_fee_cap_boundary() {
     // Test 1: fee_bps == 1000 (the 10% cap) withdraws correctly.
     client.initialize(&admin, &treasury, &1000); // 10% fee
     let id = create(&env, &client, &sender, &recipient, &token.id, 10000, 0, 10000, 0);
-    advance_time(&env, 1000);
+    advance_time(&env, 10000);
     // 10% of 10000 = 1000 to treasury, 9000 to recipient.
     assert_eq!(client.withdraw(&id), 9000);
     assert_eq!(token.balance(&recipient), 9000);
@@ -287,32 +334,34 @@ fn test_fee_cap_boundary() {
     assert_eq!(res, Err(Ok(StreamError::InvalidFee)));
 
     // Test 3: cliff_time == end_time releases everything at end_time.
-    let client3 = register(&env);
     let (token3, sender3, recipient3, client3_) = setup(&env);
     token3.mint(&sender3, 1000);
     let admin3 = account(&env);
     let treasury3 = account(&env);
     client3_.initialize(&admin3, &treasury3, &100);
-    let id3 = create(&env, &client3_, &sender3, &recipient3, &token3.id, 1000, 0, 1000, 0);
-    // cliff_time == end_time == 1000, so at t=0 nothing is vested, at t=1000 everything is vested.
+    let now3 = env.ledger().timestamp();
+    let id3 =
+        create(&env, &client3_, &sender3, &recipient3, &token3.id, 1000, now3, now3 + 1000, now3);
+    // Nothing is vested at the start; the whole schedule vests by end_time.
     assert_eq!(client3_.claimable(&id3), 0);
     advance_time(&env, 1000);
     assert_eq!(client3_.claimable(&id3), 1000);
-    assert_eq!(client3_.withdraw(&id3), 900); // 10% fee
-    assert_eq!(token3.balance(&recipient3), 900);
-    assert_eq!(token3.balance(&treasury3), 100);
+    assert_eq!(client3_.withdraw(&id3), 990); // 1% fee
+    assert_eq!(token3.balance(&recipient3), 990);
+    assert_eq!(token3.balance(&treasury3), 10);
 
     // Test 4: withdrawing the full amount twice returns NothingToWithdraw the second time.
-    let client4 = register(&env);
     let (token4, sender4, recipient4, client4_) = setup(&env);
     token4.mint(&sender4, 1000);
     let admin4 = account(&env);
     let treasury4 = account(&env);
     client4_.initialize(&admin4, &treasury4, &100);
-    let id4 = create(&env, &client4_, &sender4, &recipient4, &token4.id, 1000, 0, 1000, 0);
+    let now4 = env.ledger().timestamp();
+    let id4 =
+        create(&env, &client4_, &sender4, &recipient4, &token4.id, 1000, now4, now4 + 1000, now4);
     advance_time(&env, 1000);
     // First withdraw: full amount minus fee.
-    assert_eq!(client4_.withdraw(&id4), 900);
+    assert_eq!(client4_.withdraw(&id4), 990);
     // Second withdraw: nothing left to withdraw.
     assert!(client4_.try_withdraw(&id4).is_err());
 }

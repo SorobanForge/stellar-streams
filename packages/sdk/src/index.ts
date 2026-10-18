@@ -96,7 +96,8 @@ export type StreamErrorCode =
   | 'ALREADY_CANCELLED'
   | 'ALREADY_INITIALIZED'
   | 'TREASURY_NOT_SET'
-  | 'METADATA_TOO_LONG';
+  | 'METADATA_TOO_LONG'
+  | 'INVALID_START_TIME';
 
 /** Stable identifiers for the splits contract's `SplitError` enum. */
 export type SplitErrorCode =
@@ -124,6 +125,7 @@ const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
   9: 'ALREADY_INITIALIZED',
   10: 'TREASURY_NOT_SET',
   11: 'METADATA_TOO_LONG',
+  12: 'INVALID_START_TIME',
 };
 
 /**

@@ -78,6 +78,7 @@ cancellation timestamp, not the one it created the stream with.
 | 9 | `AlreadyInitialized` | A second `initialize` call — the presence of `DataKey::Admin` is the guard. |
 | 10 | `TreasuryNotSet` | `withdraw` when the fee is non-zero but no treasury address is stored. |
 | 11 | `MetadataTooLong` | `create_stream` when `label.len() > 64` or `reference.len() > 128`. Checked with the other arguments, before any token moves. |
+| 12 | `InvalidStartTime` | `create_stream` with `start_time < env.ledger().timestamp()`. A `start_time` equal to the current ledger time is accepted. Checked before any token moves. |
 
 `STREAM_ERROR_CODES` in `packages/sdk/src/index.ts` is the one place these
 numbers are named on the client side; codes outside that table fall back to the

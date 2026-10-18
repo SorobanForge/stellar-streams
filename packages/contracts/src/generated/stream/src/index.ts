@@ -79,7 +79,8 @@ export const StreamError = {
   8: {message:"AlreadyCancelled"},
   9: {message:"AlreadyInitialized"},
   10: {message:"TreasuryNotSet"},
-  11: {message:"MetadataTooLong"}
+  11: {message:"MetadataTooLong"},
+  12: {message:"InvalidStartTime"}
 }
 
 
