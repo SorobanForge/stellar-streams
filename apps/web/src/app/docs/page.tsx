@@ -184,7 +184,8 @@ pnpm build`}
           <div className="rounded-xl border border-slate-900 bg-slate-950/20 p-5">
             <h4 className="text-sm font-bold text-white">packages/wallets</h4>
             <p className="mt-1 text-xs text-slate-400">
-              Unified React providers and hooks wrapping Freighter, Albedo, Hana, and Rabet wallets.
+              Unified React providers and hooks wrapping Freighter, xBull, Albedo, Hana, and Rabet
+              wallets.
             </p>
           </div>
           <div className="rounded-xl border border-slate-900 bg-slate-950/20 p-5">

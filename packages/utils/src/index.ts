@@ -23,6 +23,41 @@ function assertDecimals(decimals: number): void {
 }
 
 /**
+ * `10n ** BigInt(decimals)` for every legal `decimals` value, computed once.
+ * Re-evaluating the exponentiation on each parse dominated its cost
+ * (see `index.bench.ts`).
+ */
+const POWERS_OF_TEN: readonly bigint[] = Array.from(
+  { length: 39 },
+  (_, exponent) => 10n ** BigInt(exponent),
+);
+
+/**
+ * True when `raw` is exactly `-?digits*.digits*` with at least one character,
+ * accepting the same shapes as `^-?\d*(\.\d*)?$` while skipping the regex and
+ * the intermediate string allocations. A lone `-` or `.` is not an amount.
+ */
+function isPlainDecimal(raw: string): boolean {
+  const length = raw.length;
+  if (length === 0) return false;
+
+  let index = raw.charCodeAt(0) === 45 /* '-' */ ? 1 : 0;
+  for (; index < length; index++) {
+    const code = raw.charCodeAt(index);
+    if (code >= 48 /* '0' */ && code <= 57 /* '9' */) continue;
+    if (code !== 46 /* '.' */) return false;
+    // Everything after the decimal point has to be a digit.
+    for (index++; index < length; index++) {
+      const digit = raw.charCodeAt(index);
+      if (digit < 48 || digit > 57) return false;
+    }
+    break;
+  }
+
+  return raw !== '-' && raw !== '.';
+}
+
+/**
  * Formats a raw on-chain token amount (the smallest unit) into a human-readable
  * string using the token's `decimals`, preserving precision for values larger
  * than `Number.MAX_SAFE_INTEGER`. Read `decimals` from the token contract
@@ -53,16 +88,19 @@ export function formatTokenAmount(raw: bigint | number | string, decimals: numbe
 export function parseTokenAmount(amount: string | number, decimals: number): bigint {
   assertDecimals(decimals);
   const raw = typeof amount === 'number' ? amount.toString() : amount.trim();
-  if (!/^-?\d*(\.\d*)?$/.test(raw) || raw === '' || raw === '.' || raw === '-') {
+  if (!isPlainDecimal(raw)) {
     throw new Error(`Invalid token amount: ${String(amount)}`);
   }
 
-  const negative = raw.startsWith('-');
+  const negative = raw.charCodeAt(0) === 45; // '-'
   const unsigned = negative ? raw.slice(1) : raw;
-  const [whole = '0', fraction = ''] = unsigned.split('.');
-  const paddedFraction = fraction.padEnd(decimals, '0').slice(0, decimals);
+  const pointIndex = unsigned.indexOf('.');
+  const whole = pointIndex === -1 ? unsigned : unsigned.slice(0, pointIndex);
+  const fraction = pointIndex === -1 ? '' : unsigned.slice(pointIndex + 1);
+  const paddedFraction =
+    fraction.length >= decimals ? fraction.slice(0, decimals) : fraction.padEnd(decimals, '0');
 
-  const result = BigInt(whole || '0') * 10n ** BigInt(decimals) + BigInt(paddedFraction || '0');
+  const result = BigInt(whole || '0') * POWERS_OF_TEN[decimals] + BigInt(paddedFraction || '0');
   return negative ? -result : result;
 }
 

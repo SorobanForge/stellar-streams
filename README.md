@@ -57,7 +57,7 @@ stellar/
 │   ├── types/                # @stellar-starter-kit/types   — shared domain types
 │   ├── utils/                # @stellar-starter-kit/utils   — precise stroop & vesting math
 │   ├── hooks/                # @stellar-starter-kit/hooks   — React hooks (useStream)
-│   ├── wallets/              # @stellar-starter-kit/wallets — Freighter/Albedo/Rabet/Hana
+│   ├── wallets/              # @stellar-starter-kit/wallets — Freighter/xBull/Albedo/Rabet/Hana
 │   ├── contracts/            # generated Soroban TS bindings
 │   └── ui/                   # shared UI primitives
 ├── apps/

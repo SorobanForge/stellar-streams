@@ -79,7 +79,7 @@ formula lives in `contracts/stream/src/lib.rs` and is mirrored in TypeScript.
 | `types`     | `Stream`, `StreamConfig`, `CreateStreamParams`, status derivation.         |
 | `utils`     | BigInt stroop formatting/parsing, duration formatting, vesting math.       |
 | `hooks`     | `useStream` — loads a stream + claimable balance with optional polling.    |
-| `wallets`   | Unified React context over Freighter, Albedo, Rabet, and Hana.             |
+| `wallets`   | Unified React context over Freighter, xBull, Albedo, Rabet, and Hana.      |
 | `ui`        | Shared UI primitives and the Tailwind class helper.                        |
 | `contracts` | Generated Soroban TypeScript bindings plus network constants.              |
 
