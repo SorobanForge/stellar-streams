@@ -19,7 +19,9 @@ const scenarios = [
 describe('recorded Soroban RPC fixtures', () => {
   for (const scenario of scenarios) {
     it(`replays the recorded ${scenario.id} response`, async () => {
-      const fixture = JSON.parse(await readFile(resolve(fixtureDir, `${scenario.id}.json`), 'utf8')) as {
+      const fixture = JSON.parse(
+        await readFile(resolve(fixtureDir, `${scenario.id}.json`), 'utf8'),
+      ) as {
         schemaVersion: number;
         scenario: string;
         request: { method: string };

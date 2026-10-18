@@ -9,7 +9,11 @@ use soroban_sdk::{
 #[repr(u32)]
 pub enum EscrowError {
     EscrowNotFound = 1,
-    EscrowAlreadyExists = 2,
+    // 2 was `EscrowAlreadyExists`, returned by `create_escrow` while ids were
+    // caller-supplied. The contract now assigns ids, so a creation can no
+    // longer collide and the variant is unreachable. The discriminant is
+    // retired rather than reused so every other on-chain error code keeps its
+    // value.
     InvalidAmount = 3,
     UnauthorizedOperation = 4,
     InvalidStateTransition = 5,
@@ -45,6 +49,7 @@ pub struct Escrow {
 #[contracttype]
 pub enum DataKey {
     Escrow(u64),
+    NextId,
 }
 
 const BUMP_THRESHOLD: u32 = 17_280; // ~1 day of ledgers
@@ -105,28 +110,27 @@ pub struct EscrowContract;
 
 #[contractimpl]
 impl EscrowContract {
-    /// Create a new escrow agreement. Initial status is Created (unfunded).
+    /// Create a new escrow agreement. The contract assigns the id — the first
+    /// escrow is `1` and every successful creation increments the counter — and
+    /// returns it. Initial status is Created (unfunded).
     pub fn create_escrow(
         env: Env,
-        id: u64,
         payer: Address,
         payee: Address,
         arbiter: Address,
         token: Address,
         amount: i128,
         deadline: u64,
-    ) -> Result<(), EscrowError> {
-        let key = DataKey::Escrow(id);
-        if env.storage().persistent().has(&key) {
-            return Err(EscrowError::EscrowAlreadyExists);
-        }
-
+    ) -> Result<u64, EscrowError> {
         if amount <= 0 {
             return Err(EscrowError::InvalidAmount);
         }
 
         payer.require_auth();
 
+        // Everything that can reject the call has run, so the counter is only
+        // incremented by a creation that will be stored.
+        let id = next_id(&env);
         let escrow = Escrow {
             id,
             payer: payer.clone(),
@@ -138,12 +142,14 @@ impl EscrowContract {
             status: EscrowStatus::Created,
         };
 
+        let key = DataKey::Escrow(id);
         env.storage().persistent().set(&key, &escrow);
         env.storage().persistent().extend_ttl(&key, BUMP_THRESHOLD, BUMP_LIMIT);
+        env.storage().instance().extend_ttl(BUMP_THRESHOLD, BUMP_LIMIT);
 
         EscrowCreated { id, payer, amount }.publish(&env);
 
-        Ok(())
+        Ok(id)
     }
 
     /// Fund the escrow by transferring the specified amount of tokens from payer to this contract.
@@ -285,6 +291,17 @@ impl EscrowContract {
         let key = DataKey::Escrow(id);
         env.storage().persistent().get(&key)
     }
+
+    /// The id that will be assigned to the next escrow.
+    pub fn next_escrow_id(env: Env) -> u64 {
+        env.storage().instance().get(&DataKey::NextId).unwrap_or(1)
+    }
+}
+
+fn next_id(env: &Env) -> u64 {
+    let id: u64 = env.storage().instance().get(&DataKey::NextId).unwrap_or(1);
+    env.storage().instance().set(&DataKey::NextId, &(id + 1));
+    id
 }
 
 mod test;

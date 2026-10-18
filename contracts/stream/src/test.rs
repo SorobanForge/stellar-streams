@@ -1,11 +1,14 @@
 #![cfg(test)]
 #![allow(elided_lifetimes_in_paths, mismatched_lifetime_syntaxes)]
 use super::*;
-use soroban_sdk::{testutils::Events as _, Env, Event, String, Vec};
+use soroban_sdk::{
+    testutils::{Events as _, Ledger as _},
+    Env, Event, String, Vec,
+};
 
 #[path = "../../test-support/test_support.rs"]
 mod support;
-use support::{account, advance_time, empty_string, reentry_rejected, HostileToken, TestToken};
+use support::{account, advance_time, empty_string, TestToken};
 
 fn register(env: &Env) -> StreamContractClient<'_> {
     StreamContractClient::new(env, &env.register(StreamContract, ()))
@@ -94,6 +97,33 @@ fn test_linear_vesting_and_withdraw() {
 }
 
 #[test]
+fn test_withdraw_keeps_instance_config_alive() {
+    let env = Env::default();
+    env.mock_all_auths();
+    // Start every entry with a long TTL so the token survives the ledger jumps
+    // below; the instance then only outlives that TTL if a call bumps it.
+    env.ledger().with_mut(|l| {
+        l.min_persistent_entry_ttl = 600_000;
+        l.max_entry_ttl = 3_000_000;
+    });
+    let (token, sender, recipient, client) = setup(&env);
+    let admin = account(&env);
+    client.initialize(&admin, &account(&env), &0);
+    token.mint(&sender, 1000);
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 500);
+
+    // Move close enough to expiry that the bump threshold is crossed, then
+    // withdraw, which must extend the instance entry.
+    env.ledger().with_mut(|l| l.sequence_number = 590_000);
+    assert_eq!(client.withdraw(&id), 500);
+
+    // Past the original expiry, the config is still readable.
+    env.ledger().with_mut(|l| l.sequence_number = 650_000);
+    assert!(client.get_config().is_some());
+}
+
+#[test]
 fn test_cliff_blocks_early_withdrawal() {
     let env = Env::default();
     env.mock_all_auths();
@@ -146,6 +176,41 @@ fn test_cancel_refunds_unvested_and_keeps_vested() {
 
     let stream = client.get_stream(&id).unwrap();
     assert!(stream.cancelled);
+}
+
+#[test]
+fn test_pause_freezes_accrual_until_resumed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    advance_time(&env, 250);
+    assert_eq!(client.claimable(&id), 250);
+
+    // Pausing freezes accrual and blocks withdrawal.
+    client.pause(&id);
+    advance_time(&env, 500);
+    assert_eq!(client.claimable(&id), 250);
+    assert_eq!(client.try_withdraw(&id), Err(Ok(StreamError::StreamPaused)));
+
+    // Resuming folds the paused window out of the schedule.
+    client.resume(&id);
+    assert_eq!(client.claimable(&id), 250);
+    advance_time(&env, 250);
+    assert_eq!(client.claimable(&id), 500);
+    assert_eq!(client.withdraw(&id), 500);
+    assert_eq!(token.balance(&recipient), 500);
+
+    // Both calls are idempotent.
+    client.resume(&id);
+    assert_eq!(client.claimable(&id), 0);
+
+    let stream = client.get_stream(&id).unwrap();
+    assert!(stream.paused_at.is_none());
+    assert_eq!(stream.total_paused, 500);
 }
 
 #[test]
@@ -379,8 +444,8 @@ fn test_fee_cap_boundary() {
     client4_.initialize(&admin4, &treasury4, &1000);
     let id4 = create(&env, &client4_, &sender4, &recipient4, &token4.id, 1000, 0, 1000, 0);
     advance_time(&env, 1000);
-    // First withdraw: full amount minus fee.
-    assert_eq!(client4_.withdraw(&id4), 990);
+    // First withdraw: full amount minus fee (10% of 1000).
+    assert_eq!(client4_.withdraw(&id4), 900);
     // Second withdraw: nothing left to withdraw.
     assert!(client4_.try_withdraw(&id4).is_err());
 }
@@ -634,6 +699,8 @@ fn test_create_streams_creates_all_in_order() {
             label: no_metadata.clone(),
             reference: no_metadata.clone(),
             cancelled: false,
+            paused_at: None,
+            total_paused: 0,
         },
     );
     assert_eq!(client.get_stream(&2).unwrap().recipient, bob);

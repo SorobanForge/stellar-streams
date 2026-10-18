@@ -20,16 +20,16 @@ Labels are organized into six categories to help organize, prioritize, and route
 
 Describes the nature of the work.
 
-| Label | Color | Description | Use When |
-| --- | --- | --- | --- |
-| `type: bug` | 🔴 Red | Something isn't working | A defect is reported |
-| `type: feature` | 🔵 Cyan | New features or enhancements | New capability requested |
-| `type: documentation` | 🔵 Blue | Docs improvements | Docs missing/outdated |
-| `type: chore` | ⚫ Gray | Repository maintenance | Dependencies, build scripts |
-| `type: performance` | 🔵 Light Blue | Performance improvements | Optimizations needed |
-| `type: security` | 🔴 Dark Red | Security issues | Vulnerability found |
-| `type: refactor` | 🟣 Purple | Code structure changes | Clarity/maintainability |
-| `type: test` | 🔴 Light Red | Test improvements | Coverage needed |
+| Label                 | Color         | Description                  | Use When                    |
+| --------------------- | ------------- | ---------------------------- | --------------------------- |
+| `type: bug`           | 🔴 Red        | Something isn't working      | A defect is reported        |
+| `type: feature`       | 🔵 Cyan       | New features or enhancements | New capability requested    |
+| `type: documentation` | 🔵 Blue       | Docs improvements            | Docs missing/outdated       |
+| `type: chore`         | ⚫ Gray       | Repository maintenance       | Dependencies, build scripts |
+| `type: performance`   | 🔵 Light Blue | Performance improvements     | Optimizations needed        |
+| `type: security`      | 🔴 Dark Red   | Security issues              | Vulnerability found         |
+| `type: refactor`      | 🟣 Purple     | Code structure changes       | Clarity/maintainability     |
+| `type: test`          | 🔴 Light Red  | Test improvements            | Coverage needed             |
 
 **Example:** A user reports that the wallet connection hook fails on Firefox → `type: bug`
 
@@ -37,19 +37,19 @@ Describes the nature of the work.
 
 Indicates which codebase area or package is affected.
 
-| Label | Description |
-|-------|-------------|
-| `area: cli` | Packages/cli command-line tools and scripts |
-| `area: config` | Packages/config configuration system |
-| `area: contracts` | Packages/contracts Soroban smart contracts |
-| `area: core` | Packages/core core logic and connections |
-| `area: hooks` | Packages/hooks React hooks and state management |
-| `area: sdk` | Packages/sdk developer client modules |
-| `area: testing` | Packages/testing mock environments and simulators |
-| `area: ui` | Packages/ui Tailwind UI components |
-| `area: utils` | Packages/utils helpers and converters |
-| `area: wallets` | Packages/wallets wallet adapter integrations |
-| `area: web` | Apps/web Next.js views and API routes |
+| Label             | Description                                       |
+| ----------------- | ------------------------------------------------- |
+| `area: cli`       | Packages/cli command-line tools and scripts       |
+| `area: config`    | Packages/config configuration system              |
+| `area: contracts` | Packages/contracts Soroban smart contracts        |
+| `area: core`      | Packages/core core logic and connections          |
+| `area: hooks`     | Packages/hooks React hooks and state management   |
+| `area: sdk`       | Packages/sdk developer client modules             |
+| `area: testing`   | Packages/testing mock environments and simulators |
+| `area: ui`        | Packages/ui Tailwind UI components                |
+| `area: utils`     | Packages/utils helpers and converters             |
+| `area: wallets`   | Packages/wallets wallet adapter integrations      |
+| `area: web`       | Apps/web Next.js views and API routes             |
 
 **Example:** A dropdown component doesn't render correctly → `area: ui`
 
@@ -57,12 +57,12 @@ Indicates which codebase area or package is affected.
 
 Reflects business and product importance.
 
-| Label | Color | Definition | Timeline |
-| --- | --- | --- | --- |
-| `priority: critical (p0)` | 🔴 Dark Red | Blocks releases or breaks core APIs | Fix immediately |
-| `priority: high (p1)` | 🔴 Orange | Important feature or high-visibility bug | 1–2 weeks |
-| `priority: medium (p2)` | 🟡 Yellow | Standard issues or enhancements | Within 1 month |
-| `priority: low (p3)` | 🟢 Green | Minor fixes or nice-to-haves | When bandwidth available |
+| Label                     | Color       | Definition                               | Timeline                 |
+| ------------------------- | ----------- | ---------------------------------------- | ------------------------ |
+| `priority: critical (p0)` | 🔴 Dark Red | Blocks releases or breaks core APIs      | Fix immediately          |
+| `priority: high (p1)`     | 🔴 Orange   | Important feature or high-visibility bug | 1–2 weeks                |
+| `priority: medium (p2)`   | 🟡 Yellow   | Standard issues or enhancements          | Within 1 month           |
+| `priority: low (p3)`      | 🟢 Green    | Minor fixes or nice-to-haves             | When bandwidth available |
 
 **Example:** The escrow contract has a logic error that loses user funds → `priority: critical (p0)`
 
@@ -70,29 +70,29 @@ Reflects business and product importance.
 
 Tracks progress through the contribution lifecycle (see [Issue Lifecycle](#issue-lifecycle--status)).
 
-| Label | Color | Meaning |
-|-------|-------|---------|
-| `status: triaged` | 🟢 Light Green | Acknowledged, verified, and prioritized by maintainers |
-| `status: in-progress` | 🔴 Hot Pink | Work is active or currently being drafted |
-| `status: review-needed` | 🟡 Yellow | Implementation complete; awaiting review approval |
-| `status: blocked` | 🔴 Red | Work is blocked by an external dependency or another issue |
+| Label                   | Color          | Meaning                                                    |
+| ----------------------- | -------------- | ---------------------------------------------------------- |
+| `status: triaged`       | 🟢 Light Green | Acknowledged, verified, and prioritized by maintainers     |
+| `status: in-progress`   | 🔴 Hot Pink    | Work is active or currently being drafted                  |
+| `status: review-needed` | 🟡 Yellow      | Implementation complete; awaiting review approval          |
+| `status: blocked`       | 🔴 Red         | Work is blocked by an external dependency or another issue |
 
 **Related Status Labels:**
 
-| Label | Color | Meaning |
-|-------|-------|---------|
-| `status: help-wanted` | 🟢 Teal | Extra attention or community help is requested |
-| `status: good-first-issue` | 🟣 Purple | Good starting point for new contributors |
+| Label                      | Color     | Meaning                                        |
+| -------------------------- | --------- | ---------------------------------------------- |
+| `status: help-wanted`      | 🟢 Teal   | Extra attention or community help is requested |
+| `status: good-first-issue` | 🟣 Purple | Good starting point for new contributors       |
 
 ### Difficulty Labels (`difficulty:`)
 
 Signals the expected effort and required expertise.
 
-| Label | Color | Qualifications | Example |
-| --- | --- | --- | --- |
-| `difficulty: easy` | 🟢 Light Green | Simple; minimal knowledge | Update README; fix typo |
-| `difficulty: medium` | 🟡 Yellow | Standard task; basic context | Add utility; fix localized bug |
-| `difficulty: hard` | 🟠 Light Orange | Complex changes; deep understanding | Redesign state management |
+| Label                | Color           | Qualifications                      | Example                        |
+| -------------------- | --------------- | ----------------------------------- | ------------------------------ |
+| `difficulty: easy`   | 🟢 Light Green  | Simple; minimal knowledge           | Update README; fix typo        |
+| `difficulty: medium` | 🟡 Yellow       | Standard task; basic context        | Add utility; fix localized bug |
+| `difficulty: hard`   | 🟠 Light Orange | Complex changes; deep understanding | Redesign state management      |
 
 **Examples by Difficulty:**
 
@@ -104,10 +104,10 @@ Signals the expected effort and required expertise.
 
 Indicates integration points with the Stellar ecosystem.
 
-| Label | Description |
-|-------|-------------|
-| `ecosystem: soroban` | Soroban WebAssembly smart contract interactions |
-| `ecosystem: horizon` | Horizon server endpoints and REST transactions API |
+| Label                   | Description                                        |
+| ----------------------- | -------------------------------------------------- |
+| `ecosystem: soroban`    | Soroban WebAssembly smart contract interactions    |
+| `ecosystem: horizon`    | Horizon server endpoints and REST transactions API |
 | `ecosystem: quickstart` | Stellar quickstart docker container configurations |
 
 ---
@@ -150,6 +150,7 @@ All issues follow a five-stage lifecycle:
 ### Detailed States
 
 #### 1. **Opened**
+
 - A new issue is created by a community member or maintainer.
 - **Apply immediately:**
   - `type: *` (required)
@@ -158,6 +159,7 @@ All issues follow a five-stage lifecycle:
   - `status: triaged`, `priority: *`, `difficulty: *`
 
 #### 2. **Triaged**
+
 - A maintainer has reviewed and verified the issue.
 - **Steps:**
   1. Understand the problem and verify it can be reproduced.
@@ -170,18 +172,21 @@ All issues follow a five-stage lifecycle:
 - **If good for newcomers:** Add `status: good-first-issue`.
 
 #### 3. **In-Progress**
+
 - A contributor (community or maintainer) begins work.
 - **Assignment:** Use GitHub's "Assign" feature to claim the issue (prevents duplicate work).
 - **Apply:** `status: in-progress`.
 - **If work is blocked:** Change status to `status: blocked` and explain the blocker in a comment.
 
 #### 4. **Review-Needed**
+
 - The contributor has opened a pull request and implementation is complete.
 - **On the PR:** Add label `status: review-needed`.
 - **Link:** Reference the issue in the PR (`Closes #123`).
 - **Expectations:** A maintainer will review within response timeframe (see [Response Expectations](#response-expectations)).
 
 #### 5. **Closed**
+
 - The issue is resolved (PR merged, wontfix, duplicate, or external).
 - **Remove:** `status: triaged`, `status: in-progress`, `status: review-needed`.
 - **Preserve:** `type: *`, `area: *`, `priority: *`, `difficulty: *` for historical reference and searching.
@@ -196,7 +201,7 @@ All issues follow a five-stage lifecycle:
 
 1. **Read the issue:** Understand the title, description, steps to reproduce (for bugs), and desired behavior (for features).
 
-2. **Verify:** 
+2. **Verify:**
    - For bugs: Can you reproduce it? Is it a real issue or user error?
    - For features: Does it align with the project roadmap? Is it in scope?
    - For docs: Is the documentation actually missing or outdated?
@@ -209,8 +214,10 @@ All issues follow a five-stage lifecycle:
    - Assign `ecosystem: *` if applicable (soroban, horizon, quickstart).
 
 4. **Comment:** Write a triage summary:
+
    ```markdown
    **Triage Summary:**
+
    - **Type:** Bug in wallet connection
    - **Area:** Affected package(s): hooks, wallets
    - **Priority:** High (breaks desktop usage)
@@ -242,15 +249,15 @@ All issues follow a five-stage lifecycle:
 
 To maintain a healthy contributor experience, the project follows these response timeframes:
 
-| Issue Type | First Response | Action Expected |
-| --- | --- | --- |
-| **Bug (p0 critical)** | < 24 hours | Triage, confirm severity, identify assignee |
-| **Bug (p1 high)** | < 2 days | Triage and confirm severity |
-| **Bug (p2 medium)** | < 1 week | Review and triage |
-| **Bug (p3 low)** | < 2 weeks | Acknowledge |
-| **Feature Request (p1+)** | < 1 week | Discuss feasibility |
-| **Documentation** | < 2 weeks | Merge or provide feedback |
-| **PR Review** | < 3 days | Initial review |
+| Issue Type                | First Response | Action Expected                             |
+| ------------------------- | -------------- | ------------------------------------------- |
+| **Bug (p0 critical)**     | < 24 hours     | Triage, confirm severity, identify assignee |
+| **Bug (p1 high)**         | < 2 days       | Triage and confirm severity                 |
+| **Bug (p2 medium)**       | < 1 week       | Review and triage                           |
+| **Bug (p3 low)**          | < 2 weeks      | Acknowledge                                 |
+| **Feature Request (p1+)** | < 1 week       | Discuss feasibility                         |
+| **Documentation**         | < 2 weeks      | Merge or provide feedback                   |
+| **PR Review**             | < 3 days       | Initial review                              |
 
 ### Response Format
 
@@ -268,7 +275,8 @@ When responding to an issue:
 >
 > **Root cause:** The wallet adapter disconnects when the extension window loses focus.
 >
-> **Next steps:** 
+> **Next steps:**
+>
 > - [ ] Investigation: Reproduce on Firefox (currently macOS Chrome only)
 > - [ ] Fix: Update disconnect handler to persist connection state
 >
@@ -285,22 +293,25 @@ Labels are created and synchronized using the repository's label automation scri
 The `.github/labels.yml` file defines all labels. To sync them with your GitHub repository:
 
 1. **Install GitHub CLI:**
+
    ```bash
    # macOS (Homebrew)
    brew install gh
-   
+
    # Windows (Scoop)
    scoop install gh
-   
+
    # Or visit https://cli.github.com/
    ```
 
 2. **Authenticate with GitHub:**
+
    ```bash
    gh auth login
    ```
 
 3. **Run the sync script:**
+
    ```bash
    bash scripts/create-labels.sh
    ```
@@ -335,6 +346,7 @@ To add a new label:
 **Issue:** "Typo in error message: 'occured' should be 'occurred'"
 
 **Labels:**
+
 - `type: bug` — Corrects incorrect text
 - `area: web` — Error message appears in the web UI
 - `priority: low (p3)` — Cosmetic issue, no impact on functionality
@@ -342,6 +354,7 @@ To add a new label:
 - `status: triaged` — Ready for pickup
 
 **Triage Comment:**
+
 > Simple typo fix. Perfect for newcomers! Edit the error message string in `src/app/components/ErrorBoundary.tsx` line 42.
 
 ---
@@ -351,6 +364,7 @@ To add a new label:
 **Issue:** "Add pagination support to the user stream API endpoint"
 
 **Labels:**
+
 - `type: feature` — New capability
 - `area: sdk` — Affects SDK client
 - `priority: medium (p2)` — Useful enhancement, can wait
@@ -358,17 +372,20 @@ To add a new label:
 - `status: triaged` — Ready for design discussion and implementation
 
 **Triage Comment:**
+
 > Good feature request! We'll want pagination for scalability. Here's the scope:
-> 
+>
 > **Design Questions:**
+>
 > - Limit/offset or cursor-based pagination?
 > - Default page size? Max page size?
-> 
+>
 > **Implementation:**
+>
 > - Update query layer to support pagination
 > - Modify SDK endpoint to accept `limit`, `offset`, or `cursor`
 > - Add tests covering edge cases
-> 
+>
 > Feel free to comment with thoughts, or wait for us to finalize the design.
 
 ---
@@ -378,6 +395,7 @@ To add a new label:
 **Issue:** "Escrow contract fails to release funds with multiple payees"
 
 **Labels:**
+
 - `type: bug` — Defect in contract behavior
 - `area: contracts` — Soroban contract code
 - `ecosystem: soroban` — Smart contract interaction
@@ -386,17 +404,19 @@ To add a new label:
 - `status: triaged` — Ready for immediate action
 
 **Triage Comment:**
+
 > **🚨 Critical Issue:** Potential data loss. Reproduced in testnet.
 >
 > **Root Cause:** Contract release logic doesn't iterate payees correctly when checking authorization.
 >
 > **Scope:**
+>
 > - Fix payee iteration in `release()` function
 > - Add test case covering multiple payees
 > - Deploy patch to testnet for validation
 >
 > **Blocking:** Release v1.5 (scheduled for Friday)
-> 
+>
 > Assigning to @maintainer for immediate fix. This needs careful review before merge.
 
 ---
@@ -406,7 +426,7 @@ To add a new label:
 1. **Always apply `type:` first** — It's the primary classifier.
 2. **Be specific with `area:`** — An issue in `area: sdk` + `area: core` is clearer than just one.
 3. **Discuss ambiguous priority** — If it's unclear whether something is p1 or p2, default to p2 and let the team discuss.
-4. **Document blockers** — If an issue is blocked, explain *why* in a comment.
+4. **Document blockers** — If an issue is blocked, explain _why_ in a comment.
 5. **Update labels as context changes** — If new information emerges, adjust priority/difficulty accordingly.
 6. **Keep status labels clean** — Remove them when an issue is resolved; use type/area/priority for historical tracking.
 7. **Close duplicate issues respectfully** — Link to the primary issue and thank the reporter for the catch.

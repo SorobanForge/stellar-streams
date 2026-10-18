@@ -1,7 +1,10 @@
 #![cfg(test)]
 #![allow(elided_lifetimes_in_paths, mismatched_lifetime_syntaxes)]
 use super::*;
-use soroban_sdk::{testutils::Events as _, vec, Env, Event, IntoVal};
+use soroban_sdk::{
+    testutils::{storage::Instance as _, Events as _, Ledger},
+    vec, Env, Event, IntoVal,
+};
 
 #[path = "../../test-support/test_support.rs"]
 mod support;
@@ -23,7 +26,7 @@ fn test_escrow_lifecycle_release_by_payer() {
     let client = register(&env);
 
     // Create
-    client.create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
     let escrow = client.get_escrow(&1).unwrap();
     assert_eq!(escrow.status, EscrowStatus::Created);
 
@@ -53,7 +56,7 @@ fn test_escrow_lifecycle_release_by_arbiter() {
     token.mint(&payer, 1000);
     let client = register(&env);
 
-    client.create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
     client.fund_escrow(&1);
 
     // Release by arbiter
@@ -74,7 +77,7 @@ fn test_escrow_lifecycle_refund_by_payee() {
     token.mint(&payer, 1000);
     let client = register(&env);
 
-    client.create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
     client.fund_escrow(&1);
 
     // Refund by payee
@@ -95,7 +98,7 @@ fn test_escrow_lifecycle_refund_by_arbiter() {
     token.mint(&payer, 1000);
     let client = register(&env);
 
-    client.create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
     client.fund_escrow(&1);
 
     // Refund by arbiter
@@ -115,7 +118,7 @@ fn test_escrow_cancel_before_funding() {
     let arbiter = account(&env);
     let client = register(&env);
 
-    client.create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
 
     // Cancel by payer when Created (unfunded)
     client.cancel_escrow(&1, &payer);
@@ -134,7 +137,7 @@ fn test_escrow_cancel_after_deadline() {
     token.mint(&payer, 1000);
     let client = register(&env);
 
-    client.create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
     client.fund_escrow(&1);
 
     // Move the ledger past the deadline
@@ -158,7 +161,7 @@ fn test_escrow_cancel_before_deadline_fails() {
     token.mint(&payer, 1000);
     let client = register(&env);
 
-    client.create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
     client.fund_escrow(&1);
 
     // Still before the deadline
@@ -180,7 +183,7 @@ fn test_escrow_invalid_state_transitions() {
     token.mint(&payer, 1000);
     let client = register(&env);
 
-    client.create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
 
     // Try to release unfunded escrow -> should fail
     let res = client.try_release_escrow(&1, &payer);
@@ -212,7 +215,7 @@ fn test_escrow_unauthorized_operations() {
     token.mint(&payer, 1000);
     let client = register(&env);
 
-    client.create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
     client.fund_escrow(&1);
 
     // Unauthorized release (payee calls it) -> should fail
@@ -239,15 +242,15 @@ fn test_escrow_validation_failures() {
     let client = register(&env);
 
     // Invalid amount
-    let res = client.try_create_escrow(&1, &payer, &payee, &arbiter, &token.id, &0, &1000);
+    let res = client.try_create_escrow(&payer, &payee, &arbiter, &token.id, &0, &1000);
     assert_eq!(res, Err(Ok(EscrowError::InvalidAmount)));
 
-    // Successful creation
-    client.create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    // Negative amount
+    let res = client.try_create_escrow(&payer, &payee, &arbiter, &token.id, &-1, &1000);
+    assert_eq!(res, Err(Ok(EscrowError::InvalidAmount)));
 
-    // Duplicate ID creation
-    let res2 = client.try_create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
-    assert_eq!(res2, Err(Ok(EscrowError::EscrowAlreadyExists)));
+    // A valid amount succeeds and receives the first contract-assigned id.
+    assert_eq!(client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000), 1);
 }
 
 #[test]
@@ -267,7 +270,7 @@ fn test_escrow_events() {
     // transfer events.
 
     // Create
-    client.create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
     assert_eq!(
         env.events().all().filter_by_contract(&client.address),
         [EscrowCreated { id: 1, payer: payer.clone(), amount: 500 }.to_xdr(&env, &client.address)],
@@ -289,7 +292,7 @@ fn test_escrow_events() {
     );
 
     // Refund
-    client.create_escrow(&2, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
     client.fund_escrow(&2);
     client.refund_escrow(&2, &payee);
     assert_eq!(
@@ -299,7 +302,7 @@ fn test_escrow_events() {
     );
 
     // Cancel (unfunded)
-    client.create_escrow(&3, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
     client.cancel_escrow(&3, &payer);
     assert_eq!(
         env.events().all().filter_by_contract(&client.address),
@@ -322,7 +325,7 @@ fn hostile_escrow(
     let arbiter = account(env);
     token.mint(&payer, 1000);
     let client = register(env);
-    client.create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
     (token, payer, payee, arbiter, client)
 }
 
@@ -424,4 +427,151 @@ fn test_propagated_reentry_rolls_back_the_whole_release() {
     assert_eq!(token.balance(&payee), 0);
     assert_eq!(token.balance(&client.address), 500);
     assert_eq!(token.last_reentry(), None);
+}
+
+#[test]
+fn test_create_escrow_assigns_consecutive_ids() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    let client = register(&env);
+
+    // A fresh contract hands out id 1.
+    assert_eq!(client.next_escrow_id(), 1);
+
+    assert_eq!(client.create_escrow(&payer, &payee, &arbiter, &token.id, &100, &1000), 1);
+    assert_eq!(client.next_escrow_id(), 2);
+    assert_eq!(client.get_escrow(&1).unwrap().amount, 100);
+
+    assert_eq!(client.create_escrow(&payer, &payee, &arbiter, &token.id, &200, &1000), 2);
+    assert_eq!(client.next_escrow_id(), 3);
+    assert_eq!(client.get_escrow(&2).unwrap().amount, 200);
+
+    assert_eq!(client.create_escrow(&payer, &payee, &arbiter, &token.id, &300, &1000), 3);
+    assert_eq!(client.next_escrow_id(), 4);
+    assert_eq!(client.get_escrow(&3).unwrap().amount, 300);
+
+    // The returned id is the key the escrow is stored under.
+    for id in 1..=3u64 {
+        assert_eq!(client.get_escrow(&id).unwrap().id, id);
+    }
+
+    // The `created` event carries the id the contract assigned.
+    assert_eq!(client.create_escrow(&payer, &payee, &arbiter, &token.id, &400, &1000), 4);
+    assert_eq!(
+        env.events().all().filter_by_contract(&client.address),
+        [EscrowCreated { id: 4, payer: payer.clone(), amount: 400 }.to_xdr(&env, &client.address)],
+    );
+}
+
+#[test]
+fn test_create_escrow_identical_arguments_get_distinct_ids() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    let client = register(&env);
+
+    // With caller-supplied ids the second of these returned code 2
+    // (`EscrowAlreadyExists`). Creation can no longer collide, so both calls
+    // succeed and only the id differs.
+    let first_id = client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
+    let second_id = client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
+
+    assert_eq!(first_id, 1);
+    assert_eq!(second_id, 2);
+    assert_ne!(first_id, second_id);
+
+    let first = client.get_escrow(&first_id).unwrap();
+    let second = client.get_escrow(&second_id).unwrap();
+    assert_eq!(first.payer, second.payer);
+    assert_eq!(first.payee, second.payee);
+    assert_eq!(first.amount, second.amount);
+    assert_eq!(second.status, EscrowStatus::Created);
+}
+
+#[test]
+fn test_next_escrow_id_is_a_pure_view() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    let client = register(&env);
+
+    // Repeated reads return the same value and consume nothing.
+    assert_eq!(client.next_escrow_id(), 1);
+    assert_eq!(client.next_escrow_id(), 1);
+    assert_eq!(client.next_escrow_id(), 1);
+    assert_eq!(client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000), 1);
+
+    // Reading after a creation reports the stored counter and does not move it.
+    assert_eq!(client.next_escrow_id(), 2);
+    assert_eq!(client.next_escrow_id(), 2);
+    let stored: u64 = env
+        .as_contract(&client.address, || env.storage().instance().get(&DataKey::NextId).unwrap());
+    assert_eq!(stored, 2);
+
+    assert_eq!(client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000), 2);
+}
+
+#[test]
+fn test_failed_create_escrow_does_not_consume_id() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    let client = register(&env);
+
+    // A rejected creation leaves both the counter and storage untouched.
+    let res = client.try_create_escrow(&payer, &payee, &arbiter, &token.id, &0, &1000);
+    assert_eq!(res, Err(Ok(EscrowError::InvalidAmount)));
+    assert_eq!(client.next_escrow_id(), 1);
+    assert!(client.get_escrow(&1).is_none());
+
+    // The next successful creation receives the id the failed one would have.
+    assert_eq!(client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000), 1);
+    assert_eq!(client.next_escrow_id(), 2);
+}
+
+#[test]
+fn test_create_escrow_bumps_next_id_ttl() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    let client = register(&env);
+
+    assert_eq!(client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000), 1);
+
+    // Creation extends the instance entry that holds `DataKey::NextId` to
+    // `BUMP_LIMIT` ledgers.
+    let ttl_after_create = env.as_contract(&client.address, || env.storage().instance().get_ttl());
+    assert_eq!(ttl_after_create, BUMP_LIMIT);
+
+    // Leave almost the whole window behind: the entry drops below
+    // `BUMP_THRESHOLD`, so the next creation has to bump it, but it is still
+    // live and the counter still readable.
+    env.ledger().set_sequence_number(env.ledger().sequence() + BUMP_LIMIT - BUMP_THRESHOLD + 1);
+    let ttl_after_advance = env.as_contract(&client.address, || env.storage().instance().get_ttl());
+    assert!(ttl_after_advance < BUMP_THRESHOLD);
+    assert!(ttl_after_advance > 0);
+    assert_eq!(client.next_escrow_id(), 2);
+
+    // The next creation re-extends the same entry.
+    assert_eq!(client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000), 2);
+    let ttl_after_second_create =
+        env.as_contract(&client.address, || env.storage().instance().get_ttl());
+    assert_eq!(ttl_after_second_create, BUMP_LIMIT);
+    assert_eq!(client.next_escrow_id(), 3);
 }

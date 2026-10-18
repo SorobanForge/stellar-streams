@@ -20,7 +20,13 @@ const scenarios: Scenario[] = [
   { id: 'network', method: 'getNetwork', description: 'Network passphrase and protocol version.' },
   { id: 'latest-ledger', method: 'getLatestLedger', description: 'Latest ledger metadata.' },
 ];
-const fixtureDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'test', 'fixtures', 'rpc');
+const fixtureDir = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'test',
+  'fixtures',
+  'rpc',
+);
 const rpcUrl = process.env.SOROBAN_RPC_URL ?? 'https://soroban-testnet.stellar.org';
 
 async function checkFixtures(): Promise<void> {
@@ -32,7 +38,11 @@ async function checkFixtures(): Promise<void> {
     } catch {
       throw new Error(`Missing or invalid RPC fixture: ${scenario.id}.json`);
     }
-    const value = fixture as { scenario?: unknown; request?: { method?: unknown }; response?: object };
+    const value = fixture as {
+      scenario?: unknown;
+      request?: { method?: unknown };
+      response?: object;
+    };
     if (
       value.scenario !== scenario.id ||
       value.request?.method !== scenario.method ||
@@ -66,7 +76,10 @@ async function recordFixtures(): Promise<void> {
       request,
       response: body,
     };
-    await writeFile(resolve(fixtureDir, `${scenario.id}.json`), `${JSON.stringify(fixture, null, 2)}\n`);
+    await writeFile(
+      resolve(fixtureDir, `${scenario.id}.json`),
+      `${JSON.stringify(fixture, null, 2)}\n`,
+    );
     console.log(`Recorded ${scenario.id}.json`);
   }
 }

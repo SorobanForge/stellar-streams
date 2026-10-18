@@ -123,7 +123,7 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
-          arguments: --manifest-path contracts/Cargo.toml
+          manifest-path: contracts/Cargo.toml
           rust-version: stable
 
   build:

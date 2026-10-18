@@ -38,10 +38,6 @@ pub enum StreamError {
     InvalidAmount = 1,
     InvalidTimeRange = 2,
     InvalidCliff = 3,
-    /// Issue #182: withdraw was called while the stream is paused.
-    StreamPaused = 11,
-    /// Issue #182: reserved for future strict-idempotency variant.
-    NotPaused = 12,
     StreamNotFound = 4,
     NothingToWithdraw = 5,
     Unauthorized = 6,
@@ -55,6 +51,10 @@ pub enum StreamError {
     EmptyBatch = 13,
     BatchTooLarge = 14,
     BatchOverflow = 15,
+    /// Issue #182: `withdraw` was called while the stream is paused.
+    StreamPaused = 16,
+    /// Issue #182: reserved for future strict-idempotency variant.
+    NotPaused = 17,
 }
 
 /// A single linear payment stream. Tokens are locked in the contract and vest
@@ -205,7 +205,7 @@ impl StreamContract {
         admin.require_auth();
         let old_fee_bps: u32 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
         env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
-        FeeUpdated { old_fee_bps, new_fee_bps: fee_bps }.publish(&env);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
         Ok(())
     }
 
@@ -215,7 +215,7 @@ impl StreamContract {
             env.storage().instance().get(&DataKey::Admin).ok_or(StreamError::Unauthorized)?;
         admin.require_auth();
         env.storage().instance().set(&DataKey::Treasury, &treasury);
-        TreasuryUpdated { treasury }.publish(&env);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
         Ok(())
     }
 
@@ -366,6 +366,8 @@ impl StreamContract {
                 label: label.clone(),
                 reference: label.clone(),
                 cancelled: false,
+                paused_at: None,
+                total_paused: 0,
             };
 
             let key = DataKey::Stream(id);
@@ -395,9 +397,6 @@ impl StreamContract {
         let mut stream: Stream =
             env.storage().persistent().get(&key).ok_or(StreamError::StreamNotFound)?;
 
-        if stream.cancelled {
-            return Err(StreamError::StreamCancelled);
-        }
         if stream.paused_at.is_some() {
             return Err(StreamError::StreamPaused);
         }
@@ -421,6 +420,7 @@ impl StreamContract {
         stream.withdrawn += claimable;
         env.storage().persistent().set(&key, &stream);
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
 
         let token_client = token::Client::new(&env, &stream.token);
         if let Some(treasury) = treasury {
@@ -461,6 +461,7 @@ impl StreamContract {
 
         env.storage().persistent().set(&key, &stream);
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
 
         if unvested > 0 {
             let token_client = token::Client::new(&env, &stream.token);
@@ -477,13 +478,10 @@ impl StreamContract {
     /// Issue #182: pause accrual for `stream_id`. Payer-only. Idempotent.
     pub fn pause(env: Env, stream_id: u64) -> Result<(), StreamError> {
         let key = DataKey::Stream(stream_id);
-        let mut stream: Stream = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .ok_or(StreamError::StreamNotFound)?;
+        let mut stream: Stream =
+            env.storage().persistent().get(&key).ok_or(StreamError::StreamNotFound)?;
         if stream.cancelled {
-            return Err(StreamError::StreamCancelled);
+            return Err(StreamError::AlreadyCancelled);
         }
         stream.sender.require_auth();
         if stream.paused_at.is_some() {
@@ -493,6 +491,7 @@ impl StreamContract {
         stream.paused_at = Some(now);
         env.storage().persistent().set(&key, &stream);
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
         StreamPaused { id: stream_id, paused_at: now }.publish(&env);
         Ok(())
     }
@@ -500,13 +499,10 @@ impl StreamContract {
     /// Issue #182: resume accrual for `stream_id`. Payer-only. Idempotent.
     pub fn resume(env: Env, stream_id: u64) -> Result<(), StreamError> {
         let key = DataKey::Stream(stream_id);
-        let mut stream: Stream = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .ok_or(StreamError::StreamNotFound)?;
+        let mut stream: Stream =
+            env.storage().persistent().get(&key).ok_or(StreamError::StreamNotFound)?;
         if stream.cancelled {
-            return Err(StreamError::StreamCancelled);
+            return Err(StreamError::AlreadyCancelled);
         }
         stream.sender.require_auth();
         let Some(paused_at) = stream.paused_at else {
@@ -518,12 +514,9 @@ impl StreamContract {
         stream.paused_at = None;
         env.storage().persistent().set(&key, &stream);
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
-        StreamResumed {
-            id: stream_id,
-            resumed_at: now,
-            total_paused: stream.total_paused,
-        }
-        .publish(&env);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        StreamResumed { id: stream_id, resumed_at: now, total_paused: stream.total_paused }
+            .publish(&env);
         Ok(())
     }
     pub fn claimable(env: Env, stream_id: u64) -> Result<i128, StreamError> {
@@ -611,15 +604,18 @@ fn vested_amount(stream: &Stream, now: u64) -> i128 {
         Some(p) if now > p => (now.min(stream.end_time)).saturating_sub(p),
         _ => 0,
     };
-    let effective_elapsed = elapsed_secs
-        .saturating_sub(stream.total_paused)
-        .saturating_sub(active_pause_secs);
+    let effective_elapsed =
+        elapsed_secs.saturating_sub(stream.total_paused).saturating_sub(active_pause_secs);
     let duration = stream.end_time - stream.start_time;
     if duration == 0 {
         return stream.total_amount;
     }
     let vested = stream.total_amount * i128::from(effective_elapsed) / i128::from(duration);
-    if vested > stream.total_amount { stream.total_amount } else { vested }
+    if vested > stream.total_amount {
+        stream.total_amount
+    } else {
+        vested
+    }
 }
 
 fn next_id(env: &Env) -> u64 {
