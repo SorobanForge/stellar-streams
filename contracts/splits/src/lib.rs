@@ -18,6 +18,7 @@ pub enum SplitError {
     DuplicateRecipient = 5,
     SplitNotFound = 6,
     Unauthorized = 7,
+    ShareOverflow = 8,
 }
 
 /// An immutable, reusable split configuration: a set of recipients with
@@ -94,7 +95,7 @@ impl SplitsContract {
                     return Err(SplitError::DuplicateRecipient);
                 }
             }
-            total_shares += share;
+            total_shares = total_shares.checked_add(share).ok_or(SplitError::ShareOverflow)?;
         }
 
         let id = next_id(&env);

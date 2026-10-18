@@ -56,7 +56,8 @@ export const SplitError = {
   4: {message:"InvalidAmount"},
   5: {message:"DuplicateRecipient"},
   6: {message:"SplitNotFound"},
-  7: {message:"Unauthorized"}
+  7: {message:"Unauthorized"},
+  8: {message:"ShareOverflow"}
 }
 
 

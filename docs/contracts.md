@@ -183,6 +183,7 @@ paired and must be the same length. A share is a weight, not a percentage —
 |  5   | `DuplicateRecipient` | `create_split` when an address appears twice, in any position.                                                                                                                                                                  |
 |  6   | `SplitNotFound`      | `distribute` for an unregistered `split_id` (or an archived entry).                                                                                                                                                             |
 |  7   | `Unauthorized`       | **Defined but never returned.** Kept so existing codes keep their values. Authorization failures in this contract surface as a Soroban `Context` error from `require_auth()`, not as this code — a client must not wait for it. |
+|  8   | `ShareOverflow`      | `create_split` when the sum of all shares exceeds `u32::MAX` (4,294,967,295). The maximum supported `total_shares` is `u32::MAX`.                                                                                              |
 
 Rounding: each non-final recipient receives `amount * shares[i] / total_shares`
 (integer division, truncating) and the **final** recipient receives

@@ -139,6 +139,21 @@ pub struct StreamCancelled {
     pub refunded: i128,
 }
 
+/// Emitted when the admin changes the protocol fee.
+#[contractevent(topics = ["stream", "fee_set"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeUpdated {
+    pub old_fee_bps: u32,
+    pub new_fee_bps: u32,
+}
+
+/// Emitted when the admin changes the treasury address.
+#[contractevent(topics = ["stream", "treasury"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TreasuryUpdated {
+    pub treasury: Address,
+}
+
 #[contractevent]
 pub struct StreamPaused {
     #[topic]
@@ -188,7 +203,9 @@ impl StreamContract {
             return Err(StreamError::InvalidFee);
         }
         admin.require_auth();
+        let old_fee_bps: u32 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
         env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
         Ok(())
     }
 
@@ -198,6 +215,7 @@ impl StreamContract {
             env.storage().instance().get(&DataKey::Admin).ok_or(StreamError::Unauthorized)?;
         admin.require_auth();
         env.storage().instance().set(&DataKey::Treasury, &treasury);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
         Ok(())
     }
 
@@ -402,6 +420,7 @@ impl StreamContract {
         stream.withdrawn += claimable;
         env.storage().persistent().set(&key, &stream);
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
 
         let token_client = token::Client::new(&env, &stream.token);
         if let Some(treasury) = treasury {
@@ -442,6 +461,7 @@ impl StreamContract {
 
         env.storage().persistent().set(&key, &stream);
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
 
         if unvested > 0 {
             let token_client = token::Client::new(&env, &stream.token);
@@ -471,6 +491,7 @@ impl StreamContract {
         stream.paused_at = Some(now);
         env.storage().persistent().set(&key, &stream);
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
         StreamPaused { id: stream_id, paused_at: now }.publish(&env);
         Ok(())
     }
@@ -493,6 +514,7 @@ impl StreamContract {
         stream.paused_at = None;
         env.storage().persistent().set(&key, &stream);
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
         StreamResumed { id: stream_id, resumed_at: now, total_paused: stream.total_paused }
             .publish(&env);
         Ok(())

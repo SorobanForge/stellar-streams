@@ -103,6 +103,30 @@ fn test_invalid_splits() {
 }
 
 #[test]
+fn test_share_sum_overflow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register(&env);
+    let creator = account(&env);
+    let a = account(&env);
+    let b = account(&env);
+
+    assert_eq!(
+        client.try_create_split(
+            &creator,
+            &vec![&env, a.clone(), b.clone()],
+            &vec![&env, u32::MAX, 1u32]
+        ),
+        Err(Ok(SplitError::ShareOverflow)),
+    );
+
+    // A sum of exactly u32::MAX is still supported.
+    assert!(client
+        .try_create_split(&creator, &vec![&env, a, b], &vec![&env, u32::MAX - 1, 1u32])
+        .is_ok());
+}
+
+#[test]
 fn test_distribute_validations() {
     let env = Env::default();
     env.mock_all_auths();
