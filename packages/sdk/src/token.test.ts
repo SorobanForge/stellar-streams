@@ -9,18 +9,25 @@ import {
   xdr,
 } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
-import { assetContractId } from './index';
+import { StreamsClient, assetContractId, type StreamsClientOptions } from './index';
 import {
   CONTRACT_ID,
   PUBLIC_KEY,
+  createTestClient,
   invokedCall,
-  makeClient,
-  mockRpc,
   sendResponse,
   simulateByMethod,
   streamScVal,
   txResponse,
-} from './test-helpers';
+  type FakeTransport,
+  type TestClientHarness,
+} from '@stellar-starter-kit/testing';
+
+let harness: TestClientHarness<StreamsClient>;
+let rpc: FakeTransport;
+
+const makeClient = (overrides: Partial<StreamsClientOptions> = {}) =>
+  harness.withClient(overrides);
 
 const { GetTransactionStatus } = SorobanRpc.Api;
 
@@ -28,10 +35,9 @@ const { GetTransactionStatus } = SorobanRpc.Api;
 const USDC_TOKEN = StrKey.encodeContract(Buffer.alloc(32, 7));
 
 describe('arbitrary token contracts', () => {
-  let rpc: ReturnType<typeof mockRpc>;
-
   beforeEach(() => {
-    rpc = mockRpc();
+    harness = createTestClient((config) => new StreamsClient(config));
+    rpc = harness.transport;
     rpc.simulateTransaction.mockImplementation(
       simulateByMethod({
         get_stream: streamScVal({

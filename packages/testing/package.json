@@ -1,0 +1,24 @@
+{
+  "name": "@stellar-starter-kit/testing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "In-memory Soroban RPC transport, protocol fixtures, and test-client helpers. Test-only: never bundled into the app.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint src --ext .ts,.tsx",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@stellar-starter-kit/types": "workspace:*",
+    "@stellar/stellar-sdk": "^14.5.0"
+  },
+  "devDependencies": {
+    "@stellar-starter-kit/eslint-config": "workspace:*",
+    "@stellar-starter-kit/tsconfig": "workspace:*",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

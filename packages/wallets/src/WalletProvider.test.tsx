@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, act, screen } from '@testing-library/react';
+import { render, act, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { WalletProvider, useWallet } from './WalletProvider';
 import * as freighter from '@stellar/freighter-api';
@@ -28,6 +28,7 @@ function TestComponent() {
     activeProvider,
     isConnected,
     isConnecting,
+    isCheckingWallet,
     error,
     connect,
     disconnect,
@@ -40,6 +41,7 @@ function TestComponent() {
       <div data-testid="provider">{activeProvider || 'null'}</div>
       <div data-testid="connected">{isConnected ? 'true' : 'false'}</div>
       <div data-testid="connecting">{isConnecting ? 'true' : 'false'}</div>
+      <div data-testid="checking">{isCheckingWallet ? 'true' : 'false'}</div>
       <div data-testid="error">{error || 'null'}</div>
       <button onClick={() => connect('freighter')}>Connect Freighter</button>
       <button onClick={() => connect('albedo')}>Connect Albedo</button>
@@ -72,19 +74,116 @@ describe('WalletProvider', () => {
     expect(screen.getByTestId('connected').textContent).toBe('false');
   });
 
-  it('should auto-reconnect from localStorage on mount', () => {
+  it('re-authorizes a stored session and only then reports it as connected', async () => {
     localStorage.setItem('stellar_starter_kit_wallet_provider', 'freighter');
-    localStorage.setItem('stellar_starter_kit_wallet_address', 'GA123...');
+    localStorage.setItem('stellar_starter_kit_wallet_address', 'GA_STORED');
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockResolvedValue({ address: 'GA_GRANTED' });
 
-    render(
-      <WalletProvider>
-        <TestComponent />
-      </WalletProvider>,
-    );
+    await act(async () => {
+      render(
+        <WalletProvider>
+          <TestComponent />
+        </WalletProvider>,
+      );
+    });
 
-    expect(screen.getByTestId('address').textContent).toBe('GA123...');
+    // The address comes from the grant, not from localStorage.
+    expect(screen.getByTestId('address').textContent).toBe('GA_GRANTED');
     expect(screen.getByTestId('provider').textContent).toBe('freighter');
+    expect(screen.getByTestId('checking').textContent).toBe('false');
+    expect(screen.getByTestId('error').textContent).toBe('null');
+    expect(localStorage.getItem('stellar_starter_kit_wallet_address')).toBe('GA_GRANTED');
+  });
+
+  it('reports a checking state while the stored wallet decides', async () => {
+    localStorage.setItem('stellar_starter_kit_wallet_provider', 'freighter');
+    localStorage.setItem('stellar_starter_kit_wallet_address', 'GA_STORED');
+    type Access = Awaited<ReturnType<typeof freighter.requestAccess>>;
+    let grant: (value: Access) => void = () => {};
+    const pending = new Promise<Access>((resolve) => {
+      grant = resolve;
+    });
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockImplementation(() => pending);
+
+    await act(async () => {
+      render(
+        <WalletProvider>
+          <TestComponent />
+        </WalletProvider>,
+      );
+    });
+
+    expect(screen.getByTestId('checking').textContent).toBe('true');
+    expect(screen.getByTestId('connected').textContent).toBe('false');
+
+    await act(async () => {
+      grant({ address: 'GA_GRANTED' });
+    });
+
+    expect(screen.getByTestId('checking').textContent).toBe('false');
     expect(screen.getByTestId('connected').textContent).toBe('true');
+  });
+
+  it('stays disconnected without an error when access is denied', async () => {
+    localStorage.setItem('stellar_starter_kit_wallet_provider', 'freighter');
+    localStorage.setItem('stellar_starter_kit_wallet_address', 'GA_STORED');
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockRejectedValue(new Error('User declined access'));
+    vi.mocked(freighter.getAddress).mockRejectedValue(new Error('User declined access'));
+
+    await act(async () => {
+      render(
+        <WalletProvider>
+          <TestComponent />
+        </WalletProvider>,
+      );
+    });
+
+    expect(screen.getByTestId('checking').textContent).toBe('false');
+    expect(screen.getByTestId('connected').textContent).toBe('false');
+    expect(screen.getByTestId('address').textContent).toBe('null');
+    expect(screen.getByTestId('error').textContent).toBe('null');
+    expect(localStorage.getItem('stellar_starter_kit_wallet_address')).toBeNull();
+    expect(localStorage.getItem('stellar_starter_kit_wallet_provider')).toBeNull();
+  });
+
+  it('stays disconnected without an error when the wallet is unavailable', async () => {
+    localStorage.setItem('stellar_starter_kit_wallet_provider', 'freighter');
+    localStorage.setItem('stellar_starter_kit_wallet_address', 'GA_STORED');
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: false });
+
+    await act(async () => {
+      render(
+        <WalletProvider>
+          <TestComponent />
+        </WalletProvider>,
+      );
+    });
+
+    expect(screen.getByTestId('checking').textContent).toBe('false');
+    expect(screen.getByTestId('connected').textContent).toBe('false');
+    expect(screen.getByTestId('error').textContent).toBe('null');
+    expect(freighter.requestAccess).not.toHaveBeenCalled();
+  });
+
+  it('stays disconnected without an error when the saved wallet rejects the request', async () => {
+    localStorage.setItem('stellar_starter_kit_wallet_provider', 'albedo');
+    localStorage.setItem('stellar_starter_kit_wallet_address', 'GB_ALBEDO');
+    vi.mocked(albedo.publicKey).mockRejectedValue(new Error('User refused'));
+
+    await act(async () => {
+      render(
+        <WalletProvider>
+          <TestComponent />
+        </WalletProvider>,
+      );
+    });
+
+    expect(screen.getByTestId('checking').textContent).toBe('false');
+    expect(screen.getByTestId('connected').textContent).toBe('false');
+    expect(screen.getByTestId('error').textContent).toBe('null');
   });
 
   it('should connect to Freighter successfully', async () => {
@@ -174,6 +273,8 @@ describe('WalletProvider', () => {
   it('should disconnect successfully', async () => {
     localStorage.setItem('stellar_starter_kit_wallet_provider', 'freighter');
     localStorage.setItem('stellar_starter_kit_wallet_address', 'GA123...');
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockResolvedValue({ address: 'GA123...' });
 
     render(
       <WalletProvider>
@@ -181,7 +282,9 @@ describe('WalletProvider', () => {
       </WalletProvider>,
     );
 
-    expect(screen.getByTestId('connected').textContent).toBe('true');
+    await waitFor(() => {
+      expect(screen.getByTestId('connected').textContent).toBe('true');
+    });
 
     await act(async () => {
       screen.getByText('Disconnect').click();

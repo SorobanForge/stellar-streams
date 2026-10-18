@@ -1,27 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { xdr } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
-import { StreamsError } from './index';
+import { StreamsClient, StreamsError, type StreamsClientOptions } from './index';
 import {
   CONTRACT_ID,
   contractErrorEvent,
+  createTestClient,
   invokedCall,
-  makeClient,
-  mockRpc,
   sendResponse,
   simulationError,
   simulationSuccess,
   trappedResult,
   txResponse,
-} from './test-helpers';
+  type FakeTransport,
+  type TestClientHarness,
+} from '@stellar-starter-kit/testing';
+
+let harness: TestClientHarness<StreamsClient>;
+let rpc: FakeTransport;
+
+const makeClient = (overrides: Partial<StreamsClientOptions> = {}) =>
+  harness.withClient(overrides);
 
 const { GetTransactionStatus } = SorobanRpc.Api;
 
 describe('contract error mapping', () => {
-  let rpc: ReturnType<typeof mockRpc>;
-
   beforeEach(() => {
-    rpc = mockRpc();
+    harness = createTestClient((config) => new StreamsClient(config));
+    rpc = harness.transport;
   });
 
   afterEach(() => {
@@ -108,10 +114,9 @@ describe('contract error mapping', () => {
 });
 
 describe('write simulation pre-flight', () => {
-  let rpc: ReturnType<typeof mockRpc>;
-
   beforeEach(() => {
-    rpc = mockRpc();
+    harness = createTestClient((config) => new StreamsClient(config));
+    rpc = harness.transport;
   });
 
   afterEach(() => {

@@ -82,9 +82,13 @@ formula lives in `contracts/stream/src/lib.rs` and is mirrored in TypeScript.
 | `wallets`   | Unified React context over Freighter, Albedo, Rabet, and Hana.             |
 | `ui`        | Shared UI primitives and the Tailwind class helper.                        |
 | `contracts` | Generated Soroban TypeScript bindings plus network constants.              |
+| `testing`   | Test-only in-memory RPC, protocol fixtures, client harness.                |
 
 The SDK never assumes a wallet is present: read methods only need a `publicKey` for simulation,
 while write methods require an injected `signTransaction`.
+
+`testing` is test-only: it ships an in-memory Soroban RPC transport, protocol fixtures, and a
+client harness, and is never a dependency of `apps/web`, so it is never bundled.
 
 ---
 

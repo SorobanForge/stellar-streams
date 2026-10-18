@@ -59,7 +59,8 @@ stellar/
 │   ├── hooks/                # @stellar-starter-kit/hooks   — React hooks (useStream)
 │   ├── wallets/              # @stellar-starter-kit/wallets — Freighter/Albedo/Rabet/Hana
 │   ├── contracts/            # generated Soroban TS bindings
-│   └── ui/                   # shared UI primitives
+│   ├── ui/                   # shared UI primitives + toast notifications
+│   └── testing/              # @stellar-starter-kit/testing — test-only RPC fakes
 ├── apps/
 │   └── web/                  # Next.js dashboard (/streams, /escrow, /docs)
 ├── scripts/                  # cross-platform build/deploy/invoke scripts
@@ -319,6 +320,13 @@ Good places to start:
 
 - Add an integration test that exercises a full stream lifecycle on a local node.
 - Implement the `splits` dashboard page.
+
+### Testing packages
+
+`@stellar-starter-kit/testing` is a private, test-only workspace package: an in-memory Soroban RPC
+transport, `Stream`/`Escrow`/`Split` fixtures, and a `createTestClient` harness. It is never a
+dependency of `apps/web`, so it is never bundled. See
+[its README](packages/testing/README.md) for the API and a worked example.
 
 ---
 

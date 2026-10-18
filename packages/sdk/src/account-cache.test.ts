@@ -2,14 +2,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Account, nativeToScVal, xdr } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
 import {
-  makeClient,
-  mockRpc,
   PUBLIC_KEY,
+  badSequenceResult,
+  createTestClient,
   sendResponse,
   simulateByMethod,
   streamScVal,
   txResponse,
-} from './test-helpers';
+  type FakeTransport,
+  type TestClientHarness,
+} from '@stellar-starter-kit/testing';
+import { StreamsClient, type StreamsClientOptions } from './index';
+
+let harness: TestClientHarness<StreamsClient>;
+let rpc: FakeTransport;
+
+const makeClient = (overrides: Partial<StreamsClientOptions> = {}) =>
+  harness.withClient(overrides);
 
 const { GetTransactionStatus } = SorobanRpc.Api;
 
@@ -19,10 +28,9 @@ async function dashboardLoad(client: ReturnType<typeof makeClient>) {
 }
 
 describe('RPC transport calls for the dashboard read pattern', () => {
-  let rpc: ReturnType<typeof mockRpc>;
-
   beforeEach(() => {
-    rpc = mockRpc();
+    harness = createTestClient((config) => new StreamsClient(config));
+    rpc = harness.transport;
     rpc.simulateTransaction.mockImplementation(
       simulateByMethod({
         get_stream: streamScVal(),
@@ -51,19 +59,10 @@ describe('RPC transport calls for the dashboard read pattern', () => {
   });
 });
 
-function badSeqResult(): xdr.TransactionResult {
-  return new xdr.TransactionResult({
-    feeCharged: xdr.Int64.fromString('0'),
-    result: xdr.TransactionResultResult.txBadSeq(),
-    ext: new xdr.TransactionResultExt(0),
-  });
-}
-
 describe('source account cache', () => {
-  let rpc: ReturnType<typeof mockRpc>;
-
   beforeEach(() => {
-    rpc = mockRpc();
+    harness = createTestClient((config) => new StreamsClient(config));
+    rpc = harness.transport;
     rpc.simulateTransaction.mockImplementation(
       simulateByMethod({
         get_stream: streamScVal(),
@@ -107,7 +106,7 @@ describe('source account cache', () => {
       .mockResolvedValueOnce(new Account(PUBLIC_KEY, '100'))
       .mockResolvedValueOnce(new Account(PUBLIC_KEY, '105'));
     rpc.sendTransaction
-      .mockResolvedValueOnce(sendResponse('ERROR', { errorResult: badSeqResult() }))
+      .mockResolvedValueOnce(sendResponse('ERROR', { errorResult: badSequenceResult() }))
       .mockResolvedValueOnce(sendResponse('PENDING'));
     const signTransaction = vi.fn(async (txXdr: string) => txXdr);
 
@@ -124,7 +123,9 @@ describe('source account cache', () => {
   });
 
   it('only retries a stale sequence once', async () => {
-    rpc.sendTransaction.mockResolvedValue(sendResponse('ERROR', { errorResult: badSeqResult() }));
+    rpc.sendTransaction.mockResolvedValue(
+      sendResponse('ERROR', { errorResult: badSequenceResult() }),
+    );
 
     await expect(makeClient().withdraw(1)).rejects.toThrow(/stale sequence number/);
     expect(rpc.sendTransaction).toHaveBeenCalledTimes(2);

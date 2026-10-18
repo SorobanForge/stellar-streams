@@ -3,21 +3,28 @@ import { xdr } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
 import {
   contractErrorEvent,
-  makeClient,
-  mockRpc,
+  createTestClient,
   sendResponse,
   simulationSuccess,
   trappedResult,
   txResponse,
-} from './test-helpers';
+  type FakeTransport,
+  type TestClientHarness,
+} from '@stellar-starter-kit/testing';
+import { StreamsClient, type StreamsClientOptions } from './index';
+
+let harness: TestClientHarness<StreamsClient>;
+let rpc: FakeTransport;
+
+const makeClient = (overrides: Partial<StreamsClientOptions> = {}) =>
+  harness.withClient(overrides);
 
 const { GetTransactionStatus } = SorobanRpc.Api;
 
 describe('transaction submission and polling', () => {
-  let rpc: ReturnType<typeof mockRpc>;
-
   beforeEach(() => {
-    rpc = mockRpc();
+    harness = createTestClient((config) => new StreamsClient(config));
+    rpc = harness.transport;
     // Writes simulate before being prepared; these tests only exercise what
     // happens after a simulation succeeds.
     rpc.simulateTransaction.mockResolvedValue(simulationSuccess(xdr.ScVal.scvVoid()));

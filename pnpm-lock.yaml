@@ -195,6 +195,31 @@ importers:
       '@stellar-starter-kit/eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
+      '@stellar-starter-kit/testing':
+        specifier: workspace:*
+        version: link:../testing
+      '@stellar-starter-kit/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@types/node@26.1.1)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.1.4(@types/node@26.1.1)(jiti@2.7.0)(yaml@2.9.1))
+
+  packages/testing:
+    dependencies:
+      '@stellar-starter-kit/types':
+        specifier: workspace:*
+        version: link:../types
+      '@stellar/stellar-sdk':
+        specifier: ^14.5.0
+        version: 14.6.1
+    devDependencies:
+      '@stellar-starter-kit/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
       '@stellar-starter-kit/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig

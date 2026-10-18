@@ -4,10 +4,7 @@
     "outDir": "./dist",
     "rootDir": "./src",
     "declaration": true,
-    "noEmit": false,
-    "paths": {
-      "@stellar-starter-kit/core": ["../core/dist/index.d.ts"]
-    }
+    "noEmit": false
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

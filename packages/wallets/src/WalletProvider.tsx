@@ -35,6 +35,12 @@ export interface WalletContextType {
   activeProvider: WalletType | null;
   isConnected: boolean;
   isConnecting: boolean;
+  /**
+   * True while a stored session is being re-authorized on load. While it is
+   * true the wallet is neither connected nor known to be unavailable, so
+   * connect buttons should stay disabled instead of flashing.
+   */
+  isCheckingWallet: boolean;
   network: string;
   error: string | null;
   connect: (provider: WalletType) => Promise<void>;
@@ -51,62 +57,112 @@ const WalletContext = createContext<WalletContextType | undefined>(undefined);
 const LOCAL_STORAGE_KEY_PROVIDER = 'stellar_starter_kit_wallet_provider';
 const LOCAL_STORAGE_KEY_ADDRESS = 'stellar_starter_kit_wallet_address';
 
+/**
+ * Asks a wallet for an address for this session and returns it, or an empty
+ * string when the wallet answered without granting access.
+ *
+ * Granting access can prompt the user (Freighter's `requestAccess`, Albedo's
+ * `publicKey`, Rabet's `connect`, Hana's `getPublicKey`); every failure mode —
+ * extension missing, request refused, request errored — throws, so callers can
+ * treat "not granted" uniformly. This is the single place an address is read
+ * from a wallet, shared by `connect` and the session re-authorization on load.
+ */
+async function requestAddress(provider: WalletType): Promise<string> {
+  if (provider === 'freighter') {
+    const connection = await checkFreighterConnected();
+    if (!connection.isConnected) {
+      throw new Error('Freighter wallet extension is not installed or enabled.');
+    }
+    try {
+      const access = await requestFreighterAccess();
+      return access.address ?? '';
+    } catch {
+      // Older Freighter builds reject when access was already granted.
+      const address = await getFreighterAddress();
+      return address.address ?? '';
+    }
+  }
+  if (provider === 'albedo') {
+    const res = await albedo.publicKey({});
+    return res.pubkey ?? '';
+  }
+  if (provider === 'rabe') {
+    const rabet = window.rabet;
+    if (!rabet) {
+      throw new Error('Rabet wallet extension is not installed.');
+    }
+    const res = await rabet.connect();
+    return res.publicKey ?? '';
+  }
+  if (provider === 'hana') {
+    const hana = window.hanaWallet;
+    if (!hana) {
+      throw new Error('Hana wallet extension is not installed.');
+    }
+    const res = await hana.send('stellar:getPublicKey');
+    return (typeof res === 'string' ? res : res.publicKey) ?? '';
+  }
+  throw new Error(`Unsupported wallet provider: ${provider}`);
+}
+
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [activeAddress, setActiveAddress] = useState<string | null>(null);
   const [activeProvider, setActiveProvider] = useState<WalletType | null>(null);
   const [network, setNetwork] = useState<string>('TESTNET');
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
+  const [isCheckingWallet, setIsCheckingWallet] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Auto-reconnect from localStorage on mount
+  const clearSession = useCallback(() => {
+    setActiveAddress(null);
+    setActiveProvider(null);
+    localStorage.removeItem(LOCAL_STORAGE_KEY_PROVIDER);
+    localStorage.removeItem(LOCAL_STORAGE_KEY_ADDRESS);
+  }, []);
+
+  // Re-authorize the stored session on mount: a saved address is evidence the
+  // user connected once, not proof the wallet still grants access in this
+  // session. The address is only shown as connected once the wallet actually
+  // grants it; a denial or a missing extension falls back to disconnected
+  // without an error banner, because the user never asked to connect.
   useEffect(() => {
     const savedProvider = localStorage.getItem(LOCAL_STORAGE_KEY_PROVIDER) as WalletType | null;
     const savedAddress = localStorage.getItem(LOCAL_STORAGE_KEY_ADDRESS);
 
-    if (savedProvider && savedAddress) {
-      setActiveProvider(savedProvider);
-      setActiveAddress(savedAddress);
-    }
-  }, []);
+    if (!savedProvider || !savedAddress) return;
+
+    let cancelled = false;
+    setIsCheckingWallet(true);
+
+    void (async () => {
+      try {
+        const granted = await requestAddress(savedProvider);
+        if (cancelled) return;
+        if (!granted) {
+          clearSession();
+          return;
+        }
+        setActiveProvider(savedProvider);
+        setActiveAddress(granted);
+        localStorage.setItem(LOCAL_STORAGE_KEY_ADDRESS, granted);
+      } catch {
+        if (cancelled) return;
+        clearSession();
+      } finally {
+        if (!cancelled) setIsCheckingWallet(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clearSession]);
 
   const connect = useCallback(async (provider: WalletType) => {
     setIsConnecting(true);
     setError(null);
     try {
-      let publicKey = '';
-      if (provider === 'freighter') {
-        const connection = await checkFreighterConnected();
-        if (!connection.isConnected) {
-          throw new Error('Freighter wallet extension is not installed or enabled.');
-        }
-        try {
-          const access = await requestFreighterAccess();
-          publicKey = access.address;
-        } catch {
-          const address = await getFreighterAddress();
-          publicKey = address.address;
-        }
-      } else if (provider === 'albedo') {
-        const res = await albedo.publicKey({});
-        publicKey = res.pubkey;
-      } else if (provider === 'rabe') {
-        const rabet = window.rabet;
-        if (!rabet) {
-          throw new Error('Rabet wallet extension is not installed.');
-        }
-        const res = await rabet.connect();
-        publicKey = res.publicKey;
-      } else if (provider === 'hana') {
-        const hana = window.hanaWallet;
-        if (!hana) {
-          throw new Error('Hana wallet extension is not installed.');
-        }
-        const res = await hana.send('stellar:getPublicKey');
-        publicKey = typeof res === 'string' ? res : res.publicKey || '';
-      } else {
-        throw new Error(`Unsupported wallet provider: ${provider}`);
-      }
-
+      const publicKey = await requestAddress(provider);
       if (!publicKey) {
         throw new Error('Failed to retrieve public key from wallet.');
       }
@@ -127,12 +183,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const disconnect = useCallback(() => {
-    setActiveAddress(null);
-    setActiveProvider(null);
     setError(null);
-    localStorage.removeItem(LOCAL_STORAGE_KEY_PROVIDER);
-    localStorage.removeItem(LOCAL_STORAGE_KEY_ADDRESS);
-  }, []);
+    clearSession();
+  }, [clearSession]);
 
   const signTransaction = useCallback(
     async (xdr: string, opts?: { network?: string; networkPassphrase?: string }) => {
@@ -203,6 +256,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         activeProvider,
         isConnected: !!activeAddress,
         isConnecting,
+        isCheckingWallet,
         network,
         error,
         connect,

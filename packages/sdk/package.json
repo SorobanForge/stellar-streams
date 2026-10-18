@@ -15,6 +15,7 @@
     "@stellar/stellar-sdk": "^14.5.0"
   },
   "devDependencies": {
+    "@stellar-starter-kit/testing": "workspace:*",
     "@stellar-starter-kit/tsconfig": "workspace:*",
     "@stellar-starter-kit/eslint-config": "workspace:*",
     "typescript": "^6.0.3",

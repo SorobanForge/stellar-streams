@@ -1,18 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Keypair, scValToNative, xdr } from '@stellar/stellar-sdk';
-import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
 import type { CreateStreamParams } from '@stellar-starter-kit/types';
 import {
   CONTRACT_ID,
   PUBLIC_KEY,
-  makeClient,
-  mockRpc,
-  sendResponse,
-  simulationSuccess,
-  txResponse,
-} from './test-helpers';
+  createTestClient,
+  type FakeTransport,
+  type TestClientHarness,
+} from '@stellar-starter-kit/testing';
+import { StreamsClient, type StreamsClientOptions } from './index';
 
-const { GetTransactionStatus } = SorobanRpc.Api;
+let harness: TestClientHarness<StreamsClient>;
+let rpc: FakeTransport;
+
+const makeClient = (overrides: Partial<StreamsClientOptions> = {}) =>
+  harness.withClient(overrides);
 
 /** Params that pass every client-side check, with per-test overrides. */
 function validParams(overrides: Partial<CreateStreamParams> = {}): CreateStreamParams {
@@ -29,17 +31,16 @@ function validParams(overrides: Partial<CreateStreamParams> = {}): CreateStreamP
 }
 
 /** The ScVals of the `create_stream` invocation built for the first submission. */
-function createStreamArgs(rpc: ReturnType<typeof mockRpc>): xdr.ScVal[] {
+function createStreamArgs(rpc: FakeTransport): xdr.ScVal[] {
   const [tx] = rpc.prepareTransaction.mock.calls[0]!;
   const op = (tx as unknown as { operations: Array<{ func: xdr.HostFunction }> }).operations[0]!;
   return op.func.invokeContract().args();
 }
 
 describe('createStream input validation', () => {
-  let rpc: ReturnType<typeof mockRpc>;
-
   beforeEach(() => {
-    rpc = mockRpc();
+    harness = createTestClient((config) => new StreamsClient(config));
+    rpc = harness.transport;
   });
 
   afterEach(() => {
@@ -142,14 +143,11 @@ describe('createStream input validation', () => {
 });
 
 describe('createStream metadata', () => {
-  let rpc: ReturnType<typeof mockRpc>;
-
   beforeEach(() => {
-    rpc = mockRpc();
-    // Writes are simulated before being prepared; void is a valid result.
-    rpc.simulateTransaction.mockResolvedValue(simulationSuccess(xdr.ScVal.scvVoid()));
-    rpc.sendTransaction.mockResolvedValue(sendResponse('PENDING'));
-    rpc.getTransaction.mockResolvedValue(txResponse(GetTransactionStatus.SUCCESS));
+    // The fake transport answers every simulation with a void success and then
+    // reports the submission as PENDING, confirming on the first poll.
+    harness = createTestClient((config) => new StreamsClient(config));
+    rpc = harness.transport;
   });
 
   afterEach(() => {

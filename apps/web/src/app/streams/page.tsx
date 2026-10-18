@@ -2,12 +2,10 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
   Loader2,
   AlertCircle,
-  CheckCircle2,
   ExternalLink,
   Droplets,
   Ban,
@@ -16,6 +14,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { useWallet } from '@stellar-starter-kit/wallets';
+import { useToast, type ToastOptions } from '@stellar-starter-kit/ui';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
 import { getStreamStatus, type Stream } from '@stellar-starter-kit/types';
 import {
@@ -42,11 +41,17 @@ const EXPERT_URL = process.env.NEXT_PUBLIC_STELLAR_EXPERT_URL ?? 'https://stella
 const DAY = 86_400;
 
 export default function StreamsDashboard() {
-  const { activeAddress, isConnected, isConnecting, connect, disconnect, signTransaction } =
-    useWallet();
+  const {
+    activeAddress,
+    isConnected,
+    isConnecting,
+    isCheckingWallet,
+    connect,
+    disconnect,
+    signTransaction,
+  } = useWallet();
+  const { success: toastSuccess, error: toastError } = useToast();
 
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   // Create form.
@@ -75,15 +80,13 @@ export default function StreamsDashboard() {
     [activeAddress, signTransaction],
   );
 
-  const notify = useCallback((kind: 'success' | 'error', message: string) => {
-    if (kind === 'success') {
-      setSuccess(message);
-      setError(null);
-    } else {
-      setError(message);
-      setSuccess(null);
-    }
-  }, []);
+  const notify = useCallback(
+    (kind: 'success' | 'error', title: string, options?: ToastOptions) => {
+      if (kind === 'success') toastSuccess(title, options);
+      else toastError(title, options);
+    },
+    [toastSuccess, toastError],
+  );
 
   const loadStream = useCallback(
     async (id: string) => {
@@ -105,18 +108,22 @@ export default function StreamsDashboard() {
     [client, notify],
   );
 
+  const notifyTx = useCallback(
+    (title: string, hash: string) =>
+      notify('success', title, {
+        description: `Tx ${formatAddress(hash, 6)}`,
+        hash,
+        explorerUrl: EXPERT_URL,
+      }),
+    [notify],
+  );
+
   const runAction = useCallback(
     async (label: string, action: () => Promise<{ hash: string }>, id: string) => {
       setBusy(true);
-      setSuccess(null);
-      setError(null);
       try {
         const { hash } = await action();
-        const expertLink = `${EXPERT_URL}/tx/${hash}`;
-        notify(
-          'success',
-          `${label} submitted successfully. Tx ${formatAddress(hash, 6)} ${expertLink ? '• <a href="' + expertLink + '" target="_blank" rel="noreferrer">View on explorer</a>' : ''}`,
-        );
+        notifyTx(`${label} submitted successfully.`, hash);
         await loadStream(id);
       } catch (err) {
         notify('error', err instanceof Error ? err.message : `${label} failed.`);
@@ -124,7 +131,7 @@ export default function StreamsDashboard() {
         setBusy(false);
       }
     },
-    [loadStream, notify],
+    [loadStream, notify, notifyTx],
   );
 
   const handleCreate = async (event: React.FormEvent) => {
@@ -139,8 +146,6 @@ export default function StreamsDashboard() {
     }
 
     setBusy(true);
-    setError(null);
-    setSuccess(null);
     try {
       const now = Math.floor(Date.now() / 1000);
       const startTime = now;
@@ -157,11 +162,7 @@ export default function StreamsDashboard() {
         endTime,
         cliffTime,
       });
-      const expertLink = `${EXPERT_URL}/tx/${hash}`;
-      notify(
-        'success',
-        `Stream created. Tx ${formatAddress(hash, 6)} ${expertLink ? '• <a href="' + expertLink + '" target="_blank" rel="noreferrer">View on explorer</a>' : ''}`,
-      );
+      notifyTx('Stream created.', hash);
       setRecipient('');
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Failed to create stream.');
@@ -239,7 +240,9 @@ export default function StreamsDashboard() {
             ) : (
               <>
                 <span className="h-2 w-2 rounded-full bg-rose-500" />
-                <span className="text-slate-400">Wallet not connected</span>
+                <span className="text-slate-400">
+                  {isCheckingWallet ? 'Checking wallet…' : 'Wallet not connected'}
+                </span>
               </>
             )}
           </div>
@@ -255,10 +258,10 @@ export default function StreamsDashboard() {
               onClick={() =>
                 connect('freighter').catch(() => notify('error', 'Connection failed.'))
               }
-              disabled={isConnecting}
+              disabled={isConnecting || isCheckingWallet}
               className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-600 to-cyan-500 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:brightness-110"
             >
-              {isConnecting ? (
+              {isConnecting || isCheckingWallet ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
                 <Wallet className="h-3.5 w-3.5" />
@@ -267,28 +270,6 @@ export default function StreamsDashboard() {
             </button>
           )}
         </div>
-
-        <AnimatePresence>
-          {(error || success) && (
-            <motion.div
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className={`mb-6 flex items-start gap-3 rounded-xl border p-4 text-sm ${
-                error
-                  ? 'border-rose-500/20 bg-rose-500/5 text-rose-300'
-                  : 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300'
-              }`}
-            >
-              {error ? (
-                <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-              ) : (
-                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
-              )}
-              <p className="font-light">{error ?? success}</p>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
           {/* Create */}
