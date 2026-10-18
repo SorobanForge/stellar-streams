@@ -37,6 +37,7 @@ const CONTRACT_ID = process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID ?? '';
 const DEFAULT_TOKEN =
   process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ||
   'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
+const EXPERT_URL = process.env.NEXT_PUBLIC_STELLAR_EXPERT_URL ?? 'https://stellar.expert';
 
 const DAY = 86_400;
 
@@ -61,6 +62,7 @@ export default function StreamsDashboard() {
   const [claimable, setClaimable] = useState<bigint>(0n);
   const [streamToken, setStreamToken] = useState<TokenMetadata | null>(null);
   const [loadingStream, setLoadingStream] = useState(false);
+  const [feeBps, setFeeBps] = useState<number | null>(null);
 
   const client = useMemo(
     () =>
@@ -94,6 +96,9 @@ export default function StreamsDashboard() {
         setClaimable(found ? await client.claimable(id).catch(() => 0n) : 0n);
         // Amounts are in the token's smallest unit; read its decimals to display them.
         setStreamToken(found ? await client.getTokenMetadata(found.token).catch(() => null) : null);
+        // Fetch protocol config for feeBps
+        const config = await client.getConfig().catch(() => null);
+        setFeeBps(config ? config.feeBps : 0);
         if (!found) notify('error', `No stream found with id ${id}.`);
       } catch (err) {
         notify('error', err instanceof Error ? err.message : 'Failed to load stream.');
@@ -111,7 +116,11 @@ export default function StreamsDashboard() {
       setError(null);
       try {
         const { hash } = await action();
-        notify('success', `${label} submitted successfully. Tx ${formatAddress(hash, 6)}`);
+        const expertLink = `${EXPERT_URL}/tx/${hash}`;
+        notify(
+          'success',
+          `${label} submitted successfully. Tx ${formatAddress(hash, 6)} ${expertLink ? '• <a href="' + expertLink + '" target="_blank" rel="noreferrer">View on explorer</a>' : ''}`,
+        );
         await loadStream(id);
       } catch (err) {
         notify('error', err instanceof Error ? err.message : `${label} failed.`);
@@ -152,7 +161,11 @@ export default function StreamsDashboard() {
         endTime,
         cliffTime,
       });
-      notify('success', `Stream created. Tx ${formatAddress(hash, 6)}`);
+      const expertLink = `${EXPERT_URL}/tx/${hash}`;
+      notify(
+        'success',
+        `Stream created. Tx ${formatAddress(hash, 6)} ${expertLink ? '• <a href="' + expertLink + '" target="_blank" rel="noreferrer">View on explorer</a>' : ''}`,
+      );
       setRecipient('');
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Failed to create stream.');
@@ -165,6 +178,10 @@ export default function StreamsDashboard() {
     streamToken
       ? `${formatTokenAmount(raw, streamToken.decimals)} ${streamToken.symbol}`
       : `${raw.toString()} (base units)`;
+
+  const feeBpsValue = feeBps ?? 0;
+  const feeAmount = feeBpsValue > 0 ? (claimable * BigInt(feeBpsValue)) / 10000n : 0n;
+  const netAmount = claimable - feeAmount;
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   const status = stream ? getStreamStatus(stream, nowSeconds) : null;
@@ -442,10 +459,37 @@ export default function StreamsDashboard() {
                       <dt className="text-[10px] text-slate-500 uppercase">Withdrawn</dt>
                       <dd className="mt-1 text-slate-300">{formatAmount(stream.withdrawn)}</dd>
                     </div>
-                    <div>
-                      <dt className="text-[10px] text-slate-500 uppercase">Claimable</dt>
-                      <dd className="mt-1 font-bold text-cyan-300">{formatAmount(claimable)}</dd>
-                    </div>
+                    {feeBps !== null && feeBps > 0 ? (
+                      <>
+                        <div>
+                          <dt className="text-[10px] text-slate-500 uppercase">
+                            Claimable (gross)
+                          </dt>
+                          <dd className="mt-1 font-bold text-cyan-300">
+                            {formatAmount(claimable)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-[10px] text-slate-500 uppercase">
+                            Protocol fee ({feeBps}%)
+                          </dt>
+                          <dd className="mt-1 font-bold text-cyan-300">
+                            {formatAmount(feeAmount)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-[10px] text-slate-500 uppercase">Net amount</dt>
+                          <dd className="mt-1 font-bold text-cyan-300">
+                            {formatAmount(netAmount)}
+                          </dd>
+                        </div>
+                      </>
+                    ) : (
+                      <div>
+                        <dt className="text-[10px] text-slate-500 uppercase">Claimable</dt>
+                        <dd className="mt-1 font-bold text-cyan-300">{formatAmount(netAmount)}</dd>
+                      </div>
+                    )}
                   </dl>
 
                   <div className="flex flex-wrap gap-3 border-t border-slate-900 pt-4">

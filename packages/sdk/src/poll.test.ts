@@ -1,47 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { xdr } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
-import { makeClient, mockRpc, sendResponse, txResponse } from './test-helpers';
+import {
+  NETWORK_PASSPHRASE,
+  PUBLIC_KEY,
+  contractErrorEvent,
+  fakeTransport,
+  makeClient,
+  sendResponse,
+  simulationSuccess,
+  trappedResult,
+  txResponse,
+} from './test-helpers';
 
 const { GetTransactionStatus } = SorobanRpc.Api;
 
-function trappedResult(): xdr.TransactionResult {
-  return new xdr.TransactionResult({
-    feeCharged: xdr.Int64.fromString('100'),
-    result: xdr.TransactionResultResult.txFailed([
-      xdr.OperationResult.opInner(
-        xdr.OperationResultTr.invokeHostFunction(
-          xdr.InvokeHostFunctionResult.invokeHostFunctionTrapped(),
-        ),
-      ),
-    ]),
-    ext: new xdr.TransactionResultExt(0),
-  });
-}
-
-function contractErrorEvent(code: number, message: string): xdr.DiagnosticEvent {
-  return new xdr.DiagnosticEvent({
-    inSuccessfulContractCall: false,
-    event: new xdr.ContractEvent({
-      ext: new xdr.ExtensionPoint(0),
-      contractId: null,
-      type: xdr.ContractEventType.diagnostic(),
-      body: new xdr.ContractEventBody(
-        0,
-        new xdr.ContractEventV0({
-          topics: [xdr.ScVal.scvSymbol('error'), xdr.ScVal.scvError(xdr.ScError.sceContract(code))],
-          data: xdr.ScVal.scvString(message),
-        }),
-      ),
-    }),
-  });
-}
-
 describe('transaction submission and polling', () => {
-  let rpc: ReturnType<typeof mockRpc>;
+  let rpc: ReturnType<typeof fakeTransport>;
 
   beforeEach(() => {
-    rpc = mockRpc();
+    rpc = fakeTransport();
+    // Writes simulate before being prepared; these tests only exercise what
+    // happens after a simulation succeeds.
+    rpc.simulateTransaction.mockResolvedValue(simulationSuccess(xdr.ScVal.scvVoid()));
   });
 
   afterEach(() => {
@@ -54,7 +35,7 @@ describe('transaction submission and polling', () => {
       .mockResolvedValueOnce(txResponse(GetTransactionStatus.NOT_FOUND))
       .mockResolvedValueOnce(txResponse(GetTransactionStatus.SUCCESS));
 
-    await expect(makeClient().withdraw(1)).resolves.toEqual({ hash: 'abc123' });
+    await expect(makeClient({ transport: rpc }).withdraw(1)).resolves.toEqual({ hash: 'abc123' });
     expect(rpc.getTransaction).toHaveBeenCalledTimes(2);
   });
 
@@ -66,7 +47,7 @@ describe('transaction submission and polling', () => {
     rpc.getTransaction.mockResolvedValue(txResponse(GetTransactionStatus.SUCCESS));
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
 
-    await expect(makeClient({ pollIntervalMs: 5 }).withdraw(1)).resolves.toEqual({
+    await expect(makeClient({ pollIntervalMs: 5, transport: rpc }).withdraw(1)).resolves.toEqual({
       hash: 'abc123',
     });
     expect(rpc.sendTransaction).toHaveBeenCalledTimes(3);
@@ -78,15 +59,38 @@ describe('transaction submission and polling', () => {
     rpc.sendTransaction.mockResolvedValue(sendResponse('DUPLICATE'));
     rpc.getTransaction.mockResolvedValue(txResponse(GetTransactionStatus.SUCCESS));
 
-    await expect(makeClient().withdraw(1)).resolves.toEqual({ hash: 'abc123' });
+    await expect(makeClient({ transport: rpc }).withdraw(1)).resolves.toEqual({ hash: 'abc123' });
+  });
+
+  it('signs the prepared transaction and submits the signed envelope', async () => {
+    rpc.sendTransaction.mockResolvedValue(sendResponse('PENDING'));
+    rpc.getTransaction.mockResolvedValue(txResponse(GetTransactionStatus.SUCCESS));
+    const signTransaction = vi.fn(
+      async (txXdr: string, _opts: { networkPassphrase: string; address: string }) => txXdr,
+    );
+
+    await expect(makeClient({ signTransaction, transport: rpc }).withdraw(1)).resolves.toEqual({
+      hash: 'abc123',
+    });
+
+    const [preparedTx] = rpc.prepareTransaction.mock.calls[0]!;
+    expect(signTransaction).toHaveBeenCalledTimes(1);
+    const [signedXdr, signerOptions] = signTransaction.mock.calls[0]!;
+    expect(signedXdr).toBe(preparedTx.toXDR());
+    expect(signerOptions).toEqual({
+      networkPassphrase: NETWORK_PASSPHRASE,
+      address: PUBLIC_KEY,
+    });
+    const [submitted] = rpc.sendTransaction.mock.calls[0]!;
+    expect(submitted.toXDR()).toBe(signedXdr);
   });
 
   it('gives up on TRY_AGAIN_LATER once the timeout is exhausted', async () => {
     rpc.sendTransaction.mockResolvedValue(sendResponse('TRY_AGAIN_LATER'));
 
-    await expect(makeClient({ pollIntervalMs: 5, pollTimeoutMs: 30 }).withdraw(1)).rejects.toThrow(
-      /TRY_AGAIN_LATER for transaction abc123 after \d+\.\ds/,
-    );
+    await expect(
+      makeClient({ pollIntervalMs: 5, pollTimeoutMs: 30, transport: rpc }).withdraw(1),
+    ).rejects.toThrow(/TRY_AGAIN_LATER for transaction abc123 after \d+\.\ds/);
   });
 
   it('includes the result code and diagnostics when the transaction FAILED', async () => {
@@ -98,7 +102,7 @@ describe('transaction submission and polling', () => {
       }),
     );
 
-    const error = await makeClient()
+    const error = await makeClient({ transport: rpc })
       .withdraw(1)
       .catch((e: Error) => e);
     expect(error).toBeInstanceOf(Error);
@@ -113,7 +117,7 @@ describe('transaction submission and polling', () => {
       txResponse(GetTransactionStatus.FAILED, { resultXdr: trappedResult() }),
     );
 
-    await expect(makeClient().withdraw(1)).rejects.toThrow(
+    await expect(makeClient({ transport: rpc }).withdraw(1)).rejects.toThrow(
       'Transaction abc123 failed: txFailed (invokeHostFunctionTrapped)',
     );
   });
@@ -121,7 +125,7 @@ describe('transaction submission and polling', () => {
   it('reports a rejected (ERROR) submission with its result code', async () => {
     rpc.sendTransaction.mockResolvedValue(sendResponse('ERROR', { errorResult: trappedResult() }));
 
-    await expect(makeClient().withdraw(1)).rejects.toThrow(
+    await expect(makeClient({ transport: rpc }).withdraw(1)).rejects.toThrow(
       'Transaction abc123 was rejected: txFailed (invokeHostFunctionTrapped)',
     );
     expect(rpc.getTransaction).not.toHaveBeenCalled();
@@ -131,8 +135,8 @@ describe('transaction submission and polling', () => {
     rpc.sendTransaction.mockResolvedValue(sendResponse('PENDING'));
     rpc.getTransaction.mockResolvedValue(txResponse(GetTransactionStatus.NOT_FOUND));
 
-    await expect(makeClient({ pollIntervalMs: 5, pollTimeoutMs: 40 }).withdraw(1)).rejects.toThrow(
-      /^Timed out waiting for transaction abc123 after \d+\.\ds/,
-    );
+    await expect(
+      makeClient({ pollIntervalMs: 5, pollTimeoutMs: 40, transport: rpc }).withdraw(1),
+    ).rejects.toThrow(/^Timed out waiting for transaction abc123 after \d+\.\ds/);
   });
 });
