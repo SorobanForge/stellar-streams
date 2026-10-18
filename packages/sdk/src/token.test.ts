@@ -13,9 +13,9 @@ import { assetContractId } from './index';
 import {
   CONTRACT_ID,
   PUBLIC_KEY,
+  fakeTransport,
   invokedCall,
   makeClient,
-  mockRpc,
   sendResponse,
   simulateByMethod,
   streamScVal,
@@ -28,20 +28,24 @@ const { GetTransactionStatus } = SorobanRpc.Api;
 const USDC_TOKEN = StrKey.encodeContract(Buffer.alloc(32, 7));
 
 describe('arbitrary token contracts', () => {
-  let rpc: ReturnType<typeof mockRpc>;
+  let rpc: ReturnType<typeof fakeTransport>;
 
   beforeEach(() => {
-    rpc = mockRpc();
+    rpc = fakeTransport();
     rpc.simulateTransaction.mockImplementation(
       simulateByMethod({
         get_stream: streamScVal({
           token: USDC_TOKEN,
           total_amount: 2_500_000n,
           withdrawn: 500_000n,
+          label: 'Q4 payroll',
+          reference: 'INV-2026-0042',
         }),
         claimable: nativeToScVal(250_000n, { type: 'i128' }),
         decimals: nativeToScVal(6, { type: 'u32' }),
         symbol: nativeToScVal('USDC', { type: 'string' }),
+        // Writes are simulated before being prepared; void is a valid result.
+        create_stream: xdr.ScVal.scvVoid(),
       }),
     );
   });
@@ -51,11 +55,13 @@ describe('arbitrary token contracts', () => {
   });
 
   it('streams a non-XLM token and reads its decimals from the token contract', async () => {
-    const client = makeClient();
+    const client = makeClient({ transport: rpc });
 
     const stream = await client.getStream(1);
     expect(stream?.token).toBe(USDC_TOKEN);
     expect(stream?.totalAmount).toBe('2500000');
+    expect(stream?.label).toBe('Q4 payroll');
+    expect(stream?.reference).toBe('INV-2026-0042');
 
     const metadata = await client.getTokenMetadata(stream!.token);
     expect(metadata).toEqual({ contractId: USDC_TOKEN, decimals: 6, symbol: 'USDC' });
@@ -71,7 +77,7 @@ describe('arbitrary token contracts', () => {
   });
 
   it('caches token metadata per contract id', async () => {
-    const client = makeClient();
+    const client = makeClient({ transport: rpc });
     await client.getTokenMetadata(USDC_TOKEN);
     await client.getTokenMetadata(USDC_TOKEN);
 
@@ -83,7 +89,7 @@ describe('arbitrary token contracts', () => {
     rpc.getTransaction.mockResolvedValue(txResponse(GetTransactionStatus.SUCCESS));
     const recipient = Keypair.random().publicKey();
 
-    await makeClient().createStream({
+    await makeClient({ transport: rpc }).createStream({
       sender: PUBLIC_KEY,
       recipient,
       token: USDC_TOKEN,
@@ -102,7 +108,7 @@ describe('arbitrary token contracts', () => {
   });
 
   it('rejects a token that is not a contract id', async () => {
-    const client = makeClient();
+    const client = makeClient({ transport: rpc });
     await expect(client.getTokenMetadata('not-a-contract')).rejects.toThrow(
       'Invalid token contract id',
     );

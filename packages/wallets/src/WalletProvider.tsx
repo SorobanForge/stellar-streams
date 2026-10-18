@@ -2,31 +2,12 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import {
-  isConnected as checkFreighterConnected,
-  getAddress as getFreighterAddress,
-  signTransaction as signFreighterTransaction,
-  requestAccess as requestFreighterAccess,
-} from '@stellar/freighter-api';
-import albedo from '@albedo-link/intent';
-
-interface RabetInterface {
-  connect: () => Promise<{ publicKey: string }>;
-  sign: (xdr: string, network: string) => Promise<string>;
-}
-
-interface HanaInterface {
-  send: (
-    method: string,
-    params?: { xdr: string; network: string },
-  ) => Promise<{ publicKey?: string; signedTransaction?: string } | string>;
-}
-
-declare global {
-  interface Window {
-    rabet?: RabetInterface;
-    hanaWallet?: HanaInterface;
-  }
-}
+  AlbedoAdapter,
+  FreighterAdapter,
+  HanaAdapter,
+  RabetAdapter,
+  type WalletAdapter,
+} from './adapters';
 
 export type WalletType = 'freighter' | 'albedo' | 'rabe' | 'hana';
 
@@ -52,6 +33,14 @@ const WalletContext = createContext<WalletContextType | undefined>(undefined);
 const LOCAL_STORAGE_KEY_PROVIDER = 'stellar_starter_kit_wallet_provider';
 const LOCAL_STORAGE_KEY_ADDRESS = 'stellar_starter_kit_wallet_address';
 
+/** One adapter per supported wallet, keyed by provider id. */
+const ADAPTERS: Record<WalletType, WalletAdapter> = {
+  freighter: new FreighterAdapter(),
+  albedo: new AlbedoAdapter(),
+  rabe: new RabetAdapter(),
+  hana: new HanaAdapter(),
+};
+
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [activeAddress, setActiveAddress] = useState<string | null>(null);
   const [activeProvider, setActiveProvider] = useState<WalletType | null>(null);
@@ -63,9 +52,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   /** Monotonically increasing id used to discard stale restore results. */
   const restoreId = useRef(0);
 
-  // Verify a persisted session before reporting the wallet as connected. The
-  // stored address is never exposed as connected until the extension confirms
-  // it still controls that key.
+  const adapterFor = useCallback((provider: WalletType): WalletAdapter => ADAPTERS[provider], []);
+
+  // Auto-reconnect from localStorage on mount
   useEffect(() => {
     const savedProvider = localStorage.getItem(LOCAL_STORAGE_KEY_PROVIDER) as WalletType | null;
     const savedAddress = localStorage.getItem(LOCAL_STORAGE_KEY_ADDRESS);
@@ -129,64 +118,36 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const connect = useCallback(async (provider: WalletType) => {
-    // Invalidate any in-flight restore so it cannot override a new session.
-    restoreId.current++;
-    setIsConnecting(true);
-    setError(null);
-    try {
-      let publicKey = '';
-      if (provider === 'freighter') {
-        const connection = await checkFreighterConnected();
-        if (!connection.isConnected) {
-          throw new Error('Freighter wallet extension is not installed or enabled.');
-        }
-        try {
-          const access = await requestFreighterAccess();
-          publicKey = access.address;
-        } catch {
-          const address = await getFreighterAddress();
-          publicKey = address.address;
-        }
-      } else if (provider === 'albedo') {
-        const res = await albedo.publicKey({});
-        publicKey = res.pubkey;
-      } else if (provider === 'rabe') {
-        const rabet = (window as Window & { rabet?: RabetInterface }).rabet;
-        if (!rabet) {
-          throw new Error('Rabet wallet extension is not installed.');
-        }
-        const res = await rabet.connect();
-        publicKey = res.publicKey;
-      } else if (provider === 'hana') {
-        const hana = (window as Window & { hanaWallet?: HanaInterface }).hanaWallet;
-        if (!hana) {
-          throw new Error('Hana wallet extension is not installed.');
-        }
-        const res = await hana.send('stellar:getPublicKey');
-        publicKey = typeof res === 'string' ? res : res.publicKey || '';
-      } else {
-        throw new Error(`Unsupported wallet provider: ${provider}`);
-      }
+  const connect = useCallback(
+    async (provider: WalletType) => {
+      setIsConnecting(true);
+      setError(null);
+      try {
+        const adapter = adapterFor(provider);
+        const publicKey = await adapter.connect();
 
-      if (!publicKey) {
-        throw new Error('Failed to retrieve public key from wallet.');
-      }
+        if (!publicKey) {
+          throw new Error('Failed to retrieve public key from wallet.');
+        }
 
-      setActiveAddress(publicKey);
-      setActiveProvider(provider);
-      localStorage.setItem(LOCAL_STORAGE_KEY_PROVIDER, provider);
-      localStorage.setItem(LOCAL_STORAGE_KEY_ADDRESS, publicKey);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'An unknown error occurred connecting to the wallet.';
-      setError(message);
-      console.error('Wallet connection error:', err);
-      throw err;
-    } finally {
-      setIsConnecting(false);
-    }
-  }, []);
+        setActiveAddress(publicKey);
+        setActiveProvider(provider);
+        localStorage.setItem(LOCAL_STORAGE_KEY_PROVIDER, provider);
+        localStorage.setItem(LOCAL_STORAGE_KEY_ADDRESS, publicKey);
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'An unknown error occurred connecting to the wallet.';
+        setError(message);
+        console.error('Wallet connection error:', err);
+        throw err;
+      } finally {
+        setIsConnecting(false);
+      }
+    },
+    [adapterFor],
+  );
 
   const disconnect = useCallback(() => {
     // Invalidate any in-flight restore so it cannot resurrect this session.
@@ -204,6 +165,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         throw new Error('No active wallet session to sign transaction.');
       }
 
+      const adapter = ADAPTERS[activeProvider];
       const passphrase =
         opts?.networkPassphrase ||
         (network === 'TESTNET'
@@ -211,33 +173,10 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
           : 'Public Global Stellar Network ; September 2015');
 
       try {
-        if (activeProvider === 'freighter') {
-          const { signedTxXdr } = await signFreighterTransaction(xdr, {
-            networkPassphrase: passphrase,
-            address: activeAddress,
-          });
-          return signedTxXdr;
-        } else if (activeProvider === 'albedo') {
-          const res = await albedo.tx({
-            xdr,
-            network: network.toLowerCase(),
-          });
-          return res.signed_envelope_xdr;
-        } else if (activeProvider === 'rabe') {
-          const rabet = (window as Window & { rabet?: RabetInterface }).rabet;
-          if (!rabet) throw new Error('Rabet extension is missing.');
-          return await rabet.sign(xdr, network.toLowerCase());
-        } else if (activeProvider === 'hana') {
-          const hana = (window as Window & { hanaWallet?: HanaInterface }).hanaWallet;
-          if (!hana) throw new Error('Hana extension is missing.');
-          const res = await hana.send('stellar:signTransaction', {
-            xdr,
-            network: network.toLowerCase(),
-          });
-          return typeof res === 'string' ? res : res.signedTransaction || '';
-        } else {
-          throw new Error(`Signer not implemented for: ${activeProvider}`);
-        }
+        return await adapter.signTransaction(xdr, {
+          networkPassphrase: passphrase,
+          network,
+        });
       } catch (err) {
         let message = 'Failed to sign transaction.';
         if (err instanceof Error) {

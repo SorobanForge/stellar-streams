@@ -28,6 +28,10 @@ export interface Stream {
   startTime: number;
   endTime: number;
   cliffTime: number;
+  /** Optional human-readable metadata; an empty string when none was set. */
+  label: string;
+  /** Optional external reference (invoice or grant id); empty when none was set. */
+  reference: string;
   cancelled: boolean;
 }
 
@@ -52,9 +56,27 @@ export interface CreateStreamParams {
   startTime: number;
   endTime: number;
   cliffTime: number;
+  /** Short human-readable label. At most 64 bytes; defaults to no label. */
+  label?: string;
+  /** External reference such as an invoice or grant id. At most 128 bytes. */
+  reference?: string;
+}
+export type StreamStatus = 'scheduled' | 'streaming' | 'completed' | 'cancelled';
+
+/** A split configuration, mirroring the `Split` Soroban contract struct. */
+export interface SplitConfig {
+  admin: string;
+  totalShares: number;
 }
 
-export type StreamStatus = 'scheduled' | 'streaming' | 'completed' | 'cancelled';
+/** A single split configuration: a set of recipients with proportional shares. */
+export interface Split {
+  id: string;
+  creator: string;
+  recipients: string[];
+  shares: number[];
+  totalShares: number;
+}
 
 /** Derives a human-facing status for a stream at a given timestamp. */
 export function getStreamStatus(stream: Stream, now: number): StreamStatus {
@@ -62,4 +84,42 @@ export function getStreamStatus(stream: Stream, now: number): StreamStatus {
   if (now < stream.startTime || now < stream.cliffTime) return 'scheduled';
   if (now >= stream.endTime) return 'completed';
   return 'streaming';
+}
+
+/**
+ * The statuses of the escrow contract's `EscrowStatus`, as readable names
+ * (the `EscrowClient` maps the contract's numeric discriminants onto these).
+ */
+export type EscrowStatus = 'created' | 'funded' | 'released' | 'refunded' | 'cancelled';
+
+/**
+ * An escrow agreement, mirroring the `escrow` Soroban contract. `u64` / `i128`
+ * fields are carried as decimal strings because they exceed JavaScript's safe
+ * integer range.
+ */
+export interface Escrow {
+  id: string;
+  payer: string;
+  payee: string;
+  arbiter: string;
+  token: string;
+  amount: string;
+  deadline: number;
+  status: EscrowStatus;
+}
+
+/**
+ * Inputs for `create_escrow`. `id` is chosen by the caller (the escrow
+ * contract does not allocate ids), and `amount` is a decimal string in the
+ * token's smallest unit — scale it by the token's own `decimals()`, which is
+ * 7 for XLM and SACs but not for every token.
+ */
+export interface CreateEscrowParams {
+  id: string;
+  payer: string;
+  payee: string;
+  arbiter: string;
+  token: string;
+  amount: string;
+  deadline: number;
 }
