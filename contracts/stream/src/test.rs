@@ -1,7 +1,10 @@
 #![cfg(test)]
 #![allow(elided_lifetimes_in_paths, mismatched_lifetime_syntaxes)]
 use super::*;
-use soroban_sdk::{testutils::Events as _, Env, Event, String, Vec};
+use soroban_sdk::{
+    testutils::{Events as _, Ledger as _},
+    Env, Event, String, Vec,
+};
 
 #[path = "../../test-support/test_support.rs"]
 mod support;
@@ -91,6 +94,33 @@ fn test_linear_vesting_and_withdraw() {
     assert_eq!(client.withdraw(&id), 500);
     assert_eq!(token.balance(&recipient), 1000);
     assert_eq!(token.balance(&client.address), 0);
+}
+
+#[test]
+fn test_withdraw_keeps_instance_config_alive() {
+    let env = Env::default();
+    env.mock_all_auths();
+    // Start every entry with a long TTL so the token survives the ledger jumps
+    // below; the instance then only outlives that TTL if a call bumps it.
+    env.ledger().with_mut(|l| {
+        l.min_persistent_entry_ttl = 600_000;
+        l.max_entry_ttl = 3_000_000;
+    });
+    let (token, sender, recipient, client) = setup(&env);
+    let admin = account(&env);
+    client.initialize(&admin, &account(&env), &0);
+    token.mint(&sender, 1000);
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 500);
+
+    // Move close enough to expiry that the bump threshold is crossed, then
+    // withdraw, which must extend the instance entry.
+    env.ledger().with_mut(|l| l.sequence_number = 590_000);
+    assert_eq!(client.withdraw(&id), 500);
+
+    // Past the original expiry, the config is still readable.
+    env.ledger().with_mut(|l| l.sequence_number = 650_000);
+    assert!(client.get_config().is_some());
 }
 
 #[test]
@@ -293,6 +323,39 @@ fn test_protocol_fee() {
     assert_eq!(client.withdraw(&id), 990);
     assert_eq!(token.balance(&recipient), 990);
     assert_eq!(token.balance(&treasury), 10);
+}
+
+#[test]
+fn test_set_fee_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register(&env);
+    let admin = account(&env);
+    let treasury = account(&env);
+    client.initialize(&admin, &treasury, &100);
+
+    client.set_fee(&250);
+    assert_eq!(
+        env.events().all().filter_by_contract(&client.address),
+        [FeeUpdated { old_fee_bps: 100, new_fee_bps: 250 }.to_xdr(&env, &client.address)],
+    );
+}
+
+#[test]
+fn test_set_treasury_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register(&env);
+    let admin = account(&env);
+    let treasury = account(&env);
+    client.initialize(&admin, &treasury, &100);
+
+    let new_treasury = account(&env);
+    client.set_treasury(&new_treasury);
+    assert_eq!(
+        env.events().all().filter_by_contract(&client.address),
+        [TreasuryUpdated { treasury: new_treasury }.to_xdr(&env, &client.address)],
+    );
 }
 
 #[test]
