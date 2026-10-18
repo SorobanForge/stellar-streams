@@ -1,11 +1,64 @@
 import { Account, Address, Keypair, StrKey, nativeToScVal, xdr } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
 import { vi } from 'vitest';
-import { StreamsClient, type StreamsClientOptions } from './index';
+import {
+  EscrowClient,
+  StreamsClient,
+  type StreamsClientOptions,
+  type StreamsTransport,
+} from './index';
 
 export const NETWORK_PASSPHRASE = 'Test SDF Network ; September 2015';
 export const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));
 export const PUBLIC_KEY = Keypair.random().publicKey();
+
+/**
+ * An in-memory `StreamsTransport` used by the suite in place of a real Soroban
+ * RPC server. Each method is a `vi.fn` whose answer tests script per case; a
+ * method with no sensible default rejects loudly, so an unstubbed call can
+ * never silently fall through to the network.
+ */
+export class FakeTransport implements StreamsTransport {
+  readonly getAccount = vi.fn<StreamsTransport['getAccount']>(
+    async (address) => new Account(address, '100'),
+  );
+
+  readonly simulateTransaction = vi.fn<StreamsTransport['simulateTransaction']>(async () => {
+    throw new Error('simulateTransaction was not scripted for this test');
+  });
+
+  readonly prepareTransaction = vi.fn<StreamsTransport['prepareTransaction']>(async (tx) => tx);
+
+  readonly sendTransaction = vi.fn<StreamsTransport['sendTransaction']>(async () => {
+    throw new Error('sendTransaction was not scripted for this test');
+  });
+
+  readonly getTransaction = vi.fn<StreamsTransport['getTransaction']>(async () => {
+    throw new Error('getTransaction was not scripted for this test');
+  });
+
+  /** How many RPC round trips have been made through this transport in total. */
+  calls(): number {
+    return TRANSPORT_METHODS.reduce((sum, method) => sum + this[method].mock.calls.length, 0);
+  }
+
+  /** Clears the recorded calls, keeping the scripted answers. */
+  reset(): void {
+    for (const method of TRANSPORT_METHODS) this[method].mockClear();
+  }
+}
+
+const TRANSPORT_METHODS = [
+  'getAccount',
+  'simulateTransaction',
+  'prepareTransaction',
+  'sendTransaction',
+  'getTransaction',
+] as const;
+
+export function fakeTransport(): FakeTransport {
+  return new FakeTransport();
+}
 
 /**
  * Stubs every Soroban RPC method the client touches on `SorobanRpc.Server`'s
@@ -43,8 +96,8 @@ export function mockRpc() {
   };
 }
 
-export function makeClient(overrides: Partial<StreamsClientOptions> = {}): StreamsClient {
-  return new StreamsClient({
+function clientOptions(overrides: Partial<StreamsClientOptions> = {}): StreamsClientOptions {
+  return {
     contractId: CONTRACT_ID,
     rpcUrl: 'https://rpc.invalid',
     networkPassphrase: NETWORK_PASSPHRASE,
@@ -53,7 +106,15 @@ export function makeClient(overrides: Partial<StreamsClientOptions> = {}): Strea
     pollIntervalMs: 1,
     pollTimeoutMs: 200,
     ...overrides,
-  });
+  };
+}
+
+export function makeClient(overrides: Partial<StreamsClientOptions> = {}): StreamsClient {
+  return new StreamsClient(clientOptions(overrides));
+}
+
+export function makeEscrowClient(overrides: Partial<StreamsClientOptions> = {}): EscrowClient {
+  return new EscrowClient(clientOptions(overrides));
 }
 
 /** A successful simulation whose return value is `retval`. */
@@ -134,6 +195,33 @@ export function streamScVal(overrides: Partial<Record<string, unknown>> = {}): x
   });
 }
 
+/** Encodes an `Escrow` struct the way the contract's `get_escrow` returns it. */
+export function escrowScVal(overrides: Partial<Record<string, unknown>> = {}): xdr.ScVal {
+  const value = {
+    amount: 500_000_000n,
+    arbiter: PUBLIC_KEY,
+    deadline: 2_000n,
+    id: 1n,
+    payee: Keypair.random().publicKey(),
+    payer: PUBLIC_KEY,
+    status: 0,
+    token: CONTRACT_ID,
+    ...overrides,
+  };
+  return nativeToScVal(value, {
+    type: {
+      amount: ['symbol', 'i128'],
+      arbiter: ['symbol', 'address'],
+      deadline: ['symbol', 'u64'],
+      id: ['symbol', 'u64'],
+      payee: ['symbol', 'address'],
+      payer: ['symbol', 'address'],
+      status: ['symbol', 'u32'],
+      token: ['symbol', 'address'],
+    },
+  });
+}
+
 /** A `txFailed` result whose operation was a trapped contract invocation. */
 export function trappedResult(): xdr.TransactionResult {
   return new xdr.TransactionResult({
@@ -180,7 +268,7 @@ export function invokedCall(tx: unknown): { contractId: string; method: string }
 
 /** Answers each simulated call with the ScVal registered for its method name. */
 export function simulateByMethod(results: Record<string, xdr.ScVal>) {
-  return async (tx: Parameters<SorobanRpc.Server['simulateTransaction']>[0]) => {
+  return async (tx: Parameters<StreamsTransport['simulateTransaction']>[0]) => {
     const { method } = invokedCall(tx);
     const retval = results[method];
     if (!retval) throw new Error(`Unexpected simulation of ${method}`);

@@ -5,7 +5,16 @@ import Header from '../../components/Header';
 import Footer from '../../components/Footer';
 import Logo from '../../components/Logo';
 import Link from 'next/link';
-import { BookOpen, Terminal, Shield, CheckCircle, Code, ArrowLeft, Layers } from 'lucide-react';
+import {
+  BookOpen,
+  Terminal,
+  Shield,
+  CheckCircle,
+  Code,
+  ArrowLeft,
+  Layers,
+  LifeBuoy,
+} from 'lucide-react';
 import { cn } from '@stellar-starter-kit/ui';
 
 const DOCS_SECTIONS = {
@@ -58,8 +67,8 @@ const DOCS_SECTIONS = {
 
         <h3 className="mb-3 text-lg font-bold text-white">1. Clone & Install</h3>
         <pre className="mb-6 overflow-x-auto rounded-xl border border-slate-900 bg-[#08080f] p-5 font-mono text-xs leading-relaxed text-slate-300">
-          {`git clone https://github.com/SorobanForge/stellar-starter-kit.git
-cd stellar-starter-kit
+          {`git clone https://github.com/SorobanForge/stellar-streams.git
+cd stellar-streams
 pnpm install
 pnpm build`}
         </pre>
@@ -85,6 +94,71 @@ pnpm build`}
               http://localhost:8000/soroban/rpc
             </div>
           </div>
+        </div>
+      </div>
+    ),
+  },
+  troubleshooting: {
+    title: 'Troubleshooting',
+    icon: <LifeBuoy className="h-4 w-4" />,
+    content: (
+      <div>
+        <h1 className="mb-6 text-3xl font-extrabold text-white">Troubleshooting</h1>
+        <p className="text-slate-350 mb-6 leading-relaxed">
+          The same handful of causes accounts for most Testnet reports. Find the exact error text
+          you saw below, then follow the full cause-and-fix write-up in the repository.
+        </p>
+
+        <div className="space-y-4">
+          {[
+            {
+              error: 'Freighter wallet extension is not installed or enabled.',
+              fix: 'Install and enable the wallet extension, then reload the page.',
+            },
+            {
+              error: 'Simulation of create_stream failed: ...',
+              fix: 'Your wallet is on the wrong network. Match it to the app (Testnet).',
+            },
+            {
+              error: 'No stream contract id configured.',
+              fix: 'Deploy the contracts and set NEXT_PUBLIC_STREAM_CONTRACT_ID, then rebuild.',
+            },
+            {
+              error: 'Account not found',
+              fix: 'Your account has no XLM for fees. Fund it with Friendbot.',
+            },
+            {
+              error: 'RPC kept answering TRY_AGAIN_LATER for transaction ...',
+              fix: 'The public RPC is rate-limiting you. Wait and retry, or use your own RPC.',
+            },
+          ].map((entry) => (
+            <div
+              key={entry.error}
+              className="rounded-xl border border-slate-900 bg-slate-950/20 p-5"
+            >
+              <code className="text-xs font-semibold break-all text-rose-300">{entry.error}</code>
+              <p className="mt-2 text-xs leading-relaxed text-slate-400">{entry.fix}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="glass mt-8 rounded-2xl border border-slate-900 p-6">
+          <h3 className="mb-2 text-base font-bold text-white">Confirm the deployment first</h3>
+          <p className="text-sm leading-relaxed text-slate-400">
+            Many errors above mean the contracts are simply not deployed on the network you are
+            using. The contract ids page lists the deployed <code>stream</code>, <code>splits</code>
+            , and <code>escrow</code> ids with explorer links. Full entries for every symptom —
+            including how to read that page — live in{' '}
+            <a
+              href="https://github.com/SorobanForge/stellar-streams/blob/main/docs/troubleshooting.md"
+              target="_blank"
+              rel="noreferrer"
+              className="font-semibold text-cyan-400 hover:underline"
+            >
+              docs/troubleshooting.md
+            </a>
+            .
+          </p>
         </div>
       </div>
     ),

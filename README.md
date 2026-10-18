@@ -4,7 +4,7 @@
 
 **Continuous payment streams, linear vesting, and payment splits on Stellar & Soroban.**
 
-[![CI](https://img.shields.io/github/actions/workflow/status/SorobanForge/stellar-starter-kit/ci.yml?branch=main&style=for-the-badge&logo=github&logoColor=white)](https://github.com/SorobanForge/stellar-starter-kit/actions)
+[![CI](https://img.shields.io/github/actions/workflow/status/SorobanForge/stellar-streams/ci.yml?branch=main&style=for-the-badge&logo=github&logoColor=white)](https://github.com/SorobanForge/stellar-streams/actions)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![Rust](https://img.shields.io/badge/Soroban-soroban--sdk%2027-orange?style=for-the-badge&logo=rust&logoColor=white)](contracts)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue?style=for-the-badge&logo=typescript&logoColor=white)](packages)
@@ -63,7 +63,7 @@ stellar/
 ├── apps/
 │   └── web/                  # Next.js dashboard (/streams, /escrow, /docs)
 ├── scripts/                  # cross-platform build/deploy/invoke scripts
-└── docs/                     # development guide
+└── docs/                     # development guide + contract reference
 ```
 
 ---
@@ -139,6 +139,19 @@ See [`contracts/splits/src/lib.rs`](contracts/splits/src/lib.rs).
 
 ---
 
+## Contract reference
+
+Every entry point with its argument and return types, every error variant with its numeric code and
+the condition that raises it, and every event topic with its payload shape, for all three contracts:
+**[docs/contracts.md](docs/contracts.md)**.
+
+The sections above are orientation. That page is what an integrator mapping a failure to a
+user-facing message, or an indexer decoding an event, should actually be reading — including the
+cases the Rust does not advertise: two error codes that are defined but never returned, and an
+`escrow` `cancelled` event that carries no amount.
+
+---
+
 ## Quick start
 
 ### Prerequisites
@@ -179,6 +192,13 @@ pnpm deploy:splits
 ```bash
 pnpm run node:local     # docker compose up -d (Stellar Quickstart)
 ```
+
+### End-to-end walkthrough
+
+Want the complete path — local node → deploy `stream` → fund accounts → create a stream →
+advance time → withdraw — with every command and its expected output? Follow the
+[end-to-end walkthrough](docs/development-guide.md#3-end-to-end-walkthrough-a-stream-from-zero-to-withdraw)
+in the development guide (verified on Linux).
 
 ---
 
@@ -291,6 +311,13 @@ Security reports go through [SECURITY.md](SECURITY.md), not public issues.
 ## Deployments
 
 Testnet contract ids and explorer links are recorded in [docs/deployments.md](docs/deployments.md).
+
+## Troubleshooting
+
+Seeing `Freighter wallet extension is not installed or enabled.`, `No stream contract id
+configured.`, `Account not found`, or `RPC kept answering TRY_AGAIN_LATER ...`? Each known
+symptom with its cause and fix is listed in [docs/troubleshooting.md](docs/troubleshooting.md),
+along with how to confirm the deployment state via the contract ids page.
 
 ## Contributing
 

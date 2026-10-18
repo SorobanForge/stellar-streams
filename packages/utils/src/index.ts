@@ -86,18 +86,66 @@ export function parseXlmToStroops(xlm: string | number): bigint {
   }
 }
 
-/** Formats a duration in seconds into a compact human string (e.g. "2d 3h 4m"). */
+const SECOND = 1;
+const MINUTE = 60 * SECOND;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+const WEEK = 7 * DAY;
+/** A "month" is a flat 30 days so schedules stay deterministic. */
+const MONTH = 30 * DAY;
+/** A "year" is a flat 365 days so schedules stay deterministic. */
+const YEAR = 365 * DAY;
+
+/**
+ * Formats a duration in seconds into a compact human string (e.g. "2d 3h 4m").
+ *
+ * Durations up to and including 7 days keep the exact day/hour/minute/second
+ * rendering (falling back to seconds when nothing larger applies). Longer
+ * durations add weeks, months and years and show only the **two most
+ * significant non-zero units**: a year counts as exactly 365 days, a month as
+ * exactly 30 days, and zero units between them are skipped rather than shown
+ * (e.g. 382 days renders as `1y 2w`, never `1y 0mo 2w 3d`).
+ *
+ * Rounding: every unit truncates toward zero (whole units only) and the
+ * remainder below the second displayed unit is dropped, never rounded up —
+ * 400 days renders `1y 1mo` and silently drops the remaining 5 days.
+ * Negative input clamps to `0s`.
+ */
 export function formatDuration(seconds: number): string {
   const total = Math.max(0, Math.floor(seconds));
-  const days = Math.floor(total / 86_400);
-  const hours = Math.floor((total % 86_400) / 3_600);
-  const minutes = Math.floor((total % 3_600) / 60);
+
+  if (total <= WEEK) {
+    const days = Math.floor(total / DAY);
+    const hours = Math.floor((total % DAY) / HOUR);
+    const minutes = Math.floor((total % HOUR) / MINUTE);
+
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0) parts.push(`${minutes}m`);
+    if (parts.length === 0) parts.push(`${total}s`);
+    return parts.join(' ');
+  }
+
+  const units: Array<readonly [size: number, suffix: string]> = [
+    [YEAR, 'y'],
+    [MONTH, 'mo'],
+    [WEEK, 'w'],
+    [DAY, 'd'],
+    [HOUR, 'h'],
+    [MINUTE, 'm'],
+  ];
 
   const parts: string[] = [];
-  if (days > 0) parts.push(`${days}d`);
-  if (hours > 0) parts.push(`${hours}h`);
-  if (minutes > 0) parts.push(`${minutes}m`);
-  if (parts.length === 0) parts.push(`${total}s`);
+  let rest = total;
+  for (const [size, suffix] of units) {
+    if (parts.length === 2) break;
+    const value = Math.floor(rest / size);
+    if (value > 0) {
+      parts.push(`${value}${suffix}`);
+      rest -= value * size;
+    }
+  }
   return parts.join(' ');
 }
 

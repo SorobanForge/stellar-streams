@@ -47,8 +47,8 @@ pub enum DataKey {
     Escrow(u64),
 }
 
-const BUMP_THRESHOLD: u32 = 10000; // ~1.5 days of ledgers
-const BUMP_LIMIT: u32 = 50000; // ~7 days of ledgers
+const BUMP_THRESHOLD: u32 = 17_280; // ~1 day of ledgers
+const BUMP_LIMIT: u32 = 518_400; // ~30 days of ledgers
 
 /// Emitted when an escrow agreement is created.
 #[contractevent(topics = ["escrow", "created"])]
