@@ -180,7 +180,8 @@ export type SplitErrorCode =
   | 'InvalidAmount'
   | 'DuplicateRecipient'
   | 'SplitNotFound'
-  | 'Unauthorized';
+  | 'Unauthorized'
+  | 'ShareOverflow';
 /**
  * The one place the stream contract's numeric codes are named. Must stay in
  * sync with the `StreamError` enum in `contracts/stream/src/lib.rs`; codes
