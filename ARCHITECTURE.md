@@ -78,15 +78,15 @@ Vesting math is intentionally simple and integer-only. Formula in
 
 ## Client layer (`packages/`)
 
-| Package     | Responsibility                                              |
-| :---------- | :---------------------------------------------------------- |
-| `sdk`       | `StreamsClient` — prepare, sign, submit, poll transactions. |
-| `types`     | `Stream`, `StreamConfig`, `CreateStreamParams` types.       |
-| `utils`     | Stroop formatting, duration, vesting math.                  |
-| `hooks`     | `useStream` — loads stream + claimable balance.             |
-| `wallets`   | React context over Freighter, Albedo, Rabet, Hana.         |
-| `ui`        | Shared UI primitives and Tailwind helpers.                  |
-| `contracts` | Soroban TypeScript bindings + network constants.            |
+| Package     | Responsibility                                                             |
+| :---------- | :------------------------------------------------------------------------- |
+| `sdk`       | `StreamsClient` — simulates reads and prepares/signs/submits/polls writes. |
+| `types`     | `Stream`, `StreamConfig`, `CreateStreamParams`, status derivation.         |
+| `utils`     | BigInt stroop formatting/parsing, duration formatting, vesting math.       |
+| `hooks`     | [`useStream` + `useStellarNetworkStatus`](packages/hooks/README.md) — loads a stream + claimable balance with optional polling. |
+| `wallets`   | Unified React context over Freighter, Albedo, Rabet, and Hana.             |
+| `ui`        | Shared UI primitives and the Tailwind class helper.                        |
+| `contracts` | Generated Soroban TypeScript bindings plus network constants.              |
 
 The SDK never assumes a wallet is present: read methods need only `publicKey`, write methods
 require injected `signTransaction`.

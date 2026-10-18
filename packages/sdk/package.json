@@ -8,7 +8,9 @@
     "build": "tsc",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "node scripts/record-rpc-fixtures.ts --check && vitest run",
+    "fixtures:record": "node scripts/record-rpc-fixtures.ts",
+    "fixtures:check": "node scripts/record-rpc-fixtures.ts --check"
   },
   "dependencies": {
     "@stellar-starter-kit/types": "workspace:*",

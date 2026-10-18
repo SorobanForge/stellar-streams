@@ -190,13 +190,14 @@ impl EscrowContract {
             return Err(EscrowError::UnauthorizedOperation);
         }
 
-        // Transfer funds to payee
-        let token_client = token::Client::new(&env, &escrow.token);
-        token_client.transfer(&env.current_contract_address(), &escrow.payee, &escrow.amount);
-
+        // Finalize before paying out, so the escrow is already closed to
+        // `refund_escrow` and `cancel_escrow` while the token holds control.
         escrow.status = EscrowStatus::Released;
         env.storage().persistent().set(&key, &escrow);
         env.storage().persistent().extend_ttl(&key, BUMP_THRESHOLD, BUMP_LIMIT);
+
+        let token_client = token::Client::new(&env, &escrow.token);
+        token_client.transfer(&env.current_contract_address(), &escrow.payee, &escrow.amount);
 
         EscrowReleased { id, caller, payee: escrow.payee.clone(), amount: escrow.amount }
             .publish(&env);
@@ -223,13 +224,13 @@ impl EscrowContract {
             return Err(EscrowError::UnauthorizedOperation);
         }
 
-        // Refund funds back to payer
-        let token_client = token::Client::new(&env, &escrow.token);
-        token_client.transfer(&env.current_contract_address(), &escrow.payer, &escrow.amount);
-
+        // Finalize before refunding (see `release_escrow`).
         escrow.status = EscrowStatus::Refunded;
         env.storage().persistent().set(&key, &escrow);
         env.storage().persistent().extend_ttl(&key, BUMP_THRESHOLD, BUMP_LIMIT);
+
+        let token_client = token::Client::new(&env, &escrow.token);
+        token_client.transfer(&env.current_contract_address(), &escrow.payer, &escrow.amount);
 
         EscrowRefunded { id, caller, payer: escrow.payer.clone(), amount: escrow.amount }
             .publish(&env);
@@ -249,34 +250,30 @@ impl EscrowContract {
             return Err(EscrowError::UnauthorizedOperation);
         }
 
-        match escrow.status {
-            EscrowStatus::Created => {
-                // Cancel without transferring funds since it's unfunded
-                escrow.status = EscrowStatus::Cancelled;
-            }
+        let refund_payer = match escrow.status {
+            // Unfunded, so there is nothing to send back.
+            EscrowStatus::Created => false,
             EscrowStatus::Funded => {
                 // Payer can only cancel if deadline has passed
                 if env.ledger().timestamp() < escrow.deadline {
                     return Err(EscrowError::DeadlineNotReached);
                 }
-
-                // Transfer funds back to payer
-                let token_client = token::Client::new(&env, &escrow.token);
-                token_client.transfer(
-                    &env.current_contract_address(),
-                    &escrow.payer,
-                    &escrow.amount,
-                );
-
-                escrow.status = EscrowStatus::Cancelled;
+                true
             }
             EscrowStatus::Released | EscrowStatus::Refunded | EscrowStatus::Cancelled => {
                 return Err(EscrowError::AlreadyFinalized);
             }
-        }
+        };
 
+        // Finalize before refunding (see `release_escrow`).
+        escrow.status = EscrowStatus::Cancelled;
         env.storage().persistent().set(&key, &escrow);
         env.storage().persistent().extend_ttl(&key, BUMP_THRESHOLD, BUMP_LIMIT);
+
+        if refund_payer {
+            let token_client = token::Client::new(&env, &escrow.token);
+            token_client.transfer(&env.current_contract_address(), &escrow.payer, &escrow.amount);
+        }
 
         EscrowCancelled { id, payer: escrow.payer.clone() }.publish(&env);
 
