@@ -52,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI automation scripts `scripts/invoke-escrow.sh` and `scripts/invoke-escrow.ps1` supporting deployment, validation, and full execution lifecycles on Stellar Testnet.
 - Added Next.js 15 Escrow dashboard page (`apps/web/src/app/escrow/page.tsx`) with integrated Freighter connection, creation forms, lifecycle management controls, and real-time execution event logs.
 - Added `EscrowClient` exports in `@stellar-starter-kit/contracts` package.
+- `create_streams` on the `stream` contract: create up to `MAX_BATCH` (`14`) streams in one
+  all-or-nothing call, reusing `create_stream`'s per-stream validation and returning the new ids in
+  input order. New `StreamError` codes: `EmptyBatch` (`13`), `BatchTooLarge` (`14`) and
+  `BatchOverflow` (`15`).
 
 ### Changed
 
