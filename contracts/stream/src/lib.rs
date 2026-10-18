@@ -2,7 +2,8 @@
 #![allow(clippy::too_many_arguments)]
 
 use soroban_sdk::{
-    contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Env, String,
+    contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Env,
+    String, Vec,
 };
 
 /// Number of ledgers before a persistent entry is bumped (~1 day at 5s ledgers).
@@ -15,6 +16,20 @@ const MAX_FEE_BPS: u32 = 1_000;
 const MAX_LABEL_LEN: u32 = 64;
 /// Longest accepted external reference (invoice, grant or payroll id), in bytes.
 const MAX_REFERENCE_LEN: u32 = 128;
+/// Maximum number of streams a single [`StreamContract::create_streams`] call
+/// may create.
+///
+/// A batch writes one stream entry and emits one [`StreamCreated`] event per
+/// entry, so its cost grows linearly. Measured against the mainnet limits with
+/// soroban-env-host 27 and empty metadata, every stream costs roughly 232k CPU
+/// instructions, 33 KB of memory, one ledger-entry write and 548 event bytes.
+/// The transaction event budget (16,384 bytes) is by far the tightest of those,
+/// so `MAX_BATCH` is the largest batch whose events still fit in half of it
+/// (14 × 548 = 7,672 bytes). That keeps the same 2× margin on every other limit
+/// and leaves room for [`StreamCreated`] to grow without silently pushing a
+/// maximum batch over a network limit. Larger payroll runs are submitted as
+/// multiple batches.
+pub const MAX_BATCH: u32 = 14;
 
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -31,6 +46,11 @@ pub enum StreamError {
     AlreadyInitialized = 9,
     TreasuryNotSet = 10,
     MetadataTooLong = 11,
+    // 12 is intentionally skipped: it is claimed by in-flight PRs against this
+    // enum. New variants continue from 13 so existing codes never shift.
+    EmptyBatch = 13,
+    BatchTooLarge = 14,
+    BatchOverflow = 15,
 }
 
 /// A single linear payment stream. Tokens are locked in the contract and vest
@@ -178,18 +198,7 @@ impl StreamContract {
     ) -> Result<u64, StreamError> {
         sender.require_auth();
 
-        if amount <= 0 {
-            return Err(StreamError::InvalidAmount);
-        }
-        if end_time <= start_time {
-            return Err(StreamError::InvalidTimeRange);
-        }
-        if cliff_time < start_time || cliff_time > end_time {
-            return Err(StreamError::InvalidCliff);
-        }
-        if label.len() > MAX_LABEL_LEN || reference.len() > MAX_REFERENCE_LEN {
-            return Err(StreamError::MetadataTooLong);
-        }
+        validate_stream(amount, start_time, end_time, cliff_time, &label, &reference)?;
 
         // Pull the full stream amount into the contract up front.
         let token_client = token::Client::new(&env, &token);
@@ -227,6 +236,111 @@ impl StreamContract {
         .publish(&env);
 
         Ok(id)
+    }
+
+    /// Create many streams from one payroll-style batch in a single call.
+    ///
+    /// `sender` funds every stream and authorizes once for the whole batch: it is
+    /// [`StreamContract::create_stream`]'s creator/funder (issue #184's `admin`),
+    /// not the protocol `admin` set by [`StreamContract::initialize`]. `token` is
+    /// the asset every stream locks.
+    ///
+    /// Each entry is `(recipient, amount, start_time, cliff_time, end_time)`, in
+    /// the order given by issue #184, so the cliff comes before the end time
+    /// (unlike `create_stream`). Batch entries carry no metadata: their `label`
+    /// and `reference` are stored empty.
+    ///
+    /// The call is all-or-nothing: every entry is validated and the deposits are
+    /// summed with checked arithmetic before any transfer or storage write, so one
+    /// bad entry moves no tokens and leaves [`StreamContract::next_stream_id`]
+    /// untouched. Empty batches return [`StreamError::EmptyBatch`], batches over
+    /// [`MAX_BATCH`] [`StreamError::BatchTooLarge`].
+    ///
+    /// Ids are allocated and returned in input order: `ids[i]` belongs to
+    /// `entries[i]`.
+    pub fn create_streams(
+        env: Env,
+        sender: Address,
+        token: Address,
+        entries: Vec<(Address, i128, u64, u64, u64)>,
+    ) -> Result<Vec<u64>, StreamError> {
+        sender.require_auth();
+
+        let count = entries.len();
+        if count == 0 {
+            return Err(StreamError::EmptyBatch);
+        }
+        if count > MAX_BATCH {
+            return Err(StreamError::BatchTooLarge);
+        }
+
+        // Phase 1: validate the whole batch and sum the deposits with checked
+        // arithmetic, before the token or the ledger is touched. Nothing here
+        // can leave partial state behind. Each stream pulls its own deposit in
+        // phase 2; the sum exists to reject a batch whose total would not fit in
+        // an `i128` balance.
+        let label = String::from_str(&env, "");
+        let mut total_deposit: i128 = 0;
+        for entry in entries.iter() {
+            let (_, amount, start_time, cliff_time, end_time) = entry;
+            validate_stream(amount, start_time, end_time, cliff_time, &label, &label)?;
+            total_deposit = total_deposit.checked_add(amount).ok_or(StreamError::BatchOverflow)?;
+        }
+        debug_assert!(total_deposit > 0);
+
+        // Phase 2: every entry passed, so the batch can now only fail on
+        // ledger errors, which revert the whole invocation anyway.
+        let first_id: u64 = env.storage().instance().get(&DataKey::NextId).unwrap_or(1);
+        let after_batch = first_id.checked_add(count as u64).ok_or(StreamError::BatchOverflow)?;
+        // Reserve the whole id range once, mirroring `create_stream`'s
+        // allocate-then-store order.
+        env.storage().instance().set(&DataKey::NextId, &after_batch);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+
+        let token_client = token::Client::new(&env, &token);
+        let contract = env.current_contract_address();
+        let mut ids = Vec::new(&env);
+        for (id, entry) in (first_id..after_batch).zip(entries.iter()) {
+            let (recipient, amount, start_time, cliff_time, end_time) = entry;
+
+            // Pull each deposit separately, exactly like `create_stream`, so the
+            // contract's balance and per-stream accounting match N individual
+            // calls for any token, not just the built-in Stellar Asset Contract.
+            token_client.transfer(&sender, &contract, &amount);
+
+            let stream = Stream {
+                id,
+                sender: sender.clone(),
+                recipient,
+                token: token.clone(),
+                total_amount: amount,
+                withdrawn: 0,
+                start_time,
+                end_time,
+                cliff_time,
+                label: label.clone(),
+                reference: label.clone(),
+                cancelled: false,
+            };
+
+            let key = DataKey::Stream(id);
+            env.storage().persistent().set(&key, &stream);
+            env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+
+            StreamCreated {
+                id,
+                sender: stream.sender.clone(),
+                recipient: stream.recipient.clone(),
+                amount,
+                label: stream.label.clone(),
+                reference: stream.reference.clone(),
+            }
+            .publish(&env);
+
+            ids.push_back(id);
+        }
+
+        Ok(ids)
     }
 
     /// Withdraw the currently vested (and not yet withdrawn) amount to the recipient.
@@ -349,6 +463,37 @@ impl StreamContract {
     pub fn next_stream_id(env: Env) -> u64 {
         env.storage().instance().get(&DataKey::NextId).unwrap_or(1)
     }
+}
+
+/// Checks the rules every stream must satisfy, whether it is created on its own
+/// or as part of a batch.
+///
+/// Both [`StreamContract::create_stream`] and [`StreamContract::create_streams`]
+/// run exactly this check before any token moves or any storage is written, so
+/// the two entry points cannot drift apart. `end_time` is compared with
+/// `start_time` before the cliff is checked, which keeps the error a caller sees
+/// for a given input identical on both paths.
+fn validate_stream(
+    amount: i128,
+    start_time: u64,
+    end_time: u64,
+    cliff_time: u64,
+    label: &String,
+    reference: &String,
+) -> Result<(), StreamError> {
+    if amount <= 0 {
+        return Err(StreamError::InvalidAmount);
+    }
+    if end_time <= start_time {
+        return Err(StreamError::InvalidTimeRange);
+    }
+    if cliff_time < start_time || cliff_time > end_time {
+        return Err(StreamError::InvalidCliff);
+    }
+    if label.len() > MAX_LABEL_LEN || reference.len() > MAX_REFERENCE_LEN {
+        return Err(StreamError::MetadataTooLong);
+    }
+    Ok(())
 }
 
 /// Linearly vested amount of a stream at a given timestamp.
