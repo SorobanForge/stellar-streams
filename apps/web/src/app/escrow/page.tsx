@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import dynamic from 'next/dynamic';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { EscrowClient } from '@stellar-starter-kit/contracts';
 import deployments from '../../generated/deployments.json';
 import Header from '../../components/Header';
 import Footer from '../../components/Footer';
+import type { EscrowDetails } from '../../components/EscrowLookupResult';
 import {
   ArrowLeft,
   Loader2,
@@ -24,6 +25,14 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
+// framer-motion stays out of the initial route bundle; these load on demand.
+const NotificationBanner = dynamic(() => import('../../components/NotificationBanner'), {
+  ssr: false,
+});
+const EscrowLookupResult = dynamic(() => import('../../components/EscrowLookupResult'), {
+  ssr: false,
+});
+
 interface LogEntry {
   id: string;
   type: 'create' | 'fund' | 'release' | 'refund' | 'cancel' | 'fetch';
@@ -31,17 +40,6 @@ interface LogEntry {
   hash?: string;
   status: 'pending' | 'success' | 'error';
   details: string;
-}
-
-interface EscrowDetails {
-  id: string;
-  payer: string;
-  payee: string;
-  arbiter: string;
-  token: string;
-  amount: string;
-  deadline: string;
-  status: string;
 }
 
 export default function EscrowDemo() {
@@ -63,7 +61,6 @@ export default function EscrowDemo() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
   // Create Escrow Form State
-  const [createId, setCreateId] = useState<string>('');
   const [createPayee, setCreatePayee] = useState<string>('');
   const [createArbiter, setCreateArbiter] = useState<string>('');
   const [createToken, setCreateToken] = useState<string>(
@@ -129,7 +126,6 @@ export default function EscrowDemo() {
       return;
     }
 
-    const escrowId = BigInt(createId || Date.now());
     // Convert XLM to Stroops (7 decimals)
     const amountInStroops = BigInt(parseFloat(createAmount) * 10000000);
     const deadlineTimestamp = BigInt(Math.floor(Date.now() / 1000) + parseInt(createDeadline));
@@ -137,12 +133,11 @@ export default function EscrowDemo() {
     setError(null);
     setSuccessMessage(null);
     setActionLoading(true);
-    addLog('create', 'pending', `Initiating creation of escrow ID ${escrowId.toString()}...`);
+    addLog('create', 'pending', 'Initiating escrow creation...');
 
     try {
       const client = getClient();
       const tx = await client.create_escrow({
-        id: escrowId,
         payer: activeAddress!,
         payee: createPayee,
         arbiter: createArbiter,
@@ -153,6 +148,8 @@ export default function EscrowDemo() {
 
       const result = await tx.signAndSend();
       const txHash = result.sendTransactionResponse?.hash;
+      // The contract assigns the id and returns it.
+      const escrowId = result.result.unwrap();
 
       setSuccessMessage(`Escrow ID ${escrowId.toString()} created successfully!`);
       addLog(
@@ -463,25 +460,11 @@ export default function EscrowDemo() {
                 {activeTab === 'create' && (
                   <form onSubmit={handleCreateEscrow} className="space-y-6">
                     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                      <div>
-                        <label className="block text-xs font-semibold tracking-wider text-slate-400 uppercase">
-                          Escrow Contract ID (u64 / numeric)
-                        </label>
-                        <input
-                          type="number"
-                          placeholder="e.g. 176540"
-                          value={createId}
-                          onChange={(e) => setCreateId(e.target.value)}
-                          className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
-                          required
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setCreateId(Date.now().toString().slice(-8))}
-                          className="mt-1.5 text-[10px] text-cyan-400 hover:underline"
-                        >
-                          Generate random ID
-                        </button>
+                      <div className="flex items-end">
+                        <p className="text-xs leading-relaxed text-slate-400">
+                          The escrow id is assigned on-chain: the contract returns the new id once
+                          the transaction succeeds.
+                        </p>
                       </div>
 
                       <div>
@@ -680,124 +663,24 @@ export default function EscrowDemo() {
                     </div>
 
                     {/* Lookup Result Block */}
-                    <AnimatePresence mode="wait">
-                      {lookupResult && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -10 }}
-                          className="space-y-4 rounded-xl border border-slate-900 bg-slate-950/50 p-6 font-mono text-xs"
-                        >
-                          <div className="flex items-center justify-between border-b border-slate-900 pb-3">
-                            <span className="text-sm font-bold text-white">
-                              Escrow Agreement #{lookupResult.id}
-                            </span>
-                            <span
-                              className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
-                                lookupResult.status === 'Funded'
-                                  ? 'border border-yellow-500/20 bg-yellow-500/10 text-yellow-400'
-                                  : lookupResult.status === 'Released'
-                                    ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
-                                    : lookupResult.status === 'Created'
-                                      ? 'border border-purple-500/20 bg-purple-500/10 text-purple-400'
-                                      : 'border border-rose-500/20 bg-rose-500/10 text-rose-400'
-                              }`}
-                            >
-                              {lookupResult.status}
-                            </span>
-                          </div>
-
-                          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                            <div>
-                              <div className="text-[10px] text-slate-500 uppercase">Payer</div>
-                              <div className="text-slate-350 mt-1 break-all">
-                                {lookupResult.payer}
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-[10px] text-slate-500 uppercase">Payee</div>
-                              <div className="text-slate-350 mt-1 break-all">
-                                {lookupResult.payee}
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-[10px] text-slate-500 uppercase">Arbiter</div>
-                              <div className="text-slate-350 mt-1 break-all">
-                                {lookupResult.arbiter}
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-[10px] text-slate-500 uppercase">
-                                Token Contract
-                              </div>
-                              <div className="text-slate-350 mt-1 break-all">
-                                {lookupResult.token}
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-[10px] text-slate-500 uppercase">Amount</div>
-                              <div className="mt-1 text-sm font-bold text-white">
-                                {lookupResult.amount} XLM
-                              </div>
-                            </div>
-                            <div>
-                              <div className="text-[10px] text-slate-500 uppercase">
-                                Deadline (Refund unlock)
-                              </div>
-                              <div className="text-slate-350 mt-1">{lookupResult.deadline}</div>
-                            </div>
-                          </div>
-
-                          <div className="flex justify-end gap-2 border-t border-slate-900 pt-4">
-                            <button
-                              onClick={() => {
-                                setManageId(lookupResult.id);
-                                setActiveTab('manage');
-                              }}
-                              className="text-[10px] text-cyan-400 hover:underline"
-                            >
-                              Open in Manage Panel &rarr;
-                            </button>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                    <EscrowLookupResult
+                      result={lookupResult}
+                      onOpenManage={(id) => {
+                        setManageId(id);
+                        setActiveTab('manage');
+                      }}
+                    />
                   </div>
                 )}
               </div>
 
               {/* Status Notifications */}
-              <AnimatePresence>
-                {error && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="mt-6 flex items-start gap-3 rounded-xl border border-rose-500/20 bg-rose-500/5 p-4 text-sm text-rose-300"
-                  >
-                    <AlertCircle className="h-5 w-5 shrink-0 text-rose-400" />
-                    <div>
-                      <h4 className="font-semibold text-rose-200">Execution Error</h4>
-                      <p className="mt-1 leading-relaxed font-light">{error}</p>
-                    </div>
-                  </motion.div>
-                )}
-
-                {successMessage && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="mt-6 flex items-start gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 text-sm text-emerald-300"
-                  >
-                    <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" />
-                    <div>
-                      <h4 className="font-semibold text-emerald-200">Success</h4>
-                      <p className="mt-1 leading-relaxed font-light">{successMessage}</p>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              <NotificationBanner
+                kind={error ? 'error' : successMessage ? 'success' : null}
+                message={error ?? successMessage ?? ''}
+                title={error ? 'Execution Error' : successMessage ? 'Success' : undefined}
+                className="mt-6"
+              />
             </div>
           </div>
 

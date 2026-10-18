@@ -123,7 +123,7 @@ export function useStream(
     // Set up visibility change listener if document is available
     if (document) {
       document.addEventListener('visibilitychange', handleVisibilityChange);
-      
+
       // Handle initial state (in case we start hidden)
       if (document.visibilityState === 'hidden') {
         stopPolling();
