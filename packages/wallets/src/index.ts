@@ -36,3 +36,4 @@ export const WALLET_PROVIDER_OPTIONS: readonly WalletProviderOption[] = [
 ];
 
 export * from './WalletProvider';
+export * from './adapters';

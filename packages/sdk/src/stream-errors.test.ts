@@ -5,9 +5,9 @@ import { StreamsError } from './index';
 import {
   CONTRACT_ID,
   contractErrorEvent,
+  fakeTransport,
   invokedCall,
   makeClient,
-  mockRpc,
   sendResponse,
   simulationError,
   simulationSuccess,
@@ -18,10 +18,10 @@ import {
 const { GetTransactionStatus } = SorobanRpc.Api;
 
 describe('contract error mapping', () => {
-  let rpc: ReturnType<typeof mockRpc>;
+  let rpc: ReturnType<typeof fakeTransport>;
 
   beforeEach(() => {
-    rpc = mockRpc();
+    rpc = fakeTransport();
   });
 
   afterEach(() => {
@@ -33,7 +33,7 @@ describe('contract error mapping', () => {
       simulationError('HostError: Error(Contract, #5) contract call failed'),
     );
 
-    const error = (await makeClient()
+    const error = (await makeClient({ transport: rpc })
       .claimable(1)
       .catch((e: unknown) => e)) as StreamsError;
     expect(error).toBeInstanceOf(StreamsError);
@@ -47,7 +47,7 @@ describe('contract error mapping', () => {
   it('keeps the raw message for a contract code that is not mapped', async () => {
     rpc.simulateTransaction.mockResolvedValue(simulationError('HostError: Error(Contract, #99)'));
 
-    const error = (await makeClient()
+    const error = (await makeClient({ transport: rpc })
       .claimable(1)
       .catch((e: unknown) => e)) as StreamsError;
     expect(error).toBeInstanceOf(StreamsError);
@@ -61,7 +61,7 @@ describe('contract error mapping', () => {
       simulationError('HostError: Error(Budget, ExceededLimit)'),
     );
 
-    const error = (await makeClient()
+    const error = (await makeClient({ transport: rpc })
       .claimable(1)
       .catch((e: unknown) => e)) as StreamsError;
     expect(error).toBeInstanceOf(StreamsError);
@@ -81,7 +81,7 @@ describe('contract error mapping', () => {
       }),
     );
 
-    const error = (await makeClient()
+    const error = (await makeClient({ transport: rpc })
       .withdraw(1)
       .catch((e: unknown) => e)) as StreamsError;
     expect(error).toBeInstanceOf(StreamsError);
@@ -96,7 +96,7 @@ describe('contract error mapping', () => {
     rpc.simulateTransaction.mockResolvedValue(simulationSuccess(xdr.ScVal.scvVoid()));
     rpc.sendTransaction.mockResolvedValue(sendResponse('ERROR', { errorResult: trappedResult() }));
 
-    const error = (await makeClient()
+    const error = (await makeClient({ transport: rpc })
       .withdraw(1)
       .catch((e: unknown) => e)) as StreamsError;
     expect(error).toBeInstanceOf(StreamsError);
@@ -108,10 +108,10 @@ describe('contract error mapping', () => {
 });
 
 describe('write simulation pre-flight', () => {
-  let rpc: ReturnType<typeof mockRpc>;
+  let rpc: ReturnType<typeof fakeTransport>;
 
   beforeEach(() => {
-    rpc = mockRpc();
+    rpc = fakeTransport();
   });
 
   afterEach(() => {
@@ -122,7 +122,7 @@ describe('write simulation pre-flight', () => {
     rpc.simulateTransaction.mockResolvedValue(simulationError('HostError: Error(Contract, #3)'));
     const signTransaction = vi.fn(async (txXdr: string) => txXdr);
 
-    const error = (await makeClient({ signTransaction })
+    const error = (await makeClient({ signTransaction, transport: rpc })
       .cancel(7)
       .catch((e: unknown) => e)) as StreamsError;
     expect(error).toBeInstanceOf(StreamsError);
@@ -140,7 +140,7 @@ describe('write simulation pre-flight', () => {
     rpc.sendTransaction.mockResolvedValue(sendResponse('PENDING'));
     rpc.getTransaction.mockResolvedValue(txResponse(GetTransactionStatus.SUCCESS));
 
-    await expect(makeClient().withdraw(1)).resolves.toEqual({ hash: 'abc123' });
+    await expect(makeClient({ transport: rpc }).withdraw(1)).resolves.toEqual({ hash: 'abc123' });
     expect(invokedCall(rpc.simulateTransaction.mock.calls[0]![0])).toEqual({
       contractId: CONTRACT_ID,
       method: 'withdraw',
@@ -153,9 +153,11 @@ describe('write simulation pre-flight', () => {
     rpc.sendTransaction.mockResolvedValue(sendResponse('PENDING'));
     rpc.getTransaction.mockResolvedValue(txResponse(GetTransactionStatus.SUCCESS));
 
-    await expect(makeClient({ skipSimulation: true }).withdraw(1)).resolves.toEqual({
-      hash: 'abc123',
-    });
+    await expect(makeClient({ skipSimulation: true, transport: rpc }).withdraw(1)).resolves.toEqual(
+      {
+        hash: 'abc123',
+      },
+    );
     expect(rpc.simulateTransaction).not.toHaveBeenCalled();
   });
 });

@@ -2,12 +2,11 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { motion, AnimatePresence } from 'framer-motion';
+import dynamic from 'next/dynamic';
 import {
   ArrowLeft,
   Loader2,
   AlertCircle,
-  CheckCircle2,
   ExternalLink,
   Droplets,
   Ban,
@@ -30,6 +29,12 @@ import {
 import Header from '../../components/Header';
 import Footer from '../../components/Footer';
 
+// framer-motion stays out of the initial route bundle; the banner only loads
+// when an error/success message is shown.
+const NotificationBanner = dynamic(() => import('../../components/NotificationBanner'), {
+  ssr: false,
+});
+
 const RPC_URL = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? 'https://soroban-testnet.stellar.org';
 const NETWORK_PASSPHRASE =
   process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ?? 'Test SDF Network ; September 2015';
@@ -38,6 +43,7 @@ const CONTRACT_ID = process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID ?? '';
 const DEFAULT_TOKEN =
   process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ||
   'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
+const EXPERT_URL = process.env.NEXT_PUBLIC_STELLAR_EXPERT_URL ?? 'https://stellar.expert';
 
 const DAY = 86_400;
 
@@ -63,6 +69,7 @@ export default function StreamsDashboard() {
   const [claimable, setClaimable] = useState<bigint>(0n);
   const [streamToken, setStreamToken] = useState<TokenMetadata | null>(null);
   const [loadingStream, setLoadingStream] = useState(false);
+  const [feeBps, setFeeBps] = useState<number | null>(null);
 
   const client = useMemo(
     () =>
@@ -110,6 +117,9 @@ export default function StreamsDashboard() {
         setClaimable(found ? await client.claimable(id).catch(() => 0n) : 0n);
         // Amounts are in the token's smallest unit; read its decimals to display them.
         setStreamToken(found ? await client.getTokenMetadata(found.token).catch(() => null) : null);
+        // Fetch protocol config for feeBps
+        const config = await client.getConfig().catch(() => null);
+        setFeeBps(config ? config.feeBps : 0);
         if (!found) notify('error', `No stream found with id ${id}.`);
       } catch (err) {
         notify('error', err instanceof Error ? err.message : 'Failed to load stream.');
@@ -127,7 +137,11 @@ export default function StreamsDashboard() {
       setError(null);
       try {
         const { hash } = await action();
-        notify('success', `${label} submitted successfully. Tx ${formatAddress(hash, 6)}`);
+        const expertLink = `${EXPERT_URL}/tx/${hash}`;
+        notify(
+          'success',
+          `${label} submitted successfully. Tx ${formatAddress(hash, 6)} ${expertLink ? '• <a href="' + expertLink + '" target="_blank" rel="noreferrer">View on explorer</a>' : ''}`,
+        );
         await loadStream(id);
       } catch (err) {
         notify('error', err instanceof Error ? err.message : `${label} failed.`);
@@ -168,7 +182,11 @@ export default function StreamsDashboard() {
         endTime,
         cliffTime,
       });
-      notify('success', `Stream created. Tx ${formatAddress(hash, 6)}`);
+      const expertLink = `${EXPERT_URL}/tx/${hash}`;
+      notify(
+        'success',
+        `Stream created. Tx ${formatAddress(hash, 6)} ${expertLink ? '• <a href="' + expertLink + '" target="_blank" rel="noreferrer">View on explorer</a>' : ''}`,
+      );
       setRecipient('');
     } catch (err) {
       notify('error', err instanceof Error ? err.message : 'Failed to create stream.');
@@ -181,6 +199,10 @@ export default function StreamsDashboard() {
     streamToken
       ? `${formatTokenAmount(raw, streamToken.decimals)} ${streamToken.symbol}`
       : `${raw.toString()} (base units)`;
+
+  const feeBpsValue = feeBps ?? 0;
+  const feeAmount = feeBpsValue > 0 ? (claimable * BigInt(feeBpsValue)) / 10000n : 0n;
+  const netAmount = claimable - feeAmount;
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   const status = stream ? getStreamStatus(stream, nowSeconds) : null;
@@ -310,27 +332,12 @@ export default function StreamsDashboard() {
           )}
         </div>
 
-        <AnimatePresence>
-          {(error || success) && (
-            <motion.div
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className={`mb-6 flex items-start gap-3 rounded-xl border p-4 text-sm ${
-                error
-                  ? 'border-rose-500/20 bg-rose-500/5 text-rose-300'
-                  : 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300'
-              }`}
-            >
-              {error ? (
-                <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-              ) : (
-                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
-              )}
-              <p className="font-light">{error ?? success}</p>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <NotificationBanner
+          kind={error ? 'error' : success ? 'success' : null}
+          message={error ?? success ?? ''}
+          className="mb-6"
+          enterFrom="top"
+        />
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
           {/* Create */}
@@ -493,10 +500,37 @@ export default function StreamsDashboard() {
                       <dt className="text-[10px] text-slate-500 uppercase">Withdrawn</dt>
                       <dd className="mt-1 text-slate-300">{formatAmount(stream.withdrawn)}</dd>
                     </div>
-                    <div>
-                      <dt className="text-[10px] text-slate-500 uppercase">Claimable</dt>
-                      <dd className="mt-1 font-bold text-cyan-300">{formatAmount(claimable)}</dd>
-                    </div>
+                    {feeBps !== null && feeBps > 0 ? (
+                      <>
+                        <div>
+                          <dt className="text-[10px] text-slate-500 uppercase">
+                            Claimable (gross)
+                          </dt>
+                          <dd className="mt-1 font-bold text-cyan-300">
+                            {formatAmount(claimable)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-[10px] text-slate-500 uppercase">
+                            Protocol fee ({feeBps}%)
+                          </dt>
+                          <dd className="mt-1 font-bold text-cyan-300">
+                            {formatAmount(feeAmount)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-[10px] text-slate-500 uppercase">Net amount</dt>
+                          <dd className="mt-1 font-bold text-cyan-300">
+                            {formatAmount(netAmount)}
+                          </dd>
+                        </div>
+                      </>
+                    ) : (
+                      <div>
+                        <dt className="text-[10px] text-slate-500 uppercase">Claimable</dt>
+                        <dd className="mt-1 font-bold text-cyan-300">{formatAmount(netAmount)}</dd>
+                      </div>
+                    )}
                   </dl>
 
                   <div className="flex flex-wrap gap-3 border-t border-slate-900 pt-4">
