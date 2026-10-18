@@ -227,3 +227,81 @@ export function formatBps(bps: number): string {
   const clamped = Math.max(0, Math.min(10_000, bps));
   return `${(clamped / 100).toFixed(clamped % 100 === 0 ? 0 : 1)}%`;
 }
+
+/** A single point on a vesting curve suitable for plotting on a chart. */
+export interface VestingPoint {
+  t: number;
+  vested: bigint;
+}
+
+/** Accepted stream input for vesting curve generation. Supports both shorthand and formal types. */
+export interface VestingStreamInput {
+  start?: number;
+  startTime?: number;
+  cliff?: number;
+  cliffTime?: number;
+  end?: number;
+  endTime?: number;
+  deposit?: bigint | number | string;
+  totalAmount?: bigint | number | string;
+  amount?: bigint | number | string;
+}
+
+/**
+ * Generates N sample points along a stream's vesting schedule suitable for charting.
+ *
+ * Guarantees:
+ * - Always includes both endpoints (`t = start` and `t = end`).
+ * - Always includes the exact cliff timestamp (`t = cliff`).
+ * - Vested amounts are monotonically non-decreasing and never exceed the total deposit.
+ * - Pure and deterministic: identical inputs always produce the exact same points.
+ */
+export function vestingCurve(stream: VestingStreamInput, samples: number = 20): VestingPoint[] {
+  const start = stream.start ?? stream.startTime ?? 0;
+  const rawEnd = stream.end ?? stream.endTime ?? start;
+  const end = Math.max(start, rawEnd);
+  const rawCliff = stream.cliff ?? stream.cliffTime ?? start;
+  const cliff = Math.min(Math.max(start, rawCliff), end);
+
+  const rawDeposit = stream.deposit ?? stream.totalAmount ?? stream.amount ?? 0n;
+  let deposit: bigint;
+  if (typeof rawDeposit === 'bigint') {
+    deposit = rawDeposit;
+  } else if (typeof rawDeposit === 'number') {
+    deposit = BigInt(Math.floor(rawDeposit));
+  } else {
+    deposit = BigInt(String(rawDeposit));
+  }
+  if (deposit < 0n) {
+    deposit = 0n;
+  }
+
+  const schedule: VestingSchedule = {
+    startTime: start,
+    endTime: end,
+    cliffTime: cliff,
+    totalAmount: deposit,
+  };
+
+  if (end === start) {
+    return [{ t: start, vested: deposit }];
+  }
+
+  const times = new Set<number>();
+  times.add(start);
+  times.add(end);
+  times.add(cliff);
+
+  const n = Math.max(2, Math.floor(samples));
+  for (let i = 0; i < n; i++) {
+    const t = Math.round(start + (i * (end - start)) / (n - 1));
+    times.add(t);
+  }
+
+  const sortedTimes = Array.from(times).sort((a, b) => a - b);
+
+  return sortedTimes.map((t) => ({
+    t,
+    vested: computeVestedAmount(schedule, t),
+  }));
+}

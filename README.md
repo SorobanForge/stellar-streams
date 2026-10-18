@@ -27,8 +27,10 @@ Everything runs on [Soroban](https://soroban.stellar.org) smart contracts writte
 typed TypeScript SDK and an open web dashboard.
 
 > **Project status:** pre-1.0. The contracts are implemented, unit-tested, and build clean under
-> `clippy` / `rustfmt`. They have **not** been audited or deployed to Mainnet. See the
-> [Roadmap](ROADMAP.md) for what's next.
+> `clippy` / `rustfmt`. They have **not** been audited or deployed to Mainnet. Before integrating,
+> read the [security model and trust assumptions](SECURITY.md#security-model) — who can cancel,
+> who holds fees, what the arbiter may do, and the inherent risks (no upgradeability, unaudited
+> contracts, admin key custody, TTL expiry). See the [Roadmap](ROADMAP.md) for what's next.
 
 ---
 
@@ -63,7 +65,7 @@ stellar/
 ├── apps/
 │   └── web/                  # Next.js dashboard (/streams, /escrow, /docs)
 ├── scripts/                  # cross-platform build/deploy/invoke scripts
-└── docs/                     # development guide + contract reference
+└── docs/                     # development guide + contract reference + migration guide
 ```
 
 ---
@@ -99,14 +101,16 @@ The flagship contract locks tokens up front and releases them linearly.
 | :------------------------------------------------------------------- | :------------------------------------------------------------------------ |
 | `initialize(admin, treasury, fee_bps)`                               | Configure the optional protocol fee (cap 10%).                            |
 | `create_stream(sender, recipient, token, amount, start, end, cliff)` | Lock tokens and open a stream. Returns the stream id.                     |
+| `create_streams(sender, token, entries)`                             | Lock a whole batch atomically. Returns the new ids, in input order.       |
 | `withdraw(id)`                                                       | Recipient claims the vested, unclaimed balance.                           |
 | `cancel(id)`                                                         | Sender cancels; unvested funds are refunded, vested funds stay claimable. |
 | `claimable(id)` / `vested(id)`                                       | View helpers.                                                             |
 | `get_stream(id)` / `get_config()` / `next_stream_id()`               | Read helpers.                                                             |
 
 Safety properties enforced on-chain: `end > start`, `start ≤ cliff ≤ end`, `amount > 0`,
-authenticated sender/recipient, and idempotent cancel. See
-[`contracts/stream/src/lib.rs`](contracts/stream/src/lib.rs).
+authenticated sender/recipient, and idempotent cancel. `create_streams` applies every one of
+those checks to every entry before it moves a token, so a batch either fully lands or changes
+nothing. See [`contracts/stream/src/lib.rs`](contracts/stream/src/lib.rs).
 
 ### Vesting math
 
@@ -144,6 +148,9 @@ See [`contracts/splits/src/lib.rs`](contracts/splits/src/lib.rs).
 Every entry point with its argument and return types, every error variant with its numeric code and
 the condition that raises it, and every event topic with its payload shape, for all three contracts:
 **[docs/contracts.md](docs/contracts.md)**.
+
+For upgrading existing projects and mapping package imports, see the **[Migration Guide](docs/migration.md)**.
+For the complete list of technical documentation, see the **[Documentation Index](docs/README.md)**.
 
 The sections above are orientation. That page is what an integrator mapping a failure to a
 user-facing message, or an indexer decoding an event, should actually be reading — including the
@@ -203,6 +210,8 @@ in the development guide (verified on Linux).
 ---
 
 ## SDK usage
+
+> **Migrating from `@stellar-starter-kit/*`?** See the **[Migration Guide](docs/migration.md)** for a complete import mapping table and codemod snippets.
 
 ```typescript
 import { StreamsClient } from '@stellar-starter-kit/sdk';

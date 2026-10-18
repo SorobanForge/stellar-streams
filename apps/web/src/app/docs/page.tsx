@@ -14,8 +14,10 @@ import {
   ArrowLeft,
   Layers,
   LifeBuoy,
+  ArrowRightLeft,
 } from 'lucide-react';
 import { cn } from '@stellar-starter-kit/ui';
+import { REPO_URL } from '../../lib/constants';
 
 const DOCS_SECTIONS = {
   intro: {
@@ -67,7 +69,7 @@ const DOCS_SECTIONS = {
 
         <h3 className="mb-3 text-lg font-bold text-white">1. Clone & Install</h3>
         <pre className="mb-6 overflow-x-auto rounded-xl border border-slate-900 bg-[#08080f] p-5 font-mono text-xs leading-relaxed text-slate-300">
-          {`git clone https://github.com/SorobanForge/stellar-streams.git
+          {`git clone ${REPO_URL}.git
 cd stellar-streams
 pnpm install
 pnpm build`}
@@ -273,6 +275,87 @@ soroban contract deploy \\
             </p>
           </div>
         </div>
+      </div>
+    ),
+  },
+  migration: {
+    title: 'Migration Guide',
+    icon: <ArrowRightLeft className="h-4 w-4" />,
+    content: (
+      <div>
+        <h1 className="mb-6 text-3xl font-extrabold text-white">Migration Guide</h1>
+        <p className="text-slate-350 mb-6 leading-relaxed">
+          Migrating existing integrations from{' '}
+          <code className="text-cyan-300">@stellar-starter-kit/*</code> to{' '}
+          <code className="text-purple-300">@stellar-streams/*</code>.
+        </p>
+
+        <div className="glass mb-8 rounded-2xl border border-slate-900 p-6">
+          <h3 className="mb-3 text-base font-bold text-white">Package Renaming Table</h3>
+          <p className="mb-4 text-sm leading-relaxed text-slate-400">
+            All workspace packages have moved from the starter template scope to the dedicated
+            Stellar Streams protocol scope.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-300">
+              <thead className="border-b border-slate-800 text-slate-400">
+                <tr>
+                  <th className="pb-2 font-semibold">Old Package</th>
+                  <th className="pb-2 font-semibold">New Package</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-900 font-mono">
+                <tr>
+                  <td className="py-2 text-rose-400">@stellar-starter-kit/sdk</td>
+                  <td className="py-2 text-emerald-400">@stellar-streams/sdk</td>
+                </tr>
+                <tr>
+                  <td className="py-2 text-rose-400">@stellar-starter-kit/types</td>
+                  <td className="py-2 text-emerald-400">@stellar-streams/types</td>
+                </tr>
+                <tr>
+                  <td className="py-2 text-rose-400">@stellar-starter-kit/utils</td>
+                  <td className="py-2 text-emerald-400">@stellar-streams/utils</td>
+                </tr>
+                <tr>
+                  <td className="py-2 text-rose-400">@stellar-starter-kit/contracts</td>
+                  <td className="py-2 text-emerald-400">@stellar-streams/contracts</td>
+                </tr>
+                <tr>
+                  <td className="py-2 text-rose-400">@stellar-starter-kit/hooks</td>
+                  <td className="py-2 text-emerald-400">@stellar-streams/hooks</td>
+                </tr>
+                <tr>
+                  <td className="py-2 text-rose-400">@stellar-starter-kit/wallets</td>
+                  <td className="py-2 text-emerald-400">@stellar-streams/wallets</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <h3 className="mb-3 text-lg font-bold text-white">Automated Codemod</h3>
+        <p className="text-slate-350 mb-4 text-sm leading-relaxed">
+          Update all imports across your repository with a single shell command:
+        </p>
+        <pre className="mb-6 overflow-x-auto rounded-xl border border-slate-900 bg-[#08080f] p-5 font-mono text-xs leading-relaxed text-slate-300">
+          {`find . -type f \\( -name "*.ts" -o -name "*.tsx" -o -name "*.js" \\) \\
+  -not -path "*/node_modules/*" \\
+  -exec sed -i 's/@stellar-starter-kit\\//@stellar-streams\\//g' {} +`}
+        </pre>
+
+        <p className="text-sm text-slate-400">
+          For full import mappings, behaviour changes, and codemod scripts, refer to the complete{' '}
+          <a
+            href="https://github.com/SorobanForge/stellar-streams/blob/main/docs/migration.md"
+            target="_blank"
+            rel="noreferrer"
+            className="text-purple-400 underline hover:text-purple-300"
+          >
+            docs/migration.md
+          </a>{' '}
+          documentation.
+        </p>
       </div>
     ),
   },

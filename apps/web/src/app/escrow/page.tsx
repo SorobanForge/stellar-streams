@@ -61,7 +61,6 @@ export default function EscrowDemo() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
   // Create Escrow Form State
-  const [createId, setCreateId] = useState<string>('');
   const [createPayee, setCreatePayee] = useState<string>('');
   const [createArbiter, setCreateArbiter] = useState<string>('');
   const [createToken, setCreateToken] = useState<string>(
@@ -127,7 +126,6 @@ export default function EscrowDemo() {
       return;
     }
 
-    const escrowId = BigInt(createId || Date.now());
     // Convert XLM to Stroops (7 decimals)
     const amountInStroops = BigInt(parseFloat(createAmount) * 10000000);
     const deadlineTimestamp = BigInt(Math.floor(Date.now() / 1000) + parseInt(createDeadline));
@@ -135,12 +133,11 @@ export default function EscrowDemo() {
     setError(null);
     setSuccessMessage(null);
     setActionLoading(true);
-    addLog('create', 'pending', `Initiating creation of escrow ID ${escrowId.toString()}...`);
+    addLog('create', 'pending', 'Initiating escrow creation...');
 
     try {
       const client = getClient();
       const tx = await client.create_escrow({
-        id: escrowId,
         payer: activeAddress!,
         payee: createPayee,
         arbiter: createArbiter,
@@ -151,6 +148,8 @@ export default function EscrowDemo() {
 
       const result = await tx.signAndSend();
       const txHash = result.sendTransactionResponse?.hash;
+      // The contract assigns the id and returns it.
+      const escrowId = result.result.unwrap();
 
       setSuccessMessage(`Escrow ID ${escrowId.toString()} created successfully!`);
       addLog(
@@ -461,25 +460,11 @@ export default function EscrowDemo() {
                 {activeTab === 'create' && (
                   <form onSubmit={handleCreateEscrow} className="space-y-6">
                     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                      <div>
-                        <label className="block text-xs font-semibold tracking-wider text-slate-400 uppercase">
-                          Escrow Contract ID (u64 / numeric)
-                        </label>
-                        <input
-                          type="number"
-                          placeholder="e.g. 176540"
-                          value={createId}
-                          onChange={(e) => setCreateId(e.target.value)}
-                          className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
-                          required
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setCreateId(Date.now().toString().slice(-8))}
-                          className="mt-1.5 text-[10px] text-cyan-400 hover:underline"
-                        >
-                          Generate random ID
-                        </button>
+                      <div className="flex items-end">
+                        <p className="text-xs leading-relaxed text-slate-400">
+                          The escrow id is assigned on-chain: the contract returns the new id once
+                          the transaction succeeds.
+                        </p>
                       </div>
 
                       <div>

@@ -167,7 +167,10 @@ export type StreamErrorCode =
   | 'ALREADY_CANCELLED'
   | 'ALREADY_INITIALIZED'
   | 'TREASURY_NOT_SET'
-  | 'METADATA_TOO_LONG';
+  | 'METADATA_TOO_LONG'
+  | 'EMPTY_BATCH'
+  | 'BATCH_TOO_LARGE'
+  | 'BATCH_OVERFLOW';
 
 /** Stable identifiers for the splits contract's `SplitError` enum. */
 export type SplitErrorCode =
@@ -196,6 +199,10 @@ const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
   9: 'ALREADY_INITIALIZED',
   10: 'TREASURY_NOT_SET',
   11: 'METADATA_TOO_LONG',
+  // 12 is reserved by in-flight contract work; codes are append-only.
+  13: 'EMPTY_BATCH',
+  14: 'BATCH_TOO_LARGE',
+  15: 'BATCH_OVERFLOW',
 };
 
 /**

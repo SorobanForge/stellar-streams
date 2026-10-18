@@ -125,9 +125,30 @@ cargo fmt --manifest-path contracts/Cargo.toml --all
 # Run Clippy lints (also available as `pnpm lint:contracts`)
 cargo clippy --manifest-path contracts/Cargo.toml --all-targets -- -D warnings
 
+# Check dependency advisories, licenses, bans, and sources with cargo-deny
+# (config lives in contracts/deny.toml; CI runs the same check)
+cargo deny --manifest-path contracts/Cargo.toml check
+
 # Build optimized WASM for deployment
 cargo build --manifest-path contracts/Cargo.toml --target wasm32v1-none --release
 ```
+
+### Component gallery (`/ui`)
+
+The dashboard renders every shared UI primitive — buttons, form controls, badges, alerts,
+cards, typography, and the `@stellar-starter-kit/utils` formatting output — in all variants and
+states on a single internal page:
+
+```bash
+pnpm run dev        # then open http://localhost:3000/ui
+```
+
+Use it for design review and screenshot diffing without wiring components into a real flow. The
+page lives at `apps/web/src/app/ui/page.tsx`, is reachable by URL only, and is deliberately not
+linked from the site header. When you change a class recipe on the `streams` or `escrow` pages,
+update the matching recipe in the gallery so the review surface stays accurate. If the team later
+wants a richer story, a Storybook migration can be filed as a follow-up — for now the gallery keeps
+the dependency footprint at zero.
 
 ### Test snapshots
 
@@ -147,7 +168,7 @@ cargo test --manifest-path contracts/Cargo.toml -p stream
 A snapshot is a record of the ledgers, storage, events and token balances a test
 left behind, so it changes whenever the behaviour under test changes: adding a
 storage write, bumping a TTL, or editing an event payload rewrites the affected
-files. It also changes when a test's *setup* changes, because the accounts a
+files. It also changes when a test's _setup_ changes, because the accounts a
 test uses are derived from the order in which they are registered — moving a
 `register_contract`/`AccountProvider::generate()` call rewrites every address,
 contract id and nonce in that crate's snapshots. Commit the rewritten files
@@ -162,7 +183,7 @@ cargo test --manifest-path contracts/Cargo.toml && git status --short contracts/
 ```
 
 An empty output means the snapshots on disk match what the tests generate.
-Files listed as modified are stale; files listed as *untracked* are new
+Files listed as modified are stale; files listed as _untracked_ are new
 snapshots for tests that did not exist before.
 
 Orphaned snapshots — a file whose test has since been deleted or renamed — are
