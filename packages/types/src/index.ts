@@ -63,19 +63,62 @@ export interface CreateStreamParams {
   /** External reference such as an invoice or grant id. At most 128 bytes. */
   reference?: string;
 }
+export type StreamStatus = 'scheduled' | 'streaming' | 'completed' | 'cancelled';
 
-/**
- * Lifecycle status of a stream. Defined next to the shared derivation in
- * `@stellar-starter-kit/utils` and re-exported here so existing imports of
- * `StreamStatus` from this package keep working.
- */
-export type { StreamStatus };
+/** A split configuration, mirroring the `Split` Soroban contract struct. */
+export interface SplitConfig {
+  admin: string;
+  totalShares: number;
+}
 
-/**
- * Derives a human-facing status for a stream at a given timestamp.
- * Back-compat wrapper: status now shares one derivation path with progress in
- * `deriveStreamState`, so this simply delegates to it.
- */
+/** A single split configuration: a set of recipients with proportional shares. */
+export interface Split {
+  id: string;
+  creator: string;
+  recipients: string[];
+  shares: number[];
+  totalShares: number;
+}
+
+/** Derives a human-facing status for a stream at a given timestamp. */
 export function getStreamStatus(stream: Stream, now: number): StreamStatus {
   return deriveStreamState(stream, now).status;
+}
+
+/**
+ * The statuses of the escrow contract's `EscrowStatus`, as readable names
+ * (the `EscrowClient` maps the contract's numeric discriminants onto these).
+ */
+export type EscrowStatus = 'created' | 'funded' | 'released' | 'refunded' | 'cancelled';
+
+/**
+ * An escrow agreement, mirroring the `escrow` Soroban contract. `u64` / `i128`
+ * fields are carried as decimal strings because they exceed JavaScript's safe
+ * integer range.
+ */
+export interface Escrow {
+  id: string;
+  payer: string;
+  payee: string;
+  arbiter: string;
+  token: string;
+  amount: string;
+  deadline: number;
+  status: EscrowStatus;
+}
+
+/**
+ * Inputs for `create_escrow`. `id` is chosen by the caller (the escrow
+ * contract does not allocate ids), and `amount` is a decimal string in the
+ * token's smallest unit — scale it by the token's own `decimals()`, which is
+ * 7 for XLM and SACs but not for every token.
+ */
+export interface CreateEscrowParams {
+  id: string;
+  payer: string;
+  payee: string;
+  arbiter: string;
+  token: string;
+  amount: string;
+  deadline: number;
 }

@@ -11,6 +11,7 @@ import {
   formatTokenAmount,
   parseTokenAmount,
   XLM_DECIMALS,
+  vestingCurve,
 } from './index';
 
 describe('formatAddress', () => {
@@ -76,6 +77,26 @@ describe('formatDuration', () => {
     expect(formatDuration(3_661)).toBe('1h 1m');
     expect(formatDuration(90_061)).toBe('1d 1h 1m');
     expect(formatDuration(-5)).toBe('0s');
+  });
+
+  it('keeps exact day output through 7 days', () => {
+    expect(formatDuration(6 * 86_400 + 3_600)).toBe('6d 1h');
+    expect(formatDuration(7 * 86_400)).toBe('7d');
+  });
+
+  it('switches to weeks just past 7 days', () => {
+    expect(formatDuration(8 * 86_400)).toBe('1w 1d');
+    expect(formatDuration(7 * 86_400 + 1)).toBe('1w');
+  });
+
+  it('renders a year for 365 days', () => {
+    expect(formatDuration(365 * 86_400)).toBe('1y');
+  });
+
+  it('renders only the two most significant units for long schedules', () => {
+    expect(formatDuration(400 * 86_400)).toBe('1y 1mo');
+    expect(formatDuration(382 * 86_400)).toBe('1y 2w');
+    expect(formatDuration(8 * 86_400 + 5 * 3_600)).toBe('1w 1d');
   });
 });
 
@@ -246,5 +267,115 @@ describe('parseTokenAmount', () => {
   it('rejects invalid input', () => {
     expect(() => parseTokenAmount('abc', 6)).toThrow('Invalid token amount');
     expect(() => parseTokenAmount('1', -1)).toThrow('Invalid token decimals');
+  });
+});
+
+describe('vestingCurve', () => {
+  it('returns { t, vested }[] including both endpoints and the exact cliff point', () => {
+    const stream = {
+      start: 1_000,
+      cliff: 1_400,
+      end: 2_000,
+      deposit: 10_000n,
+    };
+    const curve = vestingCurve(stream, 10);
+
+    // Endpoints
+    expect(curve[0].t).toBe(1_000);
+    expect(curve[0].vested).toBe(0n);
+
+    expect(curve[curve.length - 1].t).toBe(2_000);
+    expect(curve[curve.length - 1].vested).toBe(10_000n);
+
+    // Exact cliff point exists
+    const cliffPoint = curve.find((p) => p.t === 1_400);
+    expect(cliffPoint).toBeDefined();
+    // At cliff (t=1400, elapsed=400, duration=1000), 10_000 * 400 / 1000 = 4_000
+    expect(cliffPoint!.vested).toBe(4_000n);
+
+    // Points strictly before cliff are 0
+    const beforeCliff = curve.filter((p) => p.t < 1_400);
+    expect(beforeCliff.length).toBeGreaterThan(0);
+    for (const p of beforeCliff) {
+      expect(p.vested).toBe(0n);
+    }
+  });
+
+  it('asserts monotonicity and that vested values never exceed the deposit', () => {
+    const stream = {
+      start: 100,
+      cliff: 350,
+      end: 1_000,
+      deposit: 5_000n,
+    };
+    const curve = vestingCurve(stream, 25);
+
+    expect(curve.length).toBeGreaterThanOrEqual(25);
+    for (let i = 0; i < curve.length; i++) {
+      // Never exceeds deposit
+      expect(curve[i].vested).toBeLessThanOrEqual(5_000n);
+      expect(curve[i].vested).toBeGreaterThanOrEqual(0n);
+
+      if (i > 0) {
+        // Monotonic non-decreasing vested values
+        expect(curve[i].vested >= curve[i - 1].vested).toBe(true);
+        // Strictly ascending timestamps
+        expect(curve[i].t).toBeGreaterThan(curve[i - 1].t);
+      }
+    }
+  });
+
+  it('is pure and deterministic for a given input', () => {
+    const stream = {
+      start: 0,
+      cliff: 200,
+      end: 800,
+      deposit: 1_000_000n,
+    };
+    const curve1 = vestingCurve(stream, 15);
+    const curve2 = vestingCurve(stream, 15);
+
+    expect(curve1).toEqual(curve2);
+  });
+
+  it('accepts both shorthand and formal VestingSchedule / Stream property names', () => {
+    const shorthand = { start: 100, cliff: 300, end: 500, deposit: 2_000n };
+    const formal = { startTime: 100, cliffTime: 300, endTime: 500, totalAmount: 2_000n };
+
+    const curveShort = vestingCurve(shorthand, 10);
+    const curveFormal = vestingCurve(formal, 10);
+
+    expect(curveShort).toEqual(curveFormal);
+  });
+
+  it('handles string amounts and number deposits', () => {
+    const fromString = vestingCurve({ start: 0, cliff: 100, end: 200, deposit: '5000' }, 5);
+    const fromBigInt = vestingCurve({ start: 0, cliff: 100, end: 200, deposit: 5000n }, 5);
+    const fromNumber = vestingCurve({ start: 0, cliff: 100, end: 200, deposit: 5000 }, 5);
+
+    expect(fromString).toEqual(fromBigInt);
+    expect(fromNumber).toEqual(fromBigInt);
+  });
+
+  it('handles cliff equal to start and cliff equal to end', () => {
+    // Cliff at start
+    const cliffAtStart = vestingCurve({ start: 0, cliff: 0, end: 100, deposit: 100n }, 5);
+    expect(cliffAtStart[0].t).toBe(0);
+    expect(cliffAtStart[cliffAtStart.length - 1].t).toBe(100);
+    expect(cliffAtStart[cliffAtStart.length - 1].vested).toBe(100n);
+
+    // Cliff at end
+    const cliffAtEnd = vestingCurve({ start: 0, cliff: 100, end: 100, deposit: 100n }, 5);
+    const endPoint = cliffAtEnd.find((p) => p.t === 100);
+    expect(endPoint?.vested).toBe(100n);
+    const midPoint = cliffAtEnd.find((p) => p.t < 100);
+    if (midPoint) {
+      expect(midPoint.vested).toBe(0n);
+    }
+  });
+
+  it('handles edge case where start equals end', () => {
+    const single = vestingCurve({ start: 500, cliff: 500, end: 500, deposit: 1_000n });
+    expect(single).toEqual([{ t: 500, vested: 1_000n }]);
   });
 });

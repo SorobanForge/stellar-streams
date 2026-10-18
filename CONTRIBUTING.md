@@ -10,6 +10,17 @@ This project is a monorepo containing multiple packages and applications, manage
 
 By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Issue Triage & Labels
+
+Before opening a new issue or working on existing ones, please review our [Triage & Labeling Guide](docs/triage.md). It explains:
+
+- **Label taxonomy:** How we classify issues by type, area, priority, difficulty, and status
+- **Issue lifecycle:** The workflow from triage → assignment → in-progress → review → closed
+- **Response expectations:** Expected timelines for triage and review feedback
+- **Setting up labels:** How to synchronize labels using `scripts/create-labels.sh`
+
+This guide helps us organize work consistently and ensures smooth collaboration.
+
 ## Getting Started
 
 ### Prerequisites
@@ -32,8 +43,8 @@ To contribute to this project, you will need:
 
 1. Fork and clone the repository:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/stellar-starter-kit.git
-   cd stellar-starter-kit
+   git clone https://github.com/YOUR_USERNAME/stellar-streams.git
+   cd stellar-streams
    ```
 2. Install dependencies:
    ```bash
@@ -75,6 +86,26 @@ We enforce strict formatting and linting rules using **ESLint** and **Prettier**
 - Run linter: `pnpm run lint`
 - Check formatting: `pnpm run format:check`
 - Fix formatting: `pnpm run format:write`
+
+### Smart contract tests & snapshots
+
+The Soroban contracts live in `contracts/` and their unit tests commit generated
+ledger state to `contracts/<contract>/test_snapshots/`. Running the tests is
+what regenerates that state:
+
+```bash
+cargo test --manifest-path contracts/Cargo.toml
+```
+
+**Always commit the regenerated snapshots together with the test change that
+produced them.** A snapshot is derived state — a PR that adds or edits a test
+without its `test_snapshots/` files leaves the repository inconsistent, and the
+next contributor to run the tests gets unrelated diffs in their working tree. If
+you rename or delete a test, remove the snapshot it left behind too: the SDK
+only writes snapshots, it never prunes the ones that no longer have a test.
+
+Full details, including how to check for stale and orphaned snapshots, are in
+the [development guide](docs/development-guide.md#test-snapshots).
 
 ### Git Commit Conventions
 

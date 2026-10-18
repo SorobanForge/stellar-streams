@@ -45,6 +45,7 @@ export function useStream(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -81,10 +82,61 @@ export function useStream(
     void refresh();
   }, [refresh]);
 
+  // Handle polling with visibility awareness
   useEffect(() => {
-    if (!pollMs || !client || id === null) return;
-    const timer = setInterval(() => void refresh(), pollMs);
-    return () => clearInterval(timer);
+    // Skip during SSR or when polling is disabled
+    if (typeof window === 'undefined' || !pollMs || !client || id === null) return;
+
+    // Set up initial polling
+    const startPolling = () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+      timerRef.current = setInterval(() => void refresh(), pollMs);
+      // Initial refresh already handled by the separate useEffect above
+    };
+
+    // Stop polling
+    const stopPolling = () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+
+    // Handle visibility changes
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Resume polling with immediate refresh
+        stopPolling();
+        void refresh(); // Immediate refresh
+        startPolling(); // Then start regular polling
+      } else if (document.visibilityState === 'hidden') {
+        // Pause polling when tab is hidden
+        stopPolling();
+      }
+    };
+
+    // Start polling assuming we begin visible (will be corrected on first visibilitychange if needed)
+    startPolling();
+
+    // Set up visibility change listener if document is available
+    if (document) {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      // Handle initial state (in case we start hidden)
+      if (document.visibilityState === 'hidden') {
+        stopPolling();
+      }
+    }
+
+    // Cleanup
+    return () => {
+      stopPolling();
+      if (document) {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+    };
   }, [pollMs, refresh, client, id]);
 
   return { stream, claimable, loading, error, refresh };
