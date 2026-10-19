@@ -5,7 +5,8 @@ describe('validateStreamInput', () => {
   it('accepts valid stream parameters', () => {
     expect(
       validateStreamInput({
-        recipient: 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF',
+        recipient: 'GC7JRTQX3BQZ2O2F5KEGLD5LM7NU3U7UAK2Z4JU44LBZOXP7T4XCRTM3',
+        token: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
         amount: '100',
         durationDays: '30',
         cliffDays: '7',
