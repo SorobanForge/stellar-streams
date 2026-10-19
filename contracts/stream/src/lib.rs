@@ -54,6 +54,10 @@ pub enum StreamError {
     StreamPaused = 16,
     /// Issue #182: reserved for future strict-idempotency variant.
     NotPaused = 17,
+    /// Issue #181: `top_up` was called after the stream's schedule had ended.
+    StreamCompleted = 18,
+    /// Issue #181: `top_up` arithmetic would exceed the supported range.
+    AmountOverflow = 19,
 }
 
 /// A single linear payment stream. Tokens are locked in the contract and vest
@@ -392,6 +396,59 @@ impl StreamContract {
         }
 
         Ok(ids)
+    }
+
+    /// Add `amount` to a stream's deposit while preserving its payment rate.
+    ///
+    /// Only the stream's sender (the payer) may top it up, and only while the
+    /// stream is still streaming: cancelled streams and streams whose schedule
+    /// has already ended are rejected. The end time is extended by
+    /// `amount * duration / total_amount`, so tokens that have already vested
+    /// stay vested and the recipient keeps earning at the same pace.
+    pub fn top_up(env: Env, stream_id: u64, amount: i128) -> Result<(), StreamError> {
+        let key = DataKey::Stream(stream_id);
+        let mut stream: Stream =
+            env.storage().persistent().get(&key).ok_or(StreamError::StreamNotFound)?;
+
+        stream.sender.require_auth();
+
+        if amount <= 0 {
+            return Err(StreamError::InvalidAmount);
+        }
+        if stream.cancelled {
+            return Err(StreamError::AlreadyCancelled);
+        }
+        if env.ledger().timestamp() >= stream.end_time {
+            return Err(StreamError::StreamCompleted);
+        }
+
+        // Extend the schedule at the stream's current rate. Flooring the
+        // division can only nudge the new rate up, never make already-vested
+        // tokens vest again more slowly.
+        let duration = i128::from(stream.end_time - stream.start_time);
+        let extension =
+            amount.checked_mul(duration).ok_or(StreamError::AmountOverflow)? / stream.total_amount;
+        let extension = u64::try_from(extension).map_err(|_| StreamError::AmountOverflow)?;
+        let new_end_time =
+            stream.end_time.checked_add(extension).ok_or(StreamError::AmountOverflow)?;
+        let new_total =
+            stream.total_amount.checked_add(amount).ok_or(StreamError::AmountOverflow)?;
+
+        // Persist before the transfer, like `withdraw`, so a token callback can
+        // never observe a deposit that has not been fully recorded yet.
+        stream.total_amount = new_total;
+        stream.end_time = new_end_time;
+        env.storage().persistent().set(&key, &stream);
+        env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+
+        token::Client::new(&env, &stream.token).transfer(
+            &stream.sender,
+            env.current_contract_address(),
+            &amount,
+        );
+
+        Ok(())
     }
 
     /// Withdraw the currently vested (and not yet withdrawn) amount to the recipient.

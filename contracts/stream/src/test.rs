@@ -2,8 +2,8 @@
 #![allow(elided_lifetimes_in_paths, mismatched_lifetime_syntaxes)]
 use super::*;
 use soroban_sdk::{
-    testutils::{Events as _, Ledger as _},
-    Env, Event, String, Vec,
+    testutils::{Events as _, Ledger as _, MockAuth, MockAuthInvoke},
+    Env, Event, IntoVal, String, Val, Vec,
 };
 use proptest::prelude::*;
 
@@ -952,6 +952,112 @@ fn test_create_streams_requires_sender_auth() {
     assert!(client.try_create_streams(&sender, &token.id, &entries).is_err());
     assert_eq!(client.next_stream_id(), 1);
     assert_eq!(token.balance(&sender), 1000);
+}
+
+#[test]
+fn test_top_up_extends_schedule_and_keeps_vested_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 2000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 400);
+    assert_eq!(client.withdraw(&id), 400);
+
+    client.top_up(&id, &1000);
+
+    let stream = client.get_stream(&id).unwrap();
+    assert_eq!(stream.total_amount, 2000);
+    // 1000 more tokens at the original 1 token/second rate buys 1000 seconds.
+    assert_eq!(stream.end_time, 2000);
+    assert_eq!(token.balance(&sender), 0);
+    assert_eq!(token.balance(&client.address), 1600);
+    // The already-vested amount did not shrink when the schedule was extended.
+    assert_eq!(client.claimable(&id), 0);
+
+    advance_time(&env, 600); // t = 1000: half of the extended schedule.
+    assert_eq!(client.claimable(&id), 600);
+    assert_eq!(client.withdraw(&id), 600);
+
+    advance_time(&env, 1000); // t = 2000: the extended schedule is complete.
+    assert_eq!(client.withdraw(&id), 1000);
+
+    // Withdrawals before and after the top-up sum to exactly the deposit.
+    assert_eq!(token.balance(&recipient), 2000);
+    assert_eq!(token.balance(&client.address), 0);
+}
+
+#[test]
+fn test_top_up_rejects_non_payer() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    let amount = 500i128;
+    let args: Vec<Val> = Vec::from_array(&env, [id.into_val(&env), amount.into_val(&env)]);
+    // Only the recipient authorizes: the payer's `require_auth` must still fail.
+    env.mock_auths(&[MockAuth {
+        address: &recipient,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "top_up",
+            args,
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(client.try_top_up(&id, &amount).is_err());
+
+    // The rejected call moved no tokens and left the stream untouched.
+    let stream = client.get_stream(&id).unwrap();
+    assert_eq!(stream.total_amount, 1000);
+    assert_eq!(stream.end_time, 1000);
+    assert_eq!(token.balance(&sender), 0);
+    assert_eq!(token.balance(&client.address), 1000);
+}
+
+#[test]
+fn test_top_up_rejects_cancelled_stream() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 300);
+    client.cancel(&id);
+
+    assert_eq!(client.try_top_up(&id, &500), Err(Ok(StreamError::AlreadyCancelled)));
+    assert_eq!(token.balance(&sender), 700);
+}
+
+#[test]
+fn test_top_up_rejects_completed_stream() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 1000);
+
+    assert_eq!(client.try_top_up(&id, &500), Err(Ok(StreamError::StreamCompleted)));
+}
+
+#[test]
+fn test_top_up_rejects_non_positive_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    assert_eq!(client.try_top_up(&id, &0), Err(Ok(StreamError::InvalidAmount)));
+    assert_eq!(client.try_top_up(&id, &-1), Err(Ok(StreamError::InvalidAmount)));
 }
 
 /// Proves that a full [`MAX_BATCH`] batch fits comfortably in a mainnet
