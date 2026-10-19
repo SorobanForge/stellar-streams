@@ -12,7 +12,9 @@ import {
   xdr,
 } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
-import { decodeStreamEvent } from './events';
+// Explicit extension: tsc keeps this specifier as written in dist, and Node's
+// ESM resolver will not load a directory, so the published entry fails without it.
+import { decodeStreamEvent } from './events.js';
 // Type-only: the SDK never imports another workspace package at runtime, so
 // its tests run in CI's `test` job straight off a checkout with no build step.
 import type {
@@ -22,8 +24,7 @@ import type {
   Stream,
   StreamConfig,
 } from '@stellar-starter-kit/types';
-import { normalizeEscrow, normalizeStream } from '@stellar-starter-kit/types';
-import type { RawEscrow, RawStream } from '@stellar-starter-kit/types';
+import { normalizeConfig, normalizeEscrow, normalizeStream } from '@stellar-starter-kit/types';
 
 /** Options for changing an operation from outside, e.g. cancelling it when a page unmounts. */
 export interface WriteOptions {
@@ -881,11 +882,11 @@ export class StreamsClient extends SorobanClient {
    * ```
    */
   async getStream(id: bigint | number | string): Promise<Stream | null> {
-    const raw = (await this.simulate(
+    const raw = await this.simulate(
       'get_stream',
       nativeToScVal(BigInt(id), { type: 'u64' }),
-    )) as RawStream | null;
-    return raw ? normalizeStream(raw) : null;
+    );
+    return raw === null ? null : normalizeStream(raw);
   }
 
   /**
@@ -902,9 +903,9 @@ export class StreamsClient extends SorobanClient {
    * ```
    */
   async getConfig(): Promise<StreamConfig | null> {
-    const raw = (await this.simulate('get_config')) as RawConfig | null;
-    if (!raw) return null;
-    return { admin: raw.admin, treasury: raw.treasury, feeBps: Number(raw.fee_bps) };
+    const raw = await this.simulate('get_config');
+    if (raw === null) return null;
+    return normalizeConfig(raw);
   }
 
   /**
@@ -1240,11 +1241,11 @@ export class EscrowClient extends SorobanClient {
 
   /** Fetch an escrow by id. Returns `null` if it does not exist. */
   async getEscrow(id: bigint | number | string): Promise<Escrow | null> {
-    const raw = (await this.simulate(
+    const raw = await this.simulate(
       'get_escrow',
       nativeToScVal(BigInt(id), { type: 'u64' }),
-    )) as RawEscrow | null;
-    return raw ? normalizeEscrow(raw) : null;
+    );
+    return raw === null ? null : normalizeEscrow(raw);
   }
 
   /**
@@ -1320,12 +1321,6 @@ export class EscrowClient extends SorobanClient {
       opts,
     );
   }
-}
-
-interface RawConfig {
-  admin: string;
-  treasury: string;
-  fee_bps: number;
 }
 
 function assertTokenId(tokenId: string): void {

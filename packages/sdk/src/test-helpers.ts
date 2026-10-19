@@ -14,7 +14,7 @@ import {
   StreamsClient,
   type StreamsClientOptions,
   type StreamsTransport,
-} from './index';
+} from './index.js';
 
 export const NETWORK_PASSPHRASE = 'Test SDF Network ; September 2015';
 export const CONTRACT_ID = StrKey.encodeContract(Buffer.alloc(32, 1));

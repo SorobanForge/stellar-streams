@@ -1,12 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { FreighterAdapter } from './freighter';
 
-vi.mock('@stellar/freighter-api', () => ({
-  isConnected: vi.fn(),
-  getAddress: vi.fn(),
-  requestAccess: vi.fn(),
-  signTransaction: vi.fn(),
-}));
+// The source imports the CommonJS package's default export, while these tests
+// assert on the named ones, so both point at the same mocks.
+vi.mock('@stellar/freighter-api', () => {
+  const isConnected = vi.fn();
+  const getAddress = vi.fn();
+  const requestAccess = vi.fn();
+  const signTransaction = vi.fn();
+  const api = { isConnected, getAddress, requestAccess, signTransaction };
+  return { ...api, default: api };
+});
 
 import { isConnected, getAddress, requestAccess, signTransaction } from '@stellar/freighter-api';
 

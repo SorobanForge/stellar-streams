@@ -7,7 +7,7 @@ import {
   HanaAdapter,
   RabetAdapter,
   type WalletAdapter,
-} from './adapters';
+} from './adapters/index.js';
 
 export type WalletType = 'freighter' | 'albedo' | 'rabe' | 'hana';
 

@@ -5,13 +5,16 @@ import { WalletProvider, useWallet } from './WalletProvider';
 import * as freighter from '@stellar/freighter-api';
 import albedo from '@albedo-link/intent';
 
-// Mock Freighter API
-vi.mock('@stellar/freighter-api', () => ({
-  isConnected: vi.fn(),
-  getAddress: vi.fn(),
-  requestAccess: vi.fn(),
-  signTransaction: vi.fn(),
-}));
+// Mock Freighter API. The source imports the CommonJS package's default export,
+// while these tests assert on the named ones, so both point at the same mocks.
+vi.mock('@stellar/freighter-api', () => {
+  const isConnected = vi.fn();
+  const getAddress = vi.fn();
+  const requestAccess = vi.fn();
+  const signTransaction = vi.fn();
+  const api = { isConnected, getAddress, requestAccess, signTransaction };
+  return { ...api, default: api };
+});
 
 // Mock Albedo API
 vi.mock('@albedo-link/intent', () => ({
