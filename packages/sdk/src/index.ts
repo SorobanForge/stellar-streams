@@ -19,10 +19,11 @@ import type {
   CreateEscrowParams,
   CreateStreamParams,
   Escrow,
-  EscrowStatus,
   Stream,
   StreamConfig,
 } from '@stellar-starter-kit/types';
+import { normalizeEscrow, normalizeStream } from '@stellar-starter-kit/types';
+import type { RawEscrow, RawStream } from '@stellar-starter-kit/types';
 
 /** Options for changing an operation from outside, e.g. cancelling it when a page unmounts. */
 export interface WriteOptions {
@@ -1321,83 +1322,10 @@ export class EscrowClient extends SorobanClient {
   }
 }
 
-interface RawStream {
-  id: bigint;
-  sender: string;
-  recipient: string;
-  token: string;
-  total_amount: bigint;
-  withdrawn: bigint;
-  start_time: bigint;
-  end_time: bigint;
-  cliff_time: bigint;
-  label: string;
-  reference: string;
-  cancelled: boolean;
-}
-
 interface RawConfig {
   admin: string;
   treasury: string;
   fee_bps: number;
-}
-
-interface RawEscrow {
-  id: bigint;
-  payer: string;
-  payee: string;
-  arbiter: string;
-  token: string;
-  amount: bigint;
-  deadline: bigint;
-  status: number;
-}
-
-function normalizeStream(raw: RawStream): Stream {
-  return {
-    id: raw.id.toString(),
-    sender: raw.sender,
-    recipient: raw.recipient,
-    token: raw.token,
-    totalAmount: raw.total_amount.toString(),
-    withdrawn: raw.withdrawn.toString(),
-    startTime: Number(raw.start_time),
-    endTime: Number(raw.end_time),
-    cliffTime: Number(raw.cliff_time),
-    label: raw.label,
-    reference: raw.reference,
-    cancelled: raw.cancelled,
-  };
-}
-
-function normalizeEscrow(raw: RawEscrow): Escrow {
-  return {
-    id: raw.id.toString(),
-    payer: raw.payer,
-    payee: raw.payee,
-    arbiter: raw.arbiter,
-    token: raw.token,
-    amount: raw.amount.toString(),
-    deadline: Number(raw.deadline),
-    status: escrowStatusFromIndex(Number(raw.status)),
-  };
-}
-
-/** Maps the escrow contract's numeric status discriminant to its name, in enum order. */
-const ESCROW_STATUSES: readonly EscrowStatus[] = [
-  'created',
-  'funded',
-  'released',
-  'refunded',
-  'cancelled',
-];
-
-function escrowStatusFromIndex(index: number): EscrowStatus {
-  const status = ESCROW_STATUSES[index];
-  if (!status) {
-    throw new Error(`Unknown escrow status index: ${index}`);
-  }
-  return status;
 }
 
 function assertTokenId(tokenId: string): void {

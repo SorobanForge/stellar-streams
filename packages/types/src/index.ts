@@ -35,6 +35,40 @@ export interface Stream {
   cancelled: boolean;
 }
 
+/** Raw values returned by the Soroban `stream` contract. */
+export interface RawStream {
+  id: bigint;
+  sender: string;
+  recipient: string;
+  token: string;
+  total_amount: bigint;
+  withdrawn: bigint;
+  start_time: bigint;
+  end_time: bigint;
+  cliff_time: bigint;
+  label: string;
+  reference: string;
+  cancelled: boolean;
+}
+
+/** Convert the generated snake_case contract result into the UI domain shape. */
+export function normalizeStream(raw: RawStream): Stream {
+  return {
+    id: raw.id.toString(),
+    sender: raw.sender,
+    recipient: raw.recipient,
+    token: raw.token,
+    totalAmount: raw.total_amount.toString(),
+    withdrawn: raw.withdrawn.toString(),
+    startTime: Number(raw.start_time),
+    endTime: Number(raw.end_time),
+    cliffTime: Number(raw.cliff_time),
+    label: raw.label,
+    reference: raw.reference,
+    cancelled: raw.cancelled,
+  };
+}
+
 /** Protocol configuration, mirroring the contract's `Config` struct. */
 export interface StreamConfig {
   admin: string;
@@ -78,6 +112,26 @@ export interface Split {
   totalShares: number;
 }
 
+/** Raw values returned by the Soroban `splits` contract. */
+export interface RawSplit {
+  id: bigint;
+  creator: string;
+  recipients: string[];
+  shares: number[];
+  total_shares: number;
+}
+
+/** Convert a generated snake_case split result into the domain shape. */
+export function normalizeSplit(raw: RawSplit): Split {
+  return {
+    id: raw.id.toString(),
+    creator: raw.creator,
+    recipients: raw.recipients,
+    shares: raw.shares,
+    totalShares: raw.total_shares,
+  };
+}
+
 /** Derives a human-facing status for a stream at a given timestamp. */
 export function getStreamStatus(stream: Stream, now: number): StreamStatus {
   if (stream.cancelled) return 'cancelled';
@@ -104,9 +158,41 @@ export interface Escrow {
   arbiter: string;
   token: string;
   amount: string;
-  deadline: number;
+  deadline: string;
   status: EscrowStatus;
 }
+
+/** Raw values returned by the Soroban `escrow` contract. */
+export interface RawEscrow {
+  id: bigint;
+  payer: string;
+  payee: string;
+  arbiter: string;
+  token: string;
+  amount: bigint;
+  deadline: bigint;
+  status: number;
+}
+
+/** Convert a generated snake_case escrow result into the domain shape. */
+export function normalizeEscrow(raw: RawEscrow): Escrow {
+  const status = ESCROW_STATUSES[Number(raw.status)];
+  if (!status) throw new Error(`Unknown escrow status index: ${raw.status}`);
+  return {
+    id: raw.id.toString(),
+    payer: raw.payer,
+    payee: raw.payee,
+    arbiter: raw.arbiter,
+    token: raw.token,
+    amount: raw.amount.toString(),
+    deadline: raw.deadline.toString(),
+    status,
+  };
+}
+
+const ESCROW_STATUSES: readonly EscrowStatus[] = [
+  'created', 'funded', 'released', 'refunded', 'cancelled',
+];
 
 /**
  * Inputs for `create_escrow`. `id` is chosen by the caller (the escrow
@@ -121,5 +207,5 @@ export interface CreateEscrowParams {
   arbiter: string;
   token: string;
   amount: string;
-  deadline: number;
+  deadline: string;
 }
