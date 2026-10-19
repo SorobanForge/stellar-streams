@@ -47,8 +47,6 @@ pub enum StreamError {
     TreasuryNotSet = 10,
     MetadataTooLong = 11,
     InvalidStartTime = 12,
-    // 12 is intentionally skipped: it is claimed by in-flight PRs against this
-    // enum. New variants continue from 13 so existing codes never shift.
     EmptyBatch = 13,
     BatchTooLarge = 14,
     BatchOverflow = 15,
@@ -207,6 +205,7 @@ impl StreamContract {
         let old_fee_bps: u32 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
         env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
         env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        FeeUpdated { old_fee_bps, new_fee_bps: fee_bps }.publish(&env);
         Ok(())
     }
 
@@ -217,6 +216,7 @@ impl StreamContract {
         admin.require_auth();
         env.storage().instance().set(&DataKey::Treasury, &treasury);
         env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        TreasuryUpdated { treasury }.publish(&env);
         Ok(())
     }
 
@@ -244,22 +244,7 @@ impl StreamContract {
     ) -> Result<u64, StreamError> {
         sender.require_auth();
 
-        if amount <= 0 {
-            return Err(StreamError::InvalidAmount);
-        }
-        if start_time < env.ledger().timestamp() {
-            return Err(StreamError::InvalidStartTime);
-        }
-        if end_time <= start_time {
-            return Err(StreamError::InvalidTimeRange);
-        }
-        if cliff_time < start_time || cliff_time > end_time {
-            return Err(StreamError::InvalidCliff);
-        }
-        if label.len() > MAX_LABEL_LEN || reference.len() > MAX_REFERENCE_LEN {
-            return Err(StreamError::MetadataTooLong);
-        }
-        validate_stream(amount, start_time, end_time, cliff_time, &label, &reference)?;
+        validate_stream(&env, amount, start_time, end_time, cliff_time, &label, &reference)?;
 
         // Pull the full stream amount into the contract up front, so a stream is
         // never recorded without the funds that back it.
@@ -347,7 +332,7 @@ impl StreamContract {
         let mut total_deposit: i128 = 0;
         for entry in entries.iter() {
             let (_, amount, start_time, cliff_time, end_time) = entry;
-            validate_stream(amount, start_time, end_time, cliff_time, &label, &label)?;
+            validate_stream(&env, amount, start_time, end_time, cliff_time, &label, &label)?;
             total_deposit = total_deposit.checked_add(amount).ok_or(StreamError::BatchOverflow)?;
         }
         debug_assert!(total_deposit > 0);
@@ -590,6 +575,7 @@ impl StreamContract {
 /// `start_time` before the cliff is checked, which keeps the error a caller sees
 /// for a given input identical on both paths.
 fn validate_stream(
+    env: &Env,
     amount: i128,
     start_time: u64,
     end_time: u64,
@@ -599,6 +585,9 @@ fn validate_stream(
 ) -> Result<(), StreamError> {
     if amount <= 0 {
         return Err(StreamError::InvalidAmount);
+    }
+    if start_time < env.ledger().timestamp() {
+        return Err(StreamError::InvalidStartTime);
     }
     if end_time <= start_time {
         return Err(StreamError::InvalidTimeRange);

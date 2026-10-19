@@ -80,7 +80,7 @@ export const StreamError = {
   9: {message:"AlreadyInitialized"},
   10: {message:"TreasuryNotSet"},
   11: {message:"MetadataTooLong"},
-  12: {message:"InvalidStartTime"}
+  12: {message:"InvalidStartTime"},
   13: {message:"EmptyBatch"},
   14: {message:"BatchTooLarge"},
   15: {message:"BatchOverflow"}
