@@ -3,6 +3,7 @@ import {
   formatAddress,
   formatStroopsToXlm,
   parseXlmToStroops,
+  mulDiv,
   formatDuration,
   computeVestedAmount,
   computeProgressBps,
@@ -183,6 +184,27 @@ describe('parseTokenAmount', () => {
   });
 });
 
+describe('mulDiv', () => {
+  it('returns floor of a*b/c for small values', () => {
+    expect(mulDiv(10n, 3n, 4n)).toBe(7n);
+  });
+
+  it('throws on division by zero', () => {
+    expect(() => mulDiv(1n, 2n, 0n)).toThrow('mulDiv: division by zero');
+  });
+
+  it('handles values near i128 bounds', () => {
+    const max = 2n ** 127n - 1n;
+    expect(mulDiv(max, 1n, 1n)).toBe(max);
+    expect(mulDiv(max, 2n, 2n)).toBe(max);
+  });
+
+  it('handles remainder division with floor semantics', () => {
+    expect(mulDiv(7n, 1n, 2n)).toBe(3n);
+    expect(mulDiv(100n, 33n, 7n)).toBe(471n);
+  });
+});
+
 describe('vestingCurve', () => {
   it('returns { t, vested }[] including both endpoints and the exact cliff point', () => {
     const stream = {
@@ -193,20 +215,16 @@ describe('vestingCurve', () => {
     };
     const curve = vestingCurve(stream, 10);
 
-    // Endpoints
     expect(curve[0].t).toBe(1_000);
     expect(curve[0].vested).toBe(0n);
 
     expect(curve[curve.length - 1].t).toBe(2_000);
     expect(curve[curve.length - 1].vested).toBe(10_000n);
 
-    // Exact cliff point exists
     const cliffPoint = curve.find((p) => p.t === 1_400);
     expect(cliffPoint).toBeDefined();
-    // At cliff (t=1400, elapsed=400, duration=1000), 10_000 * 400 / 1000 = 4_000
     expect(cliffPoint!.vested).toBe(4_000n);
 
-    // Points strictly before cliff are 0
     const beforeCliff = curve.filter((p) => p.t < 1_400);
     expect(beforeCliff.length).toBeGreaterThan(0);
     for (const p of beforeCliff) {
@@ -225,14 +243,11 @@ describe('vestingCurve', () => {
 
     expect(curve.length).toBeGreaterThanOrEqual(25);
     for (let i = 0; i < curve.length; i++) {
-      // Never exceeds deposit
       expect(curve[i].vested).toBeLessThanOrEqual(5_000n);
       expect(curve[i].vested).toBeGreaterThanOrEqual(0n);
 
       if (i > 0) {
-        // Monotonic non-decreasing vested values
         expect(curve[i].vested >= curve[i - 1].vested).toBe(true);
-        // Strictly ascending timestamps
         expect(curve[i].t).toBeGreaterThan(curve[i - 1].t);
       }
     }
@@ -271,13 +286,11 @@ describe('vestingCurve', () => {
   });
 
   it('handles cliff equal to start and cliff equal to end', () => {
-    // Cliff at start
     const cliffAtStart = vestingCurve({ start: 0, cliff: 0, end: 100, deposit: 100n }, 5);
     expect(cliffAtStart[0].t).toBe(0);
     expect(cliffAtStart[cliffAtStart.length - 1].t).toBe(100);
     expect(cliffAtStart[cliffAtStart.length - 1].vested).toBe(100n);
 
-    // Cliff at end
     const cliffAtEnd = vestingCurve({ start: 0, cliff: 100, end: 100, deposit: 100n }, 5);
     const endPoint = cliffAtEnd.find((p) => p.t === 100);
     expect(endPoint?.vested).toBe(100n);
