@@ -5,6 +5,7 @@ use soroban_sdk::{
     testutils::{Events as _, Ledger as _},
     Env, Event, String, Vec,
 };
+use proptest::prelude::*;
 
 #[path = "../../test-support/test_support.rs"]
 mod support;
@@ -970,4 +971,176 @@ fn test_create_streams_max_batch_fits_mainnet_limits() {
         used.contract_events_size_bytes,
         EVENTS_BYTES,
     );
+}
+
+// Property-based tests for vesting function
+proptest! {
+    #[test]
+    fn prop_vested_never_exceeds_total(
+        total_amount in 1i128..1_000_000i128,
+        start_time in 0u64..10_000u64,
+        duration in 1u64..10_000u64,
+        cliff_offset in 0u64..10_000u64,
+        now_offset in 0u64..20_000u64
+    ) {
+        let end_time = start_time + duration;
+        let cliff_time = (start_time + cliff_offset).min(end_time);
+        let now = start_time + now_offset;
+
+        let stream = Stream {
+            id: 1,
+            sender: Address::generate(&Env::default()),
+            recipient: Address::generate(&Env::default()),
+            token: Address::generate(&Env::default()),
+            total_amount,
+            withdrawn: 0,
+            start_time,
+            end_time,
+            cliff_time,
+            label: String::from_str(&Env::default(), ""),
+            reference: String::from_str(&Env::default(), ""),
+            cancelled: false,
+            paused_at: None,
+            total_paused: 0,
+        };
+
+        let vested = vested_amount(&stream, now);
+        prop_assert!(vested <= total_amount, "vested {} should not exceed total {}", vested, total_amount);
+    }
+
+    #[test]
+    fn prop_vested_is_monotonic(
+        total_amount in 1i128..1_000_000i128,
+        start_time in 0u64..10_000u64,
+        duration in 1u64..10_000u64,
+        cliff_offset in 0u64..10_000u64,
+        now1_offset in 0u64..20_000u64,
+        now2_offset in 0u64..20_000u64
+    ) {
+        let end_time = start_time + duration;
+        let cliff_time = (start_time + cliff_offset).min(end_time);
+        let now1 = start_time + now1_offset;
+        let now2 = start_time + now2_offset;
+
+        let stream = Stream {
+            id: 1,
+            sender: Address::generate(&Env::default()),
+            recipient: Address::generate(&Env::default()),
+            token: Address::generate(&Env::default()),
+            total_amount,
+            withdrawn: 0,
+            start_time,
+            end_time,
+            cliff_time,
+            label: String::from_str(&Env::default(), ""),
+            reference: String::from_str(&Env::default(), ""),
+            cancelled: false,
+            paused_at: None,
+            total_paused: 0,
+        };
+
+        let vested1 = vested_amount(&stream, now1);
+        let vested2 = vested_amount(&stream, now2);
+
+        if now2 >= now1 {
+            prop_assert!(vested2 >= vested1, "vested should be monotonic: now1={}, vested1={}, now2={}, vested2={}", now1, vested1, now2, vested2);
+        }
+    }
+
+    #[test]
+    fn prop_vested_at_end_equals_total(
+        total_amount in 1i128..1_000_000i128,
+        start_time in 0u64..10_000u64,
+        duration in 1u64..10_000u64,
+        cliff_offset in 0u64..10_000u64
+    ) {
+        let end_time = start_time + duration;
+        let cliff_time = (start_time + cliff_offset).min(end_time);
+
+        let stream = Stream {
+            id: 1,
+            sender: Address::generate(&Env::default()),
+            recipient: Address::generate(&Env::default()),
+            token: Address::generate(&Env::default()),
+            total_amount,
+            withdrawn: 0,
+            start_time,
+            end_time,
+            cliff_time,
+            label: String::from_str(&Env::default(), ""),
+            reference: String::from_str(&Env::default(), ""),
+            cancelled: false,
+            paused_at: None,
+            total_paused: 0,
+        };
+
+        let vested = vested_amount(&stream, end_time);
+        prop_assert_eq!(vested, total_amount, "vested at end_time should equal total");
+    }
+
+    #[test]
+    fn prop_vested_zero_before_start(
+        total_amount in 1i128..1_000_000i128,
+        start_time in 100u64..10_000u64,
+        duration in 1u64..10_000u64,
+        cliff_offset in 0u64..10_000u64,
+        before_offset in 1u64..100u64
+    ) {
+        let end_time = start_time + duration;
+        let cliff_time = (start_time + cliff_offset).min(end_time);
+        let now = start_time.saturating_sub(before_offset);
+
+        let stream = Stream {
+            id: 1,
+            sender: Address::generate(&Env::default()),
+            recipient: Address::generate(&Env::default()),
+            token: Address::generate(&Env::default()),
+            total_amount,
+            withdrawn: 0,
+            start_time,
+            end_time,
+            cliff_time,
+            label: String::from_str(&Env::default(), ""),
+            reference: String::from_str(&Env::default(), ""),
+            cancelled: false,
+            paused_at: None,
+            total_paused: 0,
+        };
+
+        let vested = vested_amount(&stream, now);
+        prop_assert_eq!(vested, 0, "vested before start_time should be zero");
+    }
+
+    #[test]
+    fn prop_vested_zero_before_cliff(
+        total_amount in 1i128..1_000_000i128,
+        start_time in 0u64..10_000u64,
+        duration in 1u64..10_000u64,
+        cliff_offset in 1u64..10_000u64,
+        before_cliff_offset in 1u64..100u64
+    ) {
+        let end_time = start_time + duration;
+        let cliff_time = (start_time + cliff_offset).min(end_time);
+        let now = cliff_time.saturating_sub(before_cliff_offset);
+
+        let stream = Stream {
+            id: 1,
+            sender: Address::generate(&Env::default()),
+            recipient: Address::generate(&Env::default()),
+            token: Address::generate(&Env::default()),
+            total_amount,
+            withdrawn: 0,
+            start_time,
+            end_time,
+            cliff_time,
+            label: String::from_str(&Env::default(), ""),
+            reference: String::from_str(&Env::default(), ""),
+            cancelled: false,
+            paused_at: None,
+            total_paused: 0,
+        };
+
+        let vested = vested_amount(&stream, now);
+        prop_assert_eq!(vested, 0, "vested before cliff_time should be zero");
+    }
 }
