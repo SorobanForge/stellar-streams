@@ -2,10 +2,12 @@
 
 import React from 'react';
 import { Star, Github } from 'lucide-react';
+import { CONTRACT_VERSION } from '@stellar-starter-kit/contracts';
 import Logo from './Logo';
 import { REPO_URL } from '../lib/constants';
 
 const REPO = REPO_URL;
+const NETWORK_LABEL = (process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? 'testnet').toUpperCase();
 
 export default function Footer() {
   return (
@@ -124,6 +126,9 @@ export default function Footer() {
         <div className="flex flex-col items-center justify-between gap-4 border-t border-slate-900 pt-8 text-xs text-slate-500 md:flex-row">
           <div>&copy; {new Date().getFullYear()} Stellar Streams. MIT licensed.</div>
           <div className="flex items-center gap-2">
+            <span className="rounded border border-slate-800 px-2 py-0.5 font-mono text-[11px]">
+              {NETWORK_LABEL} · contract v{CONTRACT_VERSION}
+            </span>
             <span>Maintained by SorobanForge and the community</span>
             <Star className="h-3 w-3 fill-yellow-500/20 text-yellow-500/80" />
           </div>

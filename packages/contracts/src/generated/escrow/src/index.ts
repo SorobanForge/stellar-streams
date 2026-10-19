@@ -72,6 +72,13 @@ export enum EscrowStatus {
 
 export interface Client {
   /**
+   * Construct and simulate a version transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * The contract interface version, shared by every contract in the
+   * workspace.
+   */
+  version: (options?: MethodOptions) => Promise<AssembledTransaction<u32>>
+
+  /**
    * Construct and simulate a get_escrow transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    * Get escrow details by ID.
    */
@@ -143,6 +150,7 @@ export class Client extends ContractClient {
         "AAAABQAAADZFbWl0dGVkIHdoZW4gZXNjcm93ZWQgZnVuZHMgYXJlIHJlZnVuZGVkIHRvIHRoZSBwYXllci4AAAAAAAAAAAAORXNjcm93UmVmdW5kZWQAAAAAAAIAAAAGZXNjcm93AAAAAAAIcmVmdW5kZWQAAAAEAAAAAAAAAAJpZAAAAAAABgAAAAEAAAAAAAAABmNhbGxlcgAAAAAAEwAAAAAAAAAAAAAABXBheWVyAAAAAAAAEwAAAAAAAAAAAAAABmFtb3VudAAAAAAACwAAAAAAAAAC",
         "AAAABQAAADZFbWl0dGVkIHdoZW4gZXNjcm93ZWQgZnVuZHMgYXJlIHJlbGVhc2VkIHRvIHRoZSBwYXllZS4AAAAAAAAAAAAORXNjcm93UmVsZWFzZWQAAAAAAAIAAAAGZXNjcm93AAAAAAAIcmVsZWFzZWQAAAAEAAAAAAAAAAJpZAAAAAAABgAAAAEAAAAAAAAABmNhbGxlcgAAAAAAEwAAAAAAAAAAAAAABXBheWVlAAAAAAAAEwAAAAAAAAAAAAAABmFtb3VudAAAAAAACwAAAAAAAAAC",
         "AAAABQAAACRFbWl0dGVkIHdoZW4gYW4gZXNjcm93IGlzIGNhbmNlbGxlZC4AAAAAAAAAD0VzY3Jvd0NhbmNlbGxlZAAAAAACAAAABmVzY3JvdwAAAAAACWNhbmNlbGxlZAAAAAAAAAIAAAAAAAAAAmlkAAAAAAAGAAAAAQAAAAAAAAAFcGF5ZXIAAAAAAAATAAAAAAAAAAI=",
+        "AAAAAAAAAEpUaGUgY29udHJhY3QgaW50ZXJmYWNlIHZlcnNpb24sIHNoYXJlZCBieSBldmVyeSBjb250cmFjdCBpbiB0aGUKd29ya3NwYWNlLgAAAAAAB3ZlcnNpb24AAAAAAAAAAAEAAAAE",
         "AAAAAAAAABlHZXQgZXNjcm93IGRldGFpbHMgYnkgSUQuAAAAAAAACmdldF9lc2Nyb3cAAAAAAAEAAAAAAAAAAmlkAAAAAAAGAAAAAQAAA+gAAAfQAAAABkVzY3JvdwAA",
         "AAAAAAAAAFtGdW5kIHRoZSBlc2Nyb3cgYnkgdHJhbnNmZXJyaW5nIHRoZSBzcGVjaWZpZWQgYW1vdW50IG9mIHRva2VucyBmcm9tIHBheWVyIHRvIHRoaXMgY29udHJhY3QuAAAAAAtmdW5kX2VzY3JvdwAAAAABAAAAAAAAAAJpZAAAAAAABgAAAAEAAAPpAAAAAgAAB9AAAAALRXNjcm93RXJyb3IA",
         "AAAAAAAAAIRDYW5jZWwgdGhlIGVzY3Jvdy4gQ2FuIGJlIGNhbmNlbGxlZCBieSBwYXllciBpbW1lZGlhdGVseSBpZiB1bmZ1bmRlZCAoQ3JlYXRlZCksCm9yIGFmdGVyIHRoZSBkZWFkbGluZSBoYXMgcGFzc2VkIGlmIGZ1bmRlZCAoRnVuZGVkKS4AAAANY2FuY2VsX2VzY3JvdwAAAAAAAAIAAAAAAAAAAmlkAAAAAAAGAAAAAAAAAAZjYWxsZXIAAAAAABMAAAABAAAD6QAAAAIAAAfQAAAAC0VzY3Jvd0Vycm9yAA==",
@@ -154,7 +162,8 @@ export class Client extends ContractClient {
     )
   }
   public readonly fromJSON = {
-    get_escrow: this.txFromJSON<Option<Escrow>>,
+    version: this.txFromJSON<u32>,
+        get_escrow: this.txFromJSON<Option<Escrow>>,
         fund_escrow: this.txFromJSON<Result<void>>,
         cancel_escrow: this.txFromJSON<Result<void>>,
         create_escrow: this.txFromJSON<Result<u64>>,

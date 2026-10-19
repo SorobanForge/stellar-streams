@@ -207,3 +207,36 @@ grep -oP '(?<=fn )\w+(?=\(\))' contracts/stream/src/test.rs | sort
 
 A name in the first list but not the second is an orphan; in the second but not
 the first means the snapshot is simply missing and one test run will create it.
+
+---
+
+## 3. Generating the SDK API Reference
+
+`packages/sdk` publishes its full public surface — `StreamsClient` and its
+methods, `StreamsError`, `assetContractId`, `StreamsClientOptions`,
+`TokenMetadata` and the error-code unions — as an HTML API reference built with
+[TypeDoc](https://typedoc.org). Every exported member carries JSDoc with
+`@param`, `@returns`, `@throws` and copy-pasteable `@example` blocks, which
+TypeDoc renders into the site so contributors can check signatures and usage
+against the generated reference instead of only the README snippet.
+
+### Regenerate
+
+```bash
+pnpm --filter @stellar-starter-kit/sdk docs
+```
+
+This runs `typedoc` with the config at
+[`packages/sdk/typedoc.json`](../packages/sdk/typedoc.json) and writes the site
+to `docs/api/` (an `index.html` plus per-symbol pages under `classes/`,
+`functions/`, `interfaces/` and `types/`).
+
+### The output is not committed
+
+`docs/api/` is a generated artifact and is **gitignored** (see `.gitignore`);
+regenerate it locally whenever the SDK's public surface or its doc comments
+change, rather than committing the rendered HTML. Add or update the JSDoc on the
+exported members in `packages/sdk/src/index.ts` and re-run the command above to
+refresh the reference. The build reports `Found 0 errors and 0 warnings` when
+every `{@link}` resolves; a broken intra-package link surfaces there as a
+warning, not a silent gap.

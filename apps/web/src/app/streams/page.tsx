@@ -28,10 +28,10 @@ import {
 import Header from '../../components/Header';
 import Footer from '../../components/Footer';
 import {
-  getStreamDurationSeconds,
-  getStreamCliffSeconds,
-  validateStreamInput,
-} from '../../lib/stream-validation';
+  DEFAULT_NETWORK_PASSPHRASE,
+  DEFAULT_SOROBAN_RPC_URL,
+  DEFAULT_TOKEN_CONTRACT_ID,
+} from '../../lib/constants';
 
 // framer-motion stays out of the initial route bundle; the banner only loads
 // when an error/success message is shown.
@@ -39,14 +39,12 @@ const NotificationBanner = dynamic(() => import('../../components/NotificationBa
   ssr: false,
 });
 
-const RPC_URL = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? 'https://soroban-testnet.stellar.org';
+const RPC_URL = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? DEFAULT_SOROBAN_RPC_URL;
 const NETWORK_PASSPHRASE =
-  process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ?? 'Test SDF Network ; September 2015';
+  process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ?? DEFAULT_NETWORK_PASSPHRASE;
 const CONTRACT_ID = process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID ?? '';
-// Testnet native XLM SAC; any SEP-41 token contract id works.
-const DEFAULT_TOKEN =
-  process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ||
-  'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
+// Testnet native XLM SAC by default; any SEP-41 token contract id works.
+const DEFAULT_TOKEN = process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID || DEFAULT_TOKEN_CONTRACT_ID;
 const EXPERT_URL = process.env.NEXT_PUBLIC_STELLAR_EXPERT_URL ?? 'https://stellar.expert';
 
 export default function StreamsDashboard() {

@@ -575,3 +575,10 @@ fn test_create_escrow_bumps_next_id_ttl() {
     assert_eq!(ttl_after_second_create, BUMP_LIMIT);
     assert_eq!(client.next_escrow_id(), 3);
 }
+
+#[test]
+fn test_version_matches_shared_constant() {
+    let env = Env::default();
+    let client = register(&env);
+    assert_eq!(client.version(), CONTRACT_VERSION);
+}

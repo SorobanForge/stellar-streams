@@ -263,3 +263,10 @@ fn test_propagated_reentry_rolls_back_the_whole_distribute() {
     assert_eq!(token.balance(&client.address), 0);
     assert_eq!(token.last_reentry(), None);
 }
+
+#[test]
+fn test_version_matches_shared_constant() {
+    let env = Env::default();
+    let client = register(&env);
+    assert_eq!(client.version(), CONTRACT_VERSION);
+}

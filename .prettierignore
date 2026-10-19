@@ -12,6 +12,9 @@ pnpm-lock.yaml
 **/generated/**
 **/test_snapshots/**
 
+# Generated API reference (typedoc output)
+docs/api
+
 # Third-party patches
 contracts/patches/
 

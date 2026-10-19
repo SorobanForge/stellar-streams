@@ -1,0 +1,16 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "@stellar-starter-kit/sdk",
+  "entryPoints": ["src/index.ts"],
+  "out": "../../docs/api",
+  "readme": "none",
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "disableSources": true,
+  "treatWarningsAsErrors": false,
+  "searchInComments": true,
+  "navigation": {
+    "includeGroups": false,
+    "includeCategories": false
+  }
+}

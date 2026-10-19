@@ -14,6 +14,11 @@ embeds the same numbers in the generated bindings, and `@stellar-starter-kit/sdk
 surfaces them to callers, so a variant must never be renumbered or removed:
 **append only.**
 
+All three contracts expose `version() -> u32`, sourced from the shared
+`CONTRACT_VERSION` constant in `contracts/version/src/lib.rs`. The value
+identifies the interface generation, not the deployed WASM: bump the constant
+once for a release that changes an interface, and every contract reports it.
+
 ---
 
 ## `stream` — `StreamContract`
@@ -37,6 +42,7 @@ between `start_time` and `end_time`, with an optional cliff.
 | `get_stream`     | `stream_id: u64`                                                                                                                                       | `Option<Stream>`                                                        | —              |
 | `get_config`     | —                                                                                                                                                      | `Option<Config>` (`None` if uninitialized)                              | —              |
 | `next_stream_id` | —                                                                                                                                                      | `u64` (`1` on a fresh deploy)                                           | —              |
+| `version`        | —                                                                                                                                                      | `u32` (the shared `CONTRACT_VERSION`)                                   | —              |
 
 Types returned by the views:
 
@@ -100,26 +106,23 @@ event-size limits. Larger payroll runs are split into multiple batches.
 
 ### Errors — `StreamError` (`#[repr(u32)]`)
 
-| Code | Variant              | Produced when                                                                                                                                                                     |
-| :--: | :------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-|  1   | `InvalidAmount`      | `create_stream`, or one `create_streams` entry, with `amount <= 0`.                                                                                                               |
-|  2   | `InvalidTimeRange`   | `create_stream`, or one `create_streams` entry, with `end_time <= start_time`.                                                                                                    |
-|  3   | `InvalidCliff`       | `create_stream`, or one `create_streams` entry, with `cliff_time < start_time` or `cliff_time > end_time`.                                                                        |
-|  4   | `StreamNotFound`     | No stored stream under `stream_id` — raised by `withdraw`, `cancel`, `claimable`, `vested`. Also what a recipient sees if a persistent entry was archived after its TTL lapsed.   |
-|  5   | `NothingToWithdraw`  | `withdraw` when `vested(now) - withdrawn <= 0` — before the cliff, at the start of a stream, after a full withdrawal, or for a stream whose vested amount is `0`.                 |
-|  6   | `Unauthorized`       | `set_fee` or `set_treasury` called before `initialize` stored an admin. A wrong-signer call is not this code: `require_auth()` traps with a `Context` error before the body runs. |
-|  7   | `InvalidFee`         | `fee_bps > 1000` (the 10 % cap) in `initialize` or `set_fee`.                                                                                                                     |
-|  8   | `AlreadyCancelled`   | `cancel` on a stream whose `cancelled` flag is already set.                                                                                                                       |
-|  9   | `AlreadyInitialized` | A second `initialize` call — the presence of `DataKey::Admin` is the guard.                                                                                                       |
-|  10  | `TreasuryNotSet`     | `withdraw` when the fee is non-zero but no treasury address is stored.                                                                                                            |
-|  11  | `MetadataTooLong`    | `create_stream` when `label.len() > 64` or `reference.len() > 128`. Checked with the other arguments, before any token moves.                                                     |
-|  13  | `EmptyBatch`         | `create_streams` with no entries. Checked before validation, transfer or storage writes.                                                                                          |
-|  14  | `BatchTooLarge`      | `create_streams` with more than `MAX_BATCH` (14) entries.                                                                                                                         |
-|  15  | `BatchOverflow`      | `create_streams` whose deposits sum past `i128::MAX`, or whose id range would overflow `u64`. Checked before any token moves.                                                     |
-
-Code `12` is deliberately unused: other in-flight changes had claimed it when the
-batch variants were added, and existing codes must never shift. New variants
-continue from `15`.
+| Code | Variant              | Produced when                                                                                                                                                                              |
+| :--: | :------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|  1   | `InvalidAmount`      | `create_stream`, or one `create_streams` entry, with `amount <= 0`.                                                                                                                        |
+|  2   | `InvalidTimeRange`   | `create_stream`, or one `create_streams` entry, with `end_time <= start_time`.                                                                                                             |
+|  3   | `InvalidCliff`       | `create_stream`, or one `create_streams` entry, with `cliff_time < start_time` or `cliff_time > end_time`.                                                                                 |
+|  4   | `StreamNotFound`     | No stored stream under `stream_id` — raised by `withdraw`, `cancel`, `claimable`, `vested`. Also what a recipient sees if a persistent entry was archived after its TTL lapsed.            |
+|  5   | `NothingToWithdraw`  | `withdraw` when `vested(now) - withdrawn <= 0` — before the cliff, at the start of a stream, after a full withdrawal, or for a stream whose vested amount is `0`.                          |
+|  6   | `Unauthorized`       | `set_fee` or `set_treasury` called before `initialize` stored an admin. A wrong-signer call is not this code: `require_auth()` traps with a `Context` error before the body runs.          |
+|  7   | `InvalidFee`         | `fee_bps > 1000` (the 10 % cap) in `initialize` or `set_fee`.                                                                                                                              |
+|  8   | `AlreadyCancelled`   | `cancel` on a stream whose `cancelled` flag is already set.                                                                                                                                |
+|  9   | `AlreadyInitialized` | A second `initialize` call — the presence of `DataKey::Admin` is the guard.                                                                                                                |
+|  10  | `TreasuryNotSet`     | `withdraw` when the fee is non-zero but no treasury address is stored.                                                                                                                     |
+|  11  | `MetadataTooLong`    | `create_stream` when `label.len() > 64` or `reference.len() > 128`. Checked with the other arguments, before any token moves.                                                              |
+|  12  | `InvalidStartTime`   | `create_stream`, or one `create_streams` entry, with `start_time < env.ledger().timestamp()`. A `start_time` equal to the current ledger time is accepted. Checked before any token moves. |
+|  13  | `EmptyBatch`         | `create_streams` with no entries. Checked before validation, transfer or storage writes.                                                                                                   |
+|  14  | `BatchTooLarge`      | `create_streams` with more than `MAX_BATCH` (14) entries.                                                                                                                                  |
+|  15  | `BatchOverflow`      | `create_streams` whose deposits sum past `i128::MAX`, or whose id range would overflow `u64`. Checked before any token moves.                                                              |
 
 `STREAM_ERROR_CODES` in `packages/sdk/src/index.ts` is the one place these
 numbers are named on the client side; codes outside that table fall back to the
@@ -160,6 +163,7 @@ weights. Anyone may pay into a split and funds distribute on the spot.
 | `distribute`    | `split_id: u64, from: Address, token: Address, amount: i128`   | `Result<(), SplitError>`                     | `from`    |
 | `get_split`     | `split_id: u64`                                                | `Option<Split>`                              | —         |
 | `next_split_id` | —                                                              | `u64` (`1` on a fresh deploy)                | —         |
+| `version`       | —                                                              | `u32` (the shared `CONTRACT_VERSION`)        | —         |
 
 ```rust
 struct Split {
@@ -183,7 +187,7 @@ paired and must be the same length. A share is a weight, not a percentage —
 |  5   | `DuplicateRecipient` | `create_split` when an address appears twice, in any position.                                                                                                                                                                  |
 |  6   | `SplitNotFound`      | `distribute` for an unregistered `split_id` (or an archived entry).                                                                                                                                                             |
 |  7   | `Unauthorized`       | **Defined but never returned.** Kept so existing codes keep their values. Authorization failures in this contract surface as a Soroban `Context` error from `require_auth()`, not as this code — a client must not wait for it. |
-|  8   | `ShareOverflow`      | `create_split` when the sum of all shares exceeds `u32::MAX` (4,294,967,295). The maximum supported `total_shares` is `u32::MAX`.                                                                                              |
+|  8   | `ShareOverflow`      | `create_split` when the sum of all shares exceeds `u32::MAX` (4,294,967,295). The maximum supported `total_shares` is `u32::MAX`.                                                                                               |
 
 Rounding: each non-final recipient receives `amount * shares[i] / total_shares`
 (integer division, truncating) and the **final** recipient receives
@@ -223,6 +227,7 @@ with deadline-driven cancellation.
 | `cancel_escrow`  | `id: u64, caller: Address`                                                                      | `Result<(), EscrowError>`                      | `caller`, who must be `payer`              |
 | `get_escrow`     | `id: u64`                                                                                       | `Option<Escrow>`                               | —                                          |
 | `next_escrow_id` | —                                                                                               | `u64` (`1` on a fresh deploy)                  | —                                          |
+| `version`        | —                                                                                               | `u32` (the shared `CONTRACT_VERSION`)          | —                                          |
 
 ```rust
 struct Escrow {

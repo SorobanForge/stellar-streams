@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node scripts/record-rpc-fixtures.ts --check && vitest run",
     "fixtures:record": "node scripts/record-rpc-fixtures.ts",
-    "fixtures:check": "node scripts/record-rpc-fixtures.ts --check"
+    "fixtures:check": "node scripts/record-rpc-fixtures.ts --check",
+    "docs": "typedoc"
   },
   "dependencies": {
     "@stellar-starter-kit/types": "workspace:*",
@@ -19,6 +20,7 @@
   "devDependencies": {
     "@stellar-starter-kit/tsconfig": "workspace:*",
     "@stellar-starter-kit/eslint-config": "workspace:*",
+    "typedoc": "^0.28.20",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   }

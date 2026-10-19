@@ -1,5 +1,6 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
+use contract_version::CONTRACT_VERSION;
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Env,
 };
@@ -295,6 +296,12 @@ impl EscrowContract {
     /// The id that will be assigned to the next escrow.
     pub fn next_escrow_id(env: Env) -> u64 {
         env.storage().instance().get(&DataKey::NextId).unwrap_or(1)
+    }
+
+    /// The contract interface version, shared by every contract in the
+    /// workspace.
+    pub fn version(_env: Env) -> u32 {
+        CONTRACT_VERSION
     }
 }
 
