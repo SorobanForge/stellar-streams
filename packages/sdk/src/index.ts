@@ -168,6 +168,7 @@ export type StreamErrorCode =
   | 'ALREADY_INITIALIZED'
   | 'TREASURY_NOT_SET'
   | 'METADATA_TOO_LONG'
+  | 'INVALID_START_TIME'
   | 'EMPTY_BATCH'
   | 'BATCH_TOO_LARGE'
   | 'BATCH_OVERFLOW';
@@ -180,7 +181,8 @@ export type SplitErrorCode =
   | 'InvalidAmount'
   | 'DuplicateRecipient'
   | 'SplitNotFound'
-  | 'Unauthorized';
+  | 'Unauthorized'
+  | 'ShareOverflow';
 /**
  * The one place the stream contract's numeric codes are named. Must stay in
  * sync with the `StreamError` enum in `contracts/stream/src/lib.rs`; codes
@@ -199,7 +201,7 @@ const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
   9: 'ALREADY_INITIALIZED',
   10: 'TREASURY_NOT_SET',
   11: 'METADATA_TOO_LONG',
-  // 12 is reserved by in-flight contract work; codes are append-only.
+  12: 'INVALID_START_TIME',
   13: 'EMPTY_BATCH',
   14: 'BATCH_TOO_LARGE',
   15: 'BATCH_OVERFLOW',

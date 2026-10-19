@@ -1,7 +1,7 @@
 #![cfg(test)]
 #![allow(elided_lifetimes_in_paths, mismatched_lifetime_syntaxes)]
 use super::*;
-use soroban_sdk::{vec, Env, IntoVal};
+use soroban_sdk::{testutils::Ledger, vec, Env, IntoVal};
 
 #[path = "../../test-support/test_support.rs"]
 mod support;
@@ -103,6 +103,30 @@ fn test_invalid_splits() {
 }
 
 #[test]
+fn test_share_sum_overflow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register(&env);
+    let creator = account(&env);
+    let a = account(&env);
+    let b = account(&env);
+
+    assert_eq!(
+        client.try_create_split(
+            &creator,
+            &vec![&env, a.clone(), b.clone()],
+            &vec![&env, u32::MAX, 1u32]
+        ),
+        Err(Ok(SplitError::ShareOverflow)),
+    );
+
+    // A sum of exactly u32::MAX is still supported.
+    assert!(client
+        .try_create_split(&creator, &vec![&env, a, b], &vec![&env, u32::MAX - 1, 1u32])
+        .is_ok());
+}
+
+#[test]
 fn test_distribute_validations() {
     let env = Env::default();
     env.mock_all_auths();
@@ -146,6 +170,31 @@ fn test_single_recipient_gets_everything() {
     let split = client.get_split(&id).unwrap();
     assert_eq!(split.total_shares, 7);
     assert_eq!(client.next_split_id(), 2);
+}
+
+#[test]
+fn test_distribute_extends_split_ttl() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| l.max_entry_ttl = 6_000_000);
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    token.mint(&payer, 300);
+    let client = register(&env);
+
+    let a = account(&env);
+    let id = client.create_split(&account(&env), &vec![&env, a.clone()], &vec![&env, 1u32]);
+
+    // Close to the original expiry (created at ledger 0, limit 518_400),
+    // distribute so the split and instance entries get bumped.
+    env.ledger().with_mut(|l| l.sequence_number = 510_000);
+    client.distribute(&id, &payer, &token.id, &100);
+
+    // Past the original limit the split is still readable and distributable.
+    env.ledger().with_mut(|l| l.sequence_number = 600_000);
+    assert!(client.get_split(&id).is_some());
+    client.distribute(&id, &payer, &token.id, &100);
+    assert_eq!(token.balance(&a), 200);
 }
 
 /// A 75 / 25 split and a payer holding 2000 [`HostileToken`]s.

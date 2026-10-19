@@ -1,7 +1,10 @@
 #![cfg(test)]
 #![allow(elided_lifetimes_in_paths, mismatched_lifetime_syntaxes)]
 use super::*;
-use soroban_sdk::{testutils::Events as _, Env, Event, String, Vec};
+use soroban_sdk::{
+    testutils::{Events as _, Ledger as _},
+    Env, Event, String, Vec,
+};
 
 #[path = "../../test-support/test_support.rs"]
 mod support;
@@ -91,6 +94,33 @@ fn test_linear_vesting_and_withdraw() {
     assert_eq!(client.withdraw(&id), 500);
     assert_eq!(token.balance(&recipient), 1000);
     assert_eq!(token.balance(&client.address), 0);
+}
+
+#[test]
+fn test_withdraw_keeps_instance_config_alive() {
+    let env = Env::default();
+    env.mock_all_auths();
+    // Start every entry with a long TTL so the token survives the ledger jumps
+    // below; the instance then only outlives that TTL if a call bumps it.
+    env.ledger().with_mut(|l| {
+        l.min_persistent_entry_ttl = 600_000;
+        l.max_entry_ttl = 3_000_000;
+    });
+    let (token, sender, recipient, client) = setup(&env);
+    let admin = account(&env);
+    client.initialize(&admin, &account(&env), &0);
+    token.mint(&sender, 1000);
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 500);
+
+    // Move close enough to expiry that the bump threshold is crossed, then
+    // withdraw, which must extend the instance entry.
+    env.ledger().with_mut(|l| l.sequence_number = 590_000);
+    assert_eq!(client.withdraw(&id), 500);
+
+    // Past the original expiry, the config is still readable.
+    env.ledger().with_mut(|l| l.sequence_number = 650_000);
+    assert!(client.get_config().is_some());
 }
 
 #[test]
@@ -267,6 +297,53 @@ fn test_invalid_parameters() {
 }
 
 #[test]
+fn test_start_time_in_the_past_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+    let no_metadata = empty_string(&env);
+
+    // Move the ledger clock forward so a `start_time` can be genuinely past.
+    advance_time(&env, 500);
+
+    assert_eq!(
+        client.try_create_stream(
+            &sender,
+            &recipient,
+            &token.id,
+            &1000,
+            &499,
+            &1500,
+            &499,
+            &no_metadata,
+            &no_metadata
+        ),
+        Err(Ok(StreamError::InvalidStartTime)),
+    );
+
+    // The rejection happens before any tokens move and before an id is handed out.
+    assert_eq!(token.balance(&sender), 1000);
+    assert_eq!(token.balance(&client.address), 0);
+    assert_eq!(client.next_stream_id(), 1);
+}
+
+#[test]
+fn test_start_time_equal_to_now_accepted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    // `start_time == ledger timestamp` is the inclusive boundary and must pass.
+    advance_time(&env, 500);
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 500, 1500, 500);
+
+    assert_eq!(id, 1);
+    assert_eq!(token.balance(&client.address), 1000);
+}
+
+#[test]
 fn test_stream_not_found() {
     let env = Env::default();
     env.mock_all_auths();
@@ -293,6 +370,39 @@ fn test_protocol_fee() {
     assert_eq!(client.withdraw(&id), 990);
     assert_eq!(token.balance(&recipient), 990);
     assert_eq!(token.balance(&treasury), 10);
+}
+
+#[test]
+fn test_set_fee_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register(&env);
+    let admin = account(&env);
+    let treasury = account(&env);
+    client.initialize(&admin, &treasury, &100);
+
+    client.set_fee(&250);
+    assert_eq!(
+        env.events().all().filter_by_contract(&client.address),
+        [FeeUpdated { old_fee_bps: 100, new_fee_bps: 250 }.to_xdr(&env, &client.address)],
+    );
+}
+
+#[test]
+fn test_set_treasury_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register(&env);
+    let admin = account(&env);
+    let treasury = account(&env);
+    client.initialize(&admin, &treasury, &100);
+
+    let new_treasury = account(&env);
+    client.set_treasury(&new_treasury);
+    assert_eq!(
+        env.events().all().filter_by_contract(&client.address),
+        [TreasuryUpdated { treasury: new_treasury }.to_xdr(&env, &client.address)],
+    );
 }
 
 #[test]
@@ -331,8 +441,7 @@ fn test_fee_cap_boundary() {
     // Test 1: fee_bps == 1000 (the 10% cap) withdraws correctly.
     client.initialize(&admin, &treasury, &1000); // 10% fee
     let id = create(&env, &client, &sender, &recipient, &token.id, 10000, 0, 10000, 0);
-    // Advance to `end_time` so the whole 10000 has vested.
-    advance_time(&env, 10_000);
+    advance_time(&env, 10000);
     // 10% of 10000 = 1000 to treasury, 9000 to recipient.
     assert_eq!(client.withdraw(&id), 9000);
     assert_eq!(token.balance(&recipient), 9000);
@@ -346,43 +455,34 @@ fn test_fee_cap_boundary() {
     assert_eq!(res, Err(Ok(StreamError::InvalidFee)));
 
     // Test 3: cliff_time == end_time releases everything at end_time.
-    let now = env.ledger().timestamp();
-    let (token3, sender3, recipient3, client3) = setup(&env);
+    let (token3, sender3, recipient3, client3_) = setup(&env);
     token3.mint(&sender3, 1000);
     let admin3 = account(&env);
     let treasury3 = account(&env);
-    client3.initialize(&admin3, &treasury3, &1000);
-    let id3 = create(
-        &env,
-        &client3,
-        &sender3,
-        &recipient3,
-        &token3.id,
-        1000,
-        now,
-        now + 1000,
-        now + 1000,
-    );
-    // cliff_time == end_time == now + 1000, so nothing is vested now and
-    // everything is vested one second-equivalent later.
-    assert_eq!(client3.claimable(&id3), 0);
+    client3_.initialize(&admin3, &treasury3, &100);
+    let now3 = env.ledger().timestamp();
+    let id3 =
+        create(&env, &client3_, &sender3, &recipient3, &token3.id, 1000, now3, now3 + 1000, now3);
+    // Nothing is vested at the start; the whole schedule vests by end_time.
+    assert_eq!(client3_.claimable(&id3), 0);
     advance_time(&env, 1000);
-    assert_eq!(client3.claimable(&id3), 1000);
-    assert_eq!(client3.withdraw(&id3), 900); // 10% fee
-    assert_eq!(token3.balance(&recipient3), 900);
-    assert_eq!(token3.balance(&treasury3), 100);
+    assert_eq!(client3_.claimable(&id3), 1000);
+    assert_eq!(client3_.withdraw(&id3), 990); // 1% fee
+    assert_eq!(token3.balance(&recipient3), 990);
+    assert_eq!(token3.balance(&treasury3), 10);
 
     // Test 4: withdrawing the full amount twice returns NothingToWithdraw the second time.
-    let _client4 = register(&env);
     let (token4, sender4, recipient4, client4_) = setup(&env);
     token4.mint(&sender4, 1000);
     let admin4 = account(&env);
     let treasury4 = account(&env);
-    client4_.initialize(&admin4, &treasury4, &1000);
-    let id4 = create(&env, &client4_, &sender4, &recipient4, &token4.id, 1000, 0, 1000, 0);
+    client4_.initialize(&admin4, &treasury4, &100);
+    let now4 = env.ledger().timestamp();
+    let id4 =
+        create(&env, &client4_, &sender4, &recipient4, &token4.id, 1000, now4, now4 + 1000, now4);
     advance_time(&env, 1000);
-    // First withdraw: full amount minus fee (10% of 1000).
-    assert_eq!(client4_.withdraw(&id4), 900);
+    // First withdraw: full amount minus fee.
+    assert_eq!(client4_.withdraw(&id4), 990);
     // Second withdraw: nothing left to withdraw.
     assert!(client4_.try_withdraw(&id4).is_err());
 }
