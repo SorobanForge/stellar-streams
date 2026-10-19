@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   ContractResponseError,
+  getStreamMetrics,
   getStreamStatus,
   isConfig,
   isEscrow,
@@ -115,6 +116,31 @@ describe('getStreamStatus', () => {
     it('is completed at end even when the cliff equals the end', () => {
       expect(getStreamStatus(makeStream({ cliffTime: END }), END)).toBe('completed');
     });
+  });
+});
+
+describe('getStreamMetrics', () => {
+  it('derives all stream values together when the cliff is exactly at startTime', () => {
+    expect(getStreamMetrics(makeStream({ cliffTime: START }), START)).toEqual({
+      status: 'streaming',
+      progressBps: 0,
+      claimable: 0n,
+      remainingSeconds: END - START,
+    });
+  });
+
+  it('completes and vests the full amount when the cliff is exactly at endTime', () => {
+    expect(getStreamMetrics(makeStream({ cliffTime: END }), END)).toEqual({
+      status: 'completed',
+      progressBps: 10_000,
+      claimable: 1_000_000_000n,
+      remainingSeconds: 0,
+    });
+  });
+
+  it('keeps the back-compat status helper on the shared derivation path', () => {
+    const stream = makeStream({ cliffTime: END });
+    expect(getStreamStatus(stream, END)).toBe(getStreamMetrics(stream, END).status);
   });
 });
 

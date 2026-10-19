@@ -16,12 +16,11 @@ import {
 } from 'lucide-react';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
-import { getStreamStatus, type Stream } from '@stellar-starter-kit/types';
+import { getStreamMetrics, type Stream } from '@stellar-starter-kit/types';
 import {
   formatAddress,
   formatTokenAmount,
   parseTokenAmount,
-  computeProgressBps,
   formatBps,
   formatDuration,
 } from '@stellar-starter-kit/utils';
@@ -67,7 +66,7 @@ export default function StreamsDashboard() {
   // Lookup.
   const [lookupId, setLookupId] = useState('');
   const [stream, setStream] = useState<Stream | null>(null);
-  const [claimable, setClaimable] = useState<bigint>(0n);
+  const [contractClaimable, setContractClaimable] = useState<bigint>(0n);
   const [streamToken, setStreamToken] = useState<TokenMetadata | null>(null);
   const [loadingStream, setLoadingStream] = useState(false);
   const [feeBps, setFeeBps] = useState<number | null>(null);
@@ -101,7 +100,7 @@ export default function StreamsDashboard() {
       try {
         const found = await client.getStream(id);
         setStream(found);
-        setClaimable(found ? await client.claimable(id).catch(() => 0n) : 0n);
+        setContractClaimable(found ? await client.claimable(id).catch(() => 0n) : 0n);
         // Amounts are in the token's smallest unit; read its decimals to display them.
         setStreamToken(found ? await client.getTokenMetadata(found.token).catch(() => null) : null);
         // Fetch protocol config for feeBps
@@ -187,23 +186,14 @@ export default function StreamsDashboard() {
       ? `${formatTokenAmount(raw, streamToken.decimals)} ${streamToken.symbol}`
       : `${raw.toString()} (base units)`;
 
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const streamMetrics = stream ? getStreamMetrics(stream, nowSeconds) : null;
+  const status = streamMetrics?.status ?? null;
+  const progress = streamMetrics?.progressBps ?? 0;
+  const claimable = streamMetrics?.claimable ?? contractClaimable;
   const feeBpsValue = feeBps ?? 0;
   const feeAmount = feeBpsValue > 0 ? (claimable * BigInt(feeBpsValue)) / 10000n : 0n;
   const netAmount = claimable - feeAmount;
-
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const status = stream ? getStreamStatus(stream, nowSeconds) : null;
-  const progress = stream
-    ? computeProgressBps(
-        {
-          totalAmount: BigInt(stream.totalAmount),
-          startTime: stream.startTime,
-          endTime: stream.endTime,
-          cliffTime: stream.cliffTime,
-        },
-        nowSeconds,
-      )
-    : 0;
 
   return (
     <div className="min-h-screen bg-[#06060c] text-slate-100 selection:bg-purple-500/30 selection:text-purple-200">
@@ -435,7 +425,7 @@ export default function StreamsDashboard() {
                   <div className="flex justify-between text-[10px] text-slate-500">
                     <span>{formatBps(progress)} vested</span>
                     <span>
-                      {formatDuration(Math.max(0, stream.endTime - nowSeconds))} remaining
+                      {formatDuration(streamMetrics?.remainingSeconds ?? 0)} remaining
                     </span>
                   </div>
 
@@ -490,7 +480,7 @@ export default function StreamsDashboard() {
                       onClick={() =>
                         runAction('Withdraw', () => client.withdraw(stream.id), stream.id)
                       }
-                      disabled={busy || !isConnected || claimable <= 0n || stream.cancelled}
+                      disabled={busy || !isConnected || contractClaimable <= 0n || stream.cancelled}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-900 disabled:pointer-events-none disabled:opacity-40"
                     >
                       <Droplets className="h-3.5 w-3.5 text-cyan-400" /> Withdraw

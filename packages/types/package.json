@@ -14,6 +14,9 @@
   "files": [
     "dist"
   ],
+  "dependencies": {
+    "@stellar-starter-kit/utils": "workspace:*"
+  },
   "sideEffects": false,
   "scripts": {
     "build": "tsc --project tsconfig.build.json",

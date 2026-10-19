@@ -211,6 +211,10 @@ importers:
   packages/tsconfig: {}
 
   packages/types:
+    dependencies:
+      '@stellar-starter-kit/utils':
+        specifier: workspace:*
+        version: link:../utils
     devDependencies:
       '@stellar-starter-kit/eslint-config':
         specifier: workspace:*

@@ -1,3 +1,5 @@
+import { computeVestedAmount } from '@stellar-starter-kit/utils';
+
 export type StellarNetwork = 'local' | 'testnet' | 'mainnet';
 
 export interface StellarConfig {
@@ -215,11 +217,46 @@ export function normalizeSplit(raw: RawSplit): Split {
 }
 
 /** Derives a human-facing status for a stream at a given timestamp. */
+export interface StreamMetrics {
+  status: StreamStatus;
+  progressBps: number;
+  claimable: bigint;
+  remainingSeconds: number;
+}
+
+/** Derive all time-dependent stream values from the same schedule and timestamp. */
+export function getStreamMetrics(stream: Stream, now: number): StreamMetrics {
+  const totalAmount = BigInt(stream.totalAmount);
+  const vested = computeVestedAmount(
+    {
+      totalAmount,
+      startTime: stream.startTime,
+      endTime: stream.endTime,
+      cliffTime: stream.cliffTime,
+    },
+    now,
+  );
+  const withdrawn = BigInt(stream.withdrawn);
+  const claimable = vested > withdrawn ? vested - withdrawn : 0n;
+  const status = stream.cancelled
+    ? 'cancelled'
+    : now < stream.startTime || now < stream.cliffTime
+      ? 'scheduled'
+      : now >= stream.endTime
+        ? 'completed'
+        : 'streaming';
+
+  return {
+    status,
+    progressBps: totalAmount > 0n ? Number((vested * 10_000n) / totalAmount) : 0,
+    claimable,
+    remainingSeconds: Math.max(0, stream.endTime - now),
+  };
+}
+
+/** Derives a human-facing status for a stream at a given timestamp. */
 export function getStreamStatus(stream: Stream, now: number): StreamStatus {
-  if (stream.cancelled) return 'cancelled';
-  if (now < stream.startTime || now < stream.cliffTime) return 'scheduled';
-  if (now >= stream.endTime) return 'completed';
-  return 'streaming';
+  return getStreamMetrics(stream, now).status;
 }
 
 /**
