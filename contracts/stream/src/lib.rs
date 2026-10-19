@@ -602,7 +602,7 @@ fn validate_stream(
 }
 
 /// Linearly vested amount of a stream at a given timestamp.
-fn vested_amount(stream: &Stream, now: u64) -> i128 {
+pub(crate) fn vested_amount(stream: &Stream, now: u64) -> i128 {
     if now < stream.start_time || now < stream.cliff_time {
         return 0;
     }
