@@ -13,7 +13,7 @@ import {
   DEFAULT_STELLAR_NETWORK,
   DEFAULT_TOKEN_CONTRACT_ID,
 } from '../../lib/constants';
-import type { EscrowDetails } from '../../components/EscrowLookupResult';
+import { normalizeEscrow, type RawEscrow, type Escrow } from '@stellar-starter-kit/types';
 import {
   ArrowLeft,
   Loader2,
@@ -93,7 +93,7 @@ export default function EscrowDemo() {
 
   // Lookup Escrow State
   const [lookupId, setLookupId] = useState<string>('');
-  const [lookupResult, setLookupResult] = useState<EscrowDetails | null>(null);
+  const [lookupResult, setLookupResult] = useState<Escrow | null>(null);
   const [lookupLoading, setLookupLoading] = useState<boolean>(false);
 
   const addLog = useCallback(
@@ -288,26 +288,16 @@ export default function EscrowDemo() {
 
       if (result.result) {
         const data = result.result;
-        // Convert status enum to string
-        const statusMap = ['Created', 'Funded', 'Released', 'Refunded', 'Cancelled'];
-        const statusStr = statusMap[data.status] || 'Unknown';
-
-        // Convert amount from Stroops
-        const amountXlm = (Number(data.amount) / 10000000).toFixed(7);
-
-        // Format deadline
-        const deadlineDate = new Date(Number(data.deadline) * 1000).toLocaleString();
-
-        setLookupResult({
-          id: data.id.toString(),
+        setLookupResult(normalizeEscrow({
+          id: BigInt(data.id),
           payer: data.payer,
           payee: data.payee,
           arbiter: data.arbiter,
           token: data.token,
-          amount: amountXlm,
-          deadline: deadlineDate,
-          status: statusStr,
-        });
+          amount: BigInt(data.amount),
+          deadline: BigInt(data.deadline),
+          status: Number(data.status),
+        } satisfies RawEscrow));
 
         if (!silent) {
           addLog('fetch', 'success', `Fetched details for escrow ID ${escrowId.toString()}`);

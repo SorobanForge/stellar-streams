@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { getStreamStatus, type Stream } from './index';
+import {
+  getStreamStatus,
+  normalizeEscrow,
+  normalizeSplit,
+  normalizeStream,
+  type Stream,
+} from './index';
 
 const START = 1_000;
 const CLIFF = 1_500;
@@ -92,6 +98,36 @@ describe('getStreamStatus', () => {
 
     it('is completed at end even when the cliff equals the end', () => {
       expect(getStreamStatus(makeStream({ cliffTime: END }), END)).toBe('completed');
+    });
+  });
+});
+
+describe('domain normalizers', () => {
+  it('normalizes stream contract fields and preserves large integers as strings', () => {
+    expect(normalizeStream({
+      id: 9_007_199_254_740_993n,
+      sender: 'GSENDER', recipient: 'GRECIPIENT', token: 'CTOKEN',
+      total_amount: 9_007_199_254_740_993n, withdrawn: 0n,
+      start_time: 1n, end_time: 2n, cliff_time: 1n,
+      label: '', reference: '', cancelled: false,
+    })).toMatchObject({ id: '9007199254740993', totalAmount: '9007199254740993', startTime: 1 });
+  });
+
+  it('normalizes split field names and id', () => {
+    expect(normalizeSplit({
+      id: 9_007_199_254_740_993n, creator: 'GCREATOR', recipients: ['GONE'],
+      shares: [10], total_shares: 10,
+    })).toEqual({ id: '9007199254740993', creator: 'GCREATOR', recipients: ['GONE'], shares: [10], totalShares: 10 });
+  });
+
+  it('normalizes escrow integers and status names', () => {
+    expect(normalizeEscrow({
+      id: 9_007_199_254_740_993n, payer: 'GPAYER', payee: 'GPAYEE', arbiter: 'GARBITER',
+      token: 'CTOKEN', amount: 170_141_183_460_469_231_731_687_303_715_884_105_727n,
+      deadline: 9_007_199_254_740_993n, status: 1,
+    })).toEqual({
+      id: '9007199254740993', payer: 'GPAYER', payee: 'GPAYEE', arbiter: 'GARBITER', token: 'CTOKEN',
+      amount: '170141183460469231731687303715884105727', deadline: '9007199254740993', status: 'funded',
     });
   });
 });
