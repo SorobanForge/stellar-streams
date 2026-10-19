@@ -11,11 +11,11 @@ import {
   Droplets,
   Ban,
   Search,
-  Play,
   Wallet,
 } from 'lucide-react';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
+import { Button, Input } from '@stellar-starter-kit/ui';
 import { getStreamStatus, type Stream } from '@stellar-starter-kit/types';
 import {
   formatAddress,
@@ -27,6 +27,11 @@ import {
 } from '@stellar-starter-kit/utils';
 import Header from '../../components/Header';
 import Footer from '../../components/Footer';
+import {
+  getStreamDurationSeconds,
+  getStreamCliffSeconds,
+  validateStreamInput,
+} from '../../lib/stream-validation';
 
 // framer-motion stays out of the initial route bundle; the banner only loads
 // when an error/success message is shown.
@@ -43,8 +48,6 @@ const DEFAULT_TOKEN =
   process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ||
   'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
 const EXPERT_URL = process.env.NEXT_PUBLIC_STELLAR_EXPERT_URL ?? 'https://stellar.expert';
-
-const DAY = 86_400;
 
 export default function StreamsDashboard() {
   const { activeAddress, isConnected, isConnecting, connect, disconnect, signTransaction } =
@@ -90,6 +93,19 @@ export default function StreamsDashboard() {
       setSuccess(null);
     }
   }, []);
+
+  const formErrors = useMemo(
+    () =>
+      validateStreamInput({
+        recipient,
+        token,
+        amount,
+        durationDays,
+        cliffDays,
+      }),
+    [amount, cliffDays, durationDays, recipient, token],
+  );
+  const isFormValid = Object.keys(formErrors).length === 0;
 
   const loadStream = useCallback(
     async (id: string) => {
@@ -147,14 +163,19 @@ export default function StreamsDashboard() {
       return;
     }
 
+    if (!isFormValid) {
+      notify('error', 'Fix the highlighted stream details before submitting.');
+      return;
+    }
+
     setBusy(true);
     setError(null);
     setSuccess(null);
     try {
       const now = Math.floor(Date.now() / 1000);
       const startTime = now;
-      const endTime = now + Math.floor(Number(durationDays) * DAY);
-      const cliffTime = now + Math.floor(Number(cliffDays) * DAY);
+      const endTime = now + getStreamDurationSeconds(durationDays);
+      const cliffTime = now + getStreamCliffSeconds(cliffDays);
 
       const { decimals } = await client.getTokenMetadata(token.trim());
       const { hash } = await client.createStream({
@@ -298,83 +319,64 @@ export default function StreamsDashboard() {
               New stream
             </h2>
 
-            <label className="block">
-              <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                Recipient
-              </span>
-              <input
-                value={recipient}
-                onChange={(e) => setRecipient(e.target.value)}
-                placeholder="G..."
-                required
-                className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
-              />
-            </label>
+            <Input
+              label="Recipient"
+              value={recipient}
+              onChange={(e) => setRecipient(e.target.value)}
+              placeholder="G..."
+              aria-invalid={Boolean(formErrors.recipient)}
+              error={formErrors.recipient}
+            />
 
-            <label className="block">
-              <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                Token contract
-              </span>
-              <input
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="C..."
-                required
-                className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
-              />
-            </label>
+            <Input
+              label="Token contract"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="C..."
+              aria-invalid={Boolean(formErrors.token)}
+              error={formErrors.token}
+            />
 
             <div className="grid grid-cols-2 gap-4">
-              <label className="block">
-                <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                  Amount
-                </span>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  required
-                  className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
-                />
-              </label>
-              <label className="block">
-                <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                  Duration (days)
-                </span>
-                <input
-                  type="number"
-                  min="1"
-                  value={durationDays}
-                  onChange={(e) => setDurationDays(e.target.value)}
-                  required
-                  className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
-                />
-              </label>
-            </div>
-
-            <label className="block">
-              <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                Cliff (days, 0 = none)
-              </span>
-              <input
+              <Input
+                label="Amount"
                 type="number"
                 min="0"
-                value={cliffDays}
-                onChange={(e) => setCliffDays(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
+                step="any"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                aria-invalid={Boolean(formErrors.amount)}
+                error={formErrors.amount}
               />
-            </label>
+              <Input
+                label="Duration (days)"
+                type="number"
+                min="1"
+                value={durationDays}
+                onChange={(e) => setDurationDays(e.target.value)}
+                aria-invalid={Boolean(formErrors.durationDays)}
+                error={formErrors.durationDays}
+              />
+            </div>
 
-            <button
+            <Input
+              label="Cliff (days, 0 = none)"
+              type="number"
+              min="0"
+              value={cliffDays}
+              onChange={(e) => setCliffDays(e.target.value)}
+              aria-invalid={Boolean(formErrors.cliffDays)}
+              error={formErrors.cliffDays}
+            />
+
+            <Button
               type="submit"
-              disabled={busy || !isConnected || !CONTRACT_ID}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 to-cyan-500 px-6 py-3 text-sm font-semibold text-white shadow-lg transition hover:brightness-110 disabled:pointer-events-none disabled:opacity-40"
+              disabled={busy || !isConnected || !CONTRACT_ID || !isFormValid}
+              loading={busy}
+              className="w-full"
             >
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              Create stream
-            </button>
+              {busy ? 'Creating stream' : 'Create stream'}
+            </Button>
           </form>
 
           {/* Inspect */}

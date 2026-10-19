@@ -157,6 +157,9 @@ user-facing message, or an indexer decoding an event, should actually be reading
 cases the Rust does not advertise: two error codes that are defined but never returned, and an
 `escrow` `cancelled` event that carries no amount.
 
+For copy-pasteable client examples covering SSR-safe construction, stream reads, config reads,
+write methods, and typed error handling, see the [SDK guide](docs/sdk.md).
+
 ---
 
 ## Quick start
