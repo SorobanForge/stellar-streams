@@ -81,6 +81,9 @@ export const StreamError = {
   10: {message:"TreasuryNotSet"},
   11: {message:"MetadataTooLong"},
   12: {message:"InvalidStartTime"}
+  13: {message:"EmptyBatch"},
+  14: {message:"BatchTooLarge"},
+  15: {message:"BatchOverflow"}
 }
 
 
@@ -156,6 +159,31 @@ export interface Client {
   create_stream: ({sender, recipient, token, amount, start_time, end_time, cliff_time, label, reference}: {sender: string, recipient: string, token: string, amount: i128, start_time: u64, end_time: u64, cliff_time: u64, label: string, reference: string}, options?: MethodOptions) => Promise<AssembledTransaction<Result<u64>>>
 
   /**
+   * Construct and simulate a create_streams transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Create many streams from one payroll-style batch in a single call.
+   * 
+   * `sender` funds every stream and authorizes once for the whole batch: it is
+   * [`StreamContract::create_stream`]'s creator/funder (issue #184's `admin`),
+   * not the protocol `admin` set by [`StreamContract::initialize`]. `token` is
+   * the asset every stream locks.
+   * 
+   * Each entry is `(recipient, amount, start_time, cliff_time, end_time)`, in
+   * the order given by issue #184, so the cliff comes before the end time
+   * (unlike `create_stream`). Batch entries carry no metadata: their `label`
+   * and `reference` are stored empty.
+   * 
+   * The call is all-or-nothing: every entry is validated and the deposits are
+   * summed with checked arithmetic before any transfer or storage write, so one
+   * bad entry moves no tokens and leaves [`StreamContract::next_stream_id`]
+   * untouched. Empty batches return [`StreamError::EmptyBatch`], batches over
+   * [`MAX_BATCH`] [`StreamError::BatchTooLarge`].
+   * 
+   * Ids are allocated and returned in input order: `ids[i]` belongs to
+   * `entries[i]`.
+   */
+  create_streams: ({sender, token, entries}: {sender: string, token: string, entries: Array<readonly [string, i128, u64, u64, u64]>}, options?: MethodOptions) => Promise<AssembledTransaction<Result<Array<u64>>>>
+
+  /**
    * Construct and simulate a next_stream_id transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    * The id that will be assigned to the next stream.
    */
@@ -182,7 +210,7 @@ export class Client extends ContractClient {
       new ContractSpec([ "AAAAAQAAADlQcm90b2NvbC1sZXZlbCBjb25maWd1cmF0aW9uLCBzZXQgb25jZSBhdCBpbml0aWFsaXphdGlvbi4AAAAAAAAAAAAABkNvbmZpZwAAAAAAAwAAAAAAAAAFYWRtaW4AAAAAAAATAAAAAAAAAAdmZWVfYnBzAAAAAAQAAAAAAAAACHRyZWFzdXJ5AAAAEw==",
         "AAAAAQAAASVBIHNpbmdsZSBsaW5lYXIgcGF5bWVudCBzdHJlYW0uIFRva2VucyBhcmUgbG9ja2VkIGluIHRoZSBjb250cmFjdCBhbmQgdmVzdApjb250aW51b3VzbHkgYmV0d2VlbiBgc3RhcnRfdGltZWAgYW5kIGBlbmRfdGltZWAsIHdpdGggYW4gb3B0aW9uYWwgY2xpZmYuCgpgbGFiZWxgIGFuZCBgcmVmZXJlbmNlYCBhcmUgb3B0aW9uYWwgbWV0YWRhdGE6IHRoZXkgYXJlIHN0b3JlZCBhcyBlbXB0eQpzdHJpbmdzIHdoZW4gdGhlIGNyZWF0b3IgZG9lcyBub3Qgc3VwcGx5IHRoZW0gYW5kIG5ldmVyIGFmZmVjdCB2ZXN0aW5nLgAAAAAAAAAAAAAGU3RyZWFtAAAAAAAMAAAAAAAAAAljYW5jZWxsZWQAAAAAAAABAAAAAAAAAApjbGlmZl90aW1lAAAAAAAGAAAAAAAAAAhlbmRfdGltZQAAAAYAAAAAAAAAAmlkAAAAAAAGAAAAAAAAAAVsYWJlbAAAAAAAABAAAAAAAAAACXJlY2lwaWVudAAAAAAAABMAAAAAAAAACXJlZmVyZW5jZQAAAAAAABAAAAAAAAAABnNlbmRlcgAAAAAAEwAAAAAAAAAKc3RhcnRfdGltZQAAAAAABgAAAAAAAAAFdG9rZW4AAAAAAAATAAAAAAAAAAx0b3RhbF9hbW91bnQAAAALAAAAAAAAAAl3aXRoZHJhd24AAAAAAAAL",
         "AAAAAgAAAAAAAAAAAAAAB0RhdGFLZXkAAAAABQAAAAEAAAAAAAAABlN0cmVhbQAAAAAAAQAAAAYAAAAAAAAAAAAAAAZOZXh0SWQAAAAAAAAAAAAAAAAABUFkbWluAAAAAAAAAAAAAAAAAAAIVHJlYXN1cnkAAAAAAAAAAAAAAAZGZWVCcHMAAA==",
-        "AAAABAAAAAAAAAAAAAAAC1N0cmVhbUVycm9yAAAAAAsAAAAAAAAADUludmFsaWRBbW91bnQAAAAAAAABAAAAAAAAABBJbnZhbGlkVGltZVJhbmdlAAAAAgAAAAAAAAAMSW52YWxpZENsaWZmAAAAAwAAAAAAAAAOU3RyZWFtTm90Rm91bmQAAAAAAAQAAAAAAAAAEU5vdGhpbmdUb1dpdGhkcmF3AAAAAAAABQAAAAAAAAAMVW5hdXRob3JpemVkAAAABgAAAAAAAAAKSW52YWxpZEZlZQAAAAAABwAAAAAAAAAQQWxyZWFkeUNhbmNlbGxlZAAAAAgAAAAAAAAAEkFscmVhZHlJbml0aWFsaXplZAAAAAAACQAAAAAAAAAOVHJlYXN1cnlOb3RTZXQAAAAAAAoAAAAAAAAAD01ldGFkYXRhVG9vTG9uZwAAAAAL",
+        "AAAABAAAAAAAAAAAAAAAC1N0cmVhbUVycm9yAAAAAA4AAAAAAAAADUludmFsaWRBbW91bnQAAAAAAAABAAAAAAAAABBJbnZhbGlkVGltZVJhbmdlAAAAAgAAAAAAAAAMSW52YWxpZENsaWZmAAAAAwAAAAAAAAAOU3RyZWFtTm90Rm91bmQAAAAAAAQAAAAAAAAAEU5vdGhpbmdUb1dpdGhkcmF3AAAAAAAABQAAAAAAAAAMVW5hdXRob3JpemVkAAAABgAAAAAAAAAKSW52YWxpZEZlZQAAAAAABwAAAAAAAAAQQWxyZWFkeUNhbmNlbGxlZAAAAAgAAAAAAAAAEkFscmVhZHlJbml0aWFsaXplZAAAAAAACQAAAAAAAAAOVHJlYXN1cnlOb3RTZXQAAAAAAAoAAAAAAAAAD01ldGFkYXRhVG9vTG9uZwAAAAALAAAAAAAAAApFbXB0eUJhdGNoAAAAAAANAAAAAAAAAA1CYXRjaFRvb0xhcmdlAAAAAAAADgAAAAAAAAANQmF0Y2hPdmVyZmxvdwAAAAAAAA8=",
         "AAAABQAAACFFbWl0dGVkIHdoZW4gYSBzdHJlYW0gaXMgY3JlYXRlZC4AAAAAAAAAAAAADVN0cmVhbUNyZWF0ZWQAAAAAAAACAAAABnN0cmVhbQAAAAAAB2NyZWF0ZWQAAAAABgAAAAAAAAACaWQAAAAAAAYAAAABAAAAAAAAAAZzZW5kZXIAAAAAABMAAAAAAAAAAAAAAAlyZWNpcGllbnQAAAAAAAATAAAAAAAAACxBbW91bnQgbG9ja2VkLCBpbiB0aGUgdG9rZW4ncyBzbWFsbGVzdCB1bml0LgAAAAZhbW91bnQAAAAAAAsAAAAAAAAAAAAAAAVsYWJlbAAAAAAAABAAAAAAAAAAAAAAAAlyZWZlcmVuY2UAAAAAAAAQAAAAAAAAAAI=",
         "AAAABQAAAClFbWl0dGVkIHdoZW4gdGhlIHNlbmRlciBjYW5jZWxzIGEgc3RyZWFtLgAAAAAAAAAAAAAPU3RyZWFtQ2FuY2VsbGVkAAAAAAIAAAAGc3RyZWFtAAAAAAAJY2FuY2VsbGVkAAAAAAAAAwAAAAAAAAACaWQAAAAAAAYAAAABAAAAAAAAAAZzZW5kZXIAAAAAABMAAAAAAAAAJ1VudmVzdGVkIGFtb3VudCByZWZ1bmRlZCB0byB0aGUgc2VuZGVyLgAAAAAIcmVmdW5kZWQAAAALAAAAAAAAAAI=",
         "AAAABQAAAD9FbWl0dGVkIHdoZW4gdGhlIHJlY2lwaWVudCB3aXRoZHJhd3MgYSBzdHJlYW0ncyB2ZXN0ZWQgYmFsYW5jZS4AAAAAAAAAAA9TdHJlYW1XaXRoZHJhd24AAAAAAgAAAAZzdHJlYW0AAAAAAAl3aXRoZHJhd24AAAAAAAAEAAAAAAAAAAJpZAAAAAAABgAAAAEAAAAAAAAACXJlY2lwaWVudAAAAAAAABMAAAAAAAAANUFtb3VudCBzZW50IHRvIHRoZSByZWNpcGllbnQsIGFmdGVyIGFueSBwcm90b2NvbCBmZWUuAAAAAAAABmFtb3VudAAAAAAACwAAAAAAAAAAAAAAA2ZlZQAAAAALAAAAAAAAAAI=",
@@ -196,6 +224,7 @@ export class Client extends ContractClient {
         "AAAAAAAAAEFDb25maWd1cmUgdGhlIHByb3RvY29sIGZlZSBhbmQgdHJlYXN1cnkuIENhbiBvbmx5IGJlIGNhbGxlZCBvbmNlLgAAAAAAAAppbml0aWFsaXplAAAAAAADAAAAAAAAAAVhZG1pbgAAAAAAABMAAAAAAAAACHRyZWFzdXJ5AAAAEwAAAAAAAAAHZmVlX2JwcwAAAAAEAAAAAQAAA+kAAAACAAAH0AAAAAtTdHJlYW1FcnJvcgA=",
         "AAAAAAAAAENVcGRhdGUgdGhlIHRyZWFzdXJ5IGFkZHJlc3MuIE9ubHkgY2FsbGFibGUgYnkgdGhlIGNvbmZpZ3VyZWQgYWRtaW4uAAAAAAxzZXRfdHJlYXN1cnkAAAABAAAAAAAAAAh0cmVhc3VyeQAAABMAAAABAAAD6QAAAAIAAAfQAAAAC1N0cmVhbUVycm9yAA==",
         "AAAAAAAAAWFMb2NrIGBhbW91bnRgIG9mIGB0b2tlbmAgYW5kIGJlZ2luIHN0cmVhbWluZyBpdCBmcm9tIGBzZW5kZXJgIHRvIGByZWNpcGllbnRgLgpSZXR1cm5zIHRoZSBuZXcgc3RyZWFtIGlkLgoKYGxhYmVsYCBhbmQgYHJlZmVyZW5jZWAgY2Fycnkgb3B0aW9uYWwgaHVtYW4tcmVhZGFibGUgbWV0YWRhdGEgKGEgcGF5cm9sbApsYWJlbCwgYW4gaW52b2ljZSBvciBncmFudCBpZCkuIFBhc3MgZW1wdHkgc3RyaW5ncyB0byBvbWl0IHRoZW07IHRoZXkgYXJlCmNhcHBlZCBhdCBbYE1BWF9MQUJFTF9MRU5gXSBhbmQgW2BNQVhfUkVGRVJFTkNFX0xFTmBdIGJ5dGVzIHNvIHRoZSBzdHJlYW0ncwpyZW50IHN0YXlzIHByZWRpY3RhYmxlLgAAAAAAAA1jcmVhdGVfc3RyZWFtAAAAAAAACQAAAAAAAAAGc2VuZGVyAAAAAAATAAAAAAAAAAlyZWNpcGllbnQAAAAAAAATAAAAAAAAAAV0b2tlbgAAAAAAABMAAAAAAAAABmFtb3VudAAAAAAACwAAAAAAAAAKc3RhcnRfdGltZQAAAAAABgAAAAAAAAAIZW5kX3RpbWUAAAAGAAAAAAAAAApjbGlmZl90aW1lAAAAAAAGAAAAAAAAAAVsYWJlbAAAAAAAABAAAAAAAAAACXJlZmVyZW5jZQAAAAAAABAAAAABAAAD6QAAAAYAAAfQAAAAC1N0cmVhbUVycm9yAA==",
+        "AAAAAAAAA+dDcmVhdGUgbWFueSBzdHJlYW1zIGZyb20gb25lIHBheXJvbGwtc3R5bGUgYmF0Y2ggaW4gYSBzaW5nbGUgY2FsbC4KCmBzZW5kZXJgIGZ1bmRzIGV2ZXJ5IHN0cmVhbSBhbmQgYXV0aG9yaXplcyBvbmNlIGZvciB0aGUgd2hvbGUgYmF0Y2g6IGl0IGlzCltgU3RyZWFtQ29udHJhY3Q6OmNyZWF0ZV9zdHJlYW1gXSdzIGNyZWF0b3IvZnVuZGVyIChpc3N1ZSAjMTg0J3MgYGFkbWluYCksCm5vdCB0aGUgcHJvdG9jb2wgYGFkbWluYCBzZXQgYnkgW2BTdHJlYW1Db250cmFjdDo6aW5pdGlhbGl6ZWBdLiBgdG9rZW5gIGlzCnRoZSBhc3NldCBldmVyeSBzdHJlYW0gbG9ja3MuCgpFYWNoIGVudHJ5IGlzIGAocmVjaXBpZW50LCBhbW91bnQsIHN0YXJ0X3RpbWUsIGNsaWZmX3RpbWUsIGVuZF90aW1lKWAsIGluCnRoZSBvcmRlciBnaXZlbiBieSBpc3N1ZSAjMTg0LCBzbyB0aGUgY2xpZmYgY29tZXMgYmVmb3JlIHRoZSBlbmQgdGltZQoodW5saWtlIGBjcmVhdGVfc3RyZWFtYCkuIEJhdGNoIGVudHJpZXMgY2Fycnkgbm8gbWV0YWRhdGE6IHRoZWlyIGBsYWJlbGAKYW5kIGByZWZlcmVuY2VgIGFyZSBzdG9yZWQgZW1wdHkuCgpUaGUgY2FsbCBpcyBhbGwtb3Itbm90aGluZzogZXZlcnkgZW50cnkgaXMgdmFsaWRhdGVkIGFuZCB0aGUgZGVwb3NpdHMgYXJlCnN1bW1lZCB3aXRoIGNoZWNrZWQgYXJpdGhtZXRpYyBiZWZvcmUgYW55IHRyYW5zZmVyIG9yIHN0b3JhZ2Ugd3JpdGUsIHNvIG9uZQpiYWQgZW50cnkgbW92ZXMgbm8gdG9rZW5zIGFuZCBsZWF2ZXMgW2BTdHJlYW1Db250cmFjdDo6bmV4dF9zdHJlYW1faWRgXQp1bnRvdWNoZWQuIEVtcHR5IGJhdGNoZXMgcmV0dXJuIFtgU3RyZWFtRXJyb3I6OkVtcHR5QmF0Y2hgXSwgYmF0Y2hlcyBvdmVyCltgTUFYX0JBVENIYF0gW2BTdHJlYW1FcnJvcjo6QmF0Y2hUb29MYXJnZWBdLgoKSWRzIGFyZSBhbGxvY2F0ZWQgYW5kIHJldHVybmVkIGluIGlucHV0IG9yZGVyOiBgaWRzW2ldYCBiZWxvbmdzIHRvCmBlbnRyaWVzW2ldYC4AAAAADmNyZWF0ZV9zdHJlYW1zAAAAAAADAAAAAAAAAAZzZW5kZXIAAAAAABMAAAAAAAAABXRva2VuAAAAAAAAEwAAAAAAAAAHZW50cmllcwAAAAPqAAAD7QAAAAUAAAATAAAACwAAAAYAAAAGAAAABgAAAAEAAAPpAAAD6gAAAAYAAAfQAAAAC1N0cmVhbUVycm9yAA==",
         "AAAAAAAAADBUaGUgaWQgdGhhdCB3aWxsIGJlIGFzc2lnbmVkIHRvIHRoZSBuZXh0IHN0cmVhbS4AAAAObmV4dF9zdHJlYW1faWQAAAAAAAAAAAABAAAABg==" ]),
       options
     )
@@ -211,6 +240,7 @@ export class Client extends ContractClient {
         initialize: this.txFromJSON<Result<void>>,
         set_treasury: this.txFromJSON<Result<void>>,
         create_stream: this.txFromJSON<Result<u64>>,
+        create_streams: this.txFromJSON<Result<Array<u64>>>,
         next_stream_id: this.txFromJSON<u64>
   }
 }
