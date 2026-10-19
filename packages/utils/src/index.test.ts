@@ -70,6 +70,112 @@ describe('parseXlmToStroops', () => {
   });
 });
 
+describe('parseXlmToStroops malformed-input table', () => {
+  const malformed =
+    'Expected a plain decimal number such as "1.5" (scientific notation, NaN and Infinity are not supported).';
+  const nonFinite = 'Expected a finite decimal number (e.g. "1.5").';
+
+  const cases: Array<{
+    label: string;
+    input: string | number;
+    expected?: bigint;
+    error?: string;
+  }> = [
+    {
+      label: 'rejects scientific notation supplied as a string',
+      input: '1e7',
+      error: `Invalid XLM amount: "1e7". ${malformed}`,
+    },
+    {
+      label: 'rejects the Infinity string',
+      input: 'Infinity',
+      error: `Invalid XLM amount: "Infinity". ${malformed}`,
+    },
+    {
+      label: 'trims surrounding whitespace',
+      input: ' 1.2 ',
+      expected: 12_000_000n,
+    },
+    { label: 'accepts a leading decimal point', input: '.5', expected: 5_000_000n },
+    { label: 'accepts a trailing decimal point', input: '1.', expected: 10_000_000n },
+    {
+      label: 'truncates sub-stroop precision toward zero',
+      input: '-0.00000001',
+      expected: 0n,
+    },
+    {
+      label: 'truncates positive sub-stroop precision to zero',
+      input: '0.00000001',
+      expected: 0n,
+    },
+    { label: 'parses the smallest positive stroop', input: '0.0000001', expected: 1n },
+    {
+      label: 'expands exponential notation from number inputs',
+      input: 1e7,
+      // 1e7 is ten million XLM, not scientific notation for one XLM.
+      expected: 100_000_000_000_000n,
+    },
+    {
+      label: 'parses small numeric values without exponential-notation errors',
+      input: 0.0000001,
+      expected: 1n,
+    },
+    {
+      label: 'truncates negative sub-stroop number inputs like strings',
+      input: -0.00000001,
+      expected: 0n,
+    },
+    {
+      label: 'rejects NaN with a finite-number message',
+      input: NaN,
+      error: `Invalid XLM amount: NaN. ${nonFinite}`,
+    },
+    {
+      label: 'rejects Infinity with a finite-number message',
+      input: Infinity,
+      error: `Invalid XLM amount: Infinity. ${nonFinite}`,
+    },
+    {
+      label: 'rejects -Infinity with a finite-number message',
+      input: -Infinity,
+      error: `Invalid XLM amount: -Infinity. ${nonFinite}`,
+    },
+    {
+      label: 'rejects an empty string',
+      input: '',
+      error: `Invalid XLM amount: "". ${malformed}`,
+    },
+    {
+      label: 'rejects a lone decimal point',
+      input: '.',
+      error: `Invalid XLM amount: ".". ${malformed}`,
+    },
+    {
+      label: 'rejects a lone minus sign',
+      input: '-',
+      error: `Invalid XLM amount: "-". ${malformed}`,
+    },
+    {
+      label: 'rejects multiple decimal points',
+      input: '1.2.3',
+      error: `Invalid XLM amount: "1.2.3". ${malformed}`,
+    },
+    {
+      label: 'rejects thousands separators',
+      input: '1,000',
+      error: `Invalid XLM amount: "1,000". ${malformed}`,
+    },
+  ];
+
+  it.each(cases)('$label', ({ input, expected, error }) => {
+    if (error !== undefined) {
+      expect(() => parseXlmToStroops(input)).toThrowError(error);
+    } else {
+      expect(parseXlmToStroops(input)).toBe(expected);
+    }
+  });
+});
+
 describe('formatDuration', () => {
   it('formats seconds, minutes, hours and days', () => {
     expect(formatDuration(45)).toBe('45s');
