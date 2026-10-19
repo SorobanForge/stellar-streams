@@ -27,7 +27,7 @@ for example in `apps/web/package.json`:
 The hooks are exported from the package root:
 
 ```ts
-import { useStream, useStellarNetworkStatus } from '@stellar-starter-kit/hooks';
+import { useStream, useStreams, useStellarNetworkStatus } from '@stellar-starter-kit/hooks';
 ```
 
 The hooks are not yet imported anywhere in `apps/web`; they are available for
@@ -106,6 +106,79 @@ interval is cleared when the component unmounts or when `pollMs`, `client`, or
 
 ---
 
+## `useStreams`
+
+### Purpose
+
+Lists every stream that involves an address (as sender or recipient). The hook
+keeps that read declarative for pages that currently only support looking a
+stream up by id, and exposes `refresh()` for after a create/withdraw/cancel.
+
+### Dependencies
+
+This hook depends on the SDK's address-listing API tracked in
+[issue #94](https://github.com/SorobanForge/stellar-streams/issues/94)
+(`StreamsClient.listStreams({ address })`). Until that method ships,
+`useStreams` **degrades gracefully**: it returns an empty `streams` array with
+`loading: false` and `error: null` instead of throwing. When the SDK adds
+`listStreams`, the hook starts using it automatically — no consumer changes are
+needed.
+
+### Arguments
+
+| Name      | Type                          | Description                                                                                                 |
+| :-------- | :---------------------------- | :---------------------------------------------------------------------------------------------------------- |
+| `client`  | `StreamsClient \| null`       | The streams client used to list. Pass `null` when no contract is configured.                                |
+| `address` | `string \| null \| undefined` | The account whose streams should be listed. Pass `null`/`undefined` when no wallet is connected or for SSR. |
+
+### Return value
+
+| Name      | Type                  | Description                                                         |
+| :-------- | :-------------------- | :------------------------------------------------------------------ |
+| `streams` | `Stream[]`            | Streams involving the address, or `[]` while loading / unsupported. |
+| `loading` | `boolean`             | `true` while a listing is in flight.                                |
+| `error`   | `string \| null`      | Error message if listing failed, otherwise `null`.                  |
+| `refresh` | `() => Promise<void>` | Re-run the listing, e.g. after creating or cancelling a stream.     |
+
+### Usage example
+
+```tsx
+import { useStreams } from '@stellar-starter-kit/hooks';
+import { useWallet } from '@stellar-starter-kit/wallets';
+
+function MyStreams({ client }: { client: StreamsClient | null }) {
+  const { activeAddress } = useWallet();
+  const { streams, loading, error, refresh } = useStreams(client, activeAddress);
+
+  if (loading) return <div>Loading streams…</div>;
+  if (error) return <div>Failed to load streams: {error}</div>;
+  if (streams.length === 0) return <div>No streams yet.</div>;
+
+  return (
+    <ul>
+      {streams.map((stream) => (
+        <li key={stream.id}>Stream #{stream.id}</li>
+      ))}
+      <button onClick={refresh}>Refresh</button>
+    </ul>
+  );
+}
+```
+
+### Loading, error and cleanup semantics
+
+- `streams` starts as `[]`; an address with no streams is a successful empty
+  result, not an error.
+- Changing `client` or `address` re-runs the listing and aborts the previous
+  request.
+- In-flight work is cancelled with an `AbortSignal` on unmount and on address
+  changes; stale responses are ignored, so state cannot be overwritten by an
+  older request.
+- A real listing failure clears `streams` and sets `error`; an aborted request
+  never sets a user-facing error.
+
+---
+
 ## `useStellarNetworkStatus`
 
 ### Purpose
@@ -160,10 +233,10 @@ Inside the monorepo, `@stellar-starter-kit/hooks` is consumed through a
 the package root:
 
 ```ts
-import { useStream, useStellarNetworkStatus } from '@stellar-starter-kit/hooks';
+import { useStream, useStreams, useStellarNetworkStatus } from '@stellar-starter-kit/hooks';
 ```
 
-The package's public API is exactly the two named exports above; there are no
+The package's public API is exactly the three named exports above; there are no
 default exports or additional entry points. The dashboard does not currently
 import these hooks.
 
