@@ -46,8 +46,7 @@ pub enum StreamError {
     AlreadyInitialized = 9,
     TreasuryNotSet = 10,
     MetadataTooLong = 11,
-    // 12 is intentionally skipped: it is claimed by in-flight PRs against this
-    // enum. New variants continue from 13 so existing codes never shift.
+    InvalidStartTime = 12,
     EmptyBatch = 13,
     BatchTooLarge = 14,
     BatchOverflow = 15,
@@ -55,6 +54,10 @@ pub enum StreamError {
     StreamPaused = 16,
     /// Issue #182: reserved for future strict-idempotency variant.
     NotPaused = 17,
+    /// Issue #181: `top_up` was called after the stream's schedule had ended.
+    StreamCompleted = 18,
+    /// Issue #181: `top_up` arithmetic would exceed the supported range.
+    AmountOverflow = 19,
 }
 
 /// A single linear payment stream. Tokens are locked in the contract and vest
@@ -206,6 +209,7 @@ impl StreamContract {
         let old_fee_bps: u32 = env.storage().instance().get(&DataKey::FeeBps).unwrap_or(0);
         env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
         env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        FeeUpdated { old_fee_bps, new_fee_bps: fee_bps }.publish(&env);
         Ok(())
     }
 
@@ -216,6 +220,7 @@ impl StreamContract {
         admin.require_auth();
         env.storage().instance().set(&DataKey::Treasury, &treasury);
         env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        TreasuryUpdated { treasury }.publish(&env);
         Ok(())
     }
 
@@ -226,6 +231,9 @@ impl StreamContract {
     /// label, an invoice or grant id). Pass empty strings to omit them; they are
     /// capped at [`MAX_LABEL_LEN`] and [`MAX_REFERENCE_LEN`] bytes so the stream's
     /// rent stays predictable.
+    ///
+    /// `start_time` must not be in the past: it has to be at or after the current
+    /// ledger timestamp, otherwise [`StreamError::InvalidStartTime`] is returned.
     pub fn create_stream(
         env: Env,
         sender: Address,
@@ -240,7 +248,7 @@ impl StreamContract {
     ) -> Result<u64, StreamError> {
         sender.require_auth();
 
-        validate_stream(amount, start_time, end_time, cliff_time, &label, &reference)?;
+        validate_stream(&env, amount, start_time, end_time, cliff_time, &label, &reference)?;
 
         // Pull the full stream amount into the contract up front, so a stream is
         // never recorded without the funds that back it.
@@ -328,7 +336,7 @@ impl StreamContract {
         let mut total_deposit: i128 = 0;
         for entry in entries.iter() {
             let (_, amount, start_time, cliff_time, end_time) = entry;
-            validate_stream(amount, start_time, end_time, cliff_time, &label, &label)?;
+            validate_stream(&env, amount, start_time, end_time, cliff_time, &label, &label)?;
             total_deposit = total_deposit.checked_add(amount).ok_or(StreamError::BatchOverflow)?;
         }
         debug_assert!(total_deposit > 0);
@@ -388,6 +396,59 @@ impl StreamContract {
         }
 
         Ok(ids)
+    }
+
+    /// Add `amount` to a stream's deposit while preserving its payment rate.
+    ///
+    /// Only the stream's sender (the payer) may top it up, and only while the
+    /// stream is still streaming: cancelled streams and streams whose schedule
+    /// has already ended are rejected. The end time is extended by
+    /// `amount * duration / total_amount`, so tokens that have already vested
+    /// stay vested and the recipient keeps earning at the same pace.
+    pub fn top_up(env: Env, stream_id: u64, amount: i128) -> Result<(), StreamError> {
+        let key = DataKey::Stream(stream_id);
+        let mut stream: Stream =
+            env.storage().persistent().get(&key).ok_or(StreamError::StreamNotFound)?;
+
+        stream.sender.require_auth();
+
+        if amount <= 0 {
+            return Err(StreamError::InvalidAmount);
+        }
+        if stream.cancelled {
+            return Err(StreamError::AlreadyCancelled);
+        }
+        if env.ledger().timestamp() >= stream.end_time {
+            return Err(StreamError::StreamCompleted);
+        }
+
+        // Extend the schedule at the stream's current rate. Flooring the
+        // division can only nudge the new rate up, never make already-vested
+        // tokens vest again more slowly.
+        let duration = i128::from(stream.end_time - stream.start_time);
+        let extension =
+            amount.checked_mul(duration).ok_or(StreamError::AmountOverflow)? / stream.total_amount;
+        let extension = u64::try_from(extension).map_err(|_| StreamError::AmountOverflow)?;
+        let new_end_time =
+            stream.end_time.checked_add(extension).ok_or(StreamError::AmountOverflow)?;
+        let new_total =
+            stream.total_amount.checked_add(amount).ok_or(StreamError::AmountOverflow)?;
+
+        // Persist before the transfer, like `withdraw`, so a token callback can
+        // never observe a deposit that has not been fully recorded yet.
+        stream.total_amount = new_total;
+        stream.end_time = new_end_time;
+        env.storage().persistent().set(&key, &stream);
+        env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+
+        token::Client::new(&env, &stream.token).transfer(
+            &stream.sender,
+            env.current_contract_address(),
+            &amount,
+        );
+
+        Ok(())
     }
 
     /// Withdraw the currently vested (and not yet withdrawn) amount to the recipient.
@@ -571,6 +632,7 @@ impl StreamContract {
 /// `start_time` before the cliff is checked, which keeps the error a caller sees
 /// for a given input identical on both paths.
 fn validate_stream(
+    env: &Env,
     amount: i128,
     start_time: u64,
     end_time: u64,
@@ -580,6 +642,9 @@ fn validate_stream(
 ) -> Result<(), StreamError> {
     if amount <= 0 {
         return Err(StreamError::InvalidAmount);
+    }
+    if start_time < env.ledger().timestamp() {
+        return Err(StreamError::InvalidStartTime);
     }
     if end_time <= start_time {
         return Err(StreamError::InvalidTimeRange);

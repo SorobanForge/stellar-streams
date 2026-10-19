@@ -128,8 +128,7 @@ impl SplitsContract {
         from.require_auth();
 
         let key = DataKey::Split(split_id);
-        let split: Split =
-            env.storage().persistent().get(&key).ok_or(SplitError::SplitNotFound)?;
+        let split: Split = env.storage().persistent().get(&key).ok_or(SplitError::SplitNotFound)?;
 
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
         env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
