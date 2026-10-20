@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
-import { Button, Input } from '@stellar-starter-kit/ui';
+import { Button, Footer, Header, Input } from '@stellar-starter-kit/ui';
 import { getStreamMetrics, type Stream } from '@stellar-starter-kit/types';
 import {
   formatAddress,
@@ -24,8 +24,6 @@ import {
   formatBps,
   formatDuration,
 } from '@stellar-starter-kit/utils';
-import Header from '../../components/Header';
-import Footer from '../../components/Footer';
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   DEFAULT_SOROBAN_RPC_URL,

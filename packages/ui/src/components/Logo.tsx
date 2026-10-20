@@ -1,14 +1,14 @@
 'use client';
 
-import React from 'react';
-import { cn } from '@stellar-starter-kit/ui';
+import * as React from 'react';
+import { cn } from '../utils';
 
-interface LogoProps {
+export interface LogoProps {
   className?: string;
   size?: number;
 }
 
-export default function Logo({ className, size = 24 }: LogoProps) {
+export function Logo({ className, size = 24 }: LogoProps) {
   return (
     <svg
       role="img"
@@ -25,3 +25,5 @@ export default function Logo({ className, size = 24 }: LogoProps) {
     </svg>
   );
 }
+
+export default Logo;

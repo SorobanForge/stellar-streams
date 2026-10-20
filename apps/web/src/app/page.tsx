@@ -3,8 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { Droplets, Split, Clock, ShieldCheck, ArrowRight, Github } from 'lucide-react';
-import Header from '../components/Header';
-import Footer from '../components/Footer';
+import { Footer, Header } from '@stellar-starter-kit/ui';
 import { REPO_URL } from '../lib/constants';
 
 const FEATURES = [
