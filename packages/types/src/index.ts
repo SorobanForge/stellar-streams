@@ -75,34 +75,36 @@ const isInteger = (value: unknown): value is number =>
 /** Check the runtime shape returned by the stream contract. */
 export function isStream(value: unknown): value is RawStream {
   if (!isRecord(value)) return false;
-  return typeof value.id === 'bigint'
-    && typeof value.sender === 'string'
-    && typeof value.recipient === 'string'
-    && typeof value.token === 'string'
-    && typeof value.total_amount === 'bigint'
-    && typeof value.withdrawn === 'bigint'
-    && typeof value.start_time === 'bigint'
-    && typeof value.end_time === 'bigint'
-    && typeof value.cliff_time === 'bigint'
-    && typeof value.label === 'string'
-    && typeof value.reference === 'string'
-    && typeof value.cancelled === 'boolean';
+  return (
+    typeof value.id === 'bigint' &&
+    typeof value.sender === 'string' &&
+    typeof value.recipient === 'string' &&
+    typeof value.token === 'string' &&
+    typeof value.total_amount === 'bigint' &&
+    typeof value.withdrawn === 'bigint' &&
+    typeof value.start_time === 'bigint' &&
+    typeof value.end_time === 'bigint' &&
+    typeof value.cliff_time === 'bigint' &&
+    typeof value.label === 'string' &&
+    typeof value.reference === 'string' &&
+    typeof value.cancelled === 'boolean'
+  );
 }
 
 function assertStream(value: unknown): asserts value is RawStream {
   const fields: Array<[string, (v: unknown) => boolean, string]> = [
-    ['id', v => typeof v === 'bigint', 'a bigint'],
-    ['sender', v => typeof v === 'string', 'a string'],
-    ['recipient', v => typeof v === 'string', 'a string'],
-    ['token', v => typeof v === 'string', 'a string'],
-    ['total_amount', v => typeof v === 'bigint', 'a bigint'],
-    ['withdrawn', v => typeof v === 'bigint', 'a bigint'],
-    ['start_time', v => typeof v === 'bigint', 'a bigint'],
-    ['end_time', v => typeof v === 'bigint', 'a bigint'],
-    ['cliff_time', v => typeof v === 'bigint', 'a bigint'],
-    ['label', v => typeof v === 'string', 'a string'],
-    ['reference', v => typeof v === 'string', 'a string'],
-    ['cancelled', v => typeof v === 'boolean', 'a boolean'],
+    ['id', (v) => typeof v === 'bigint', 'a bigint'],
+    ['sender', (v) => typeof v === 'string', 'a string'],
+    ['recipient', (v) => typeof v === 'string', 'a string'],
+    ['token', (v) => typeof v === 'string', 'a string'],
+    ['total_amount', (v) => typeof v === 'bigint', 'a bigint'],
+    ['withdrawn', (v) => typeof v === 'bigint', 'a bigint'],
+    ['start_time', (v) => typeof v === 'bigint', 'a bigint'],
+    ['end_time', (v) => typeof v === 'bigint', 'a bigint'],
+    ['cliff_time', (v) => typeof v === 'bigint', 'a bigint'],
+    ['label', (v) => typeof v === 'string', 'a string'],
+    ['reference', (v) => typeof v === 'string', 'a string'],
+    ['cancelled', (v) => typeof v === 'boolean', 'a boolean'],
   ];
   if (!isRecord(value)) throw new ContractResponseError('stream', '<response>', 'an object');
   for (const [field, check, expected] of fields) {
@@ -145,17 +147,20 @@ export interface RawConfig {
 
 /** Check the runtime shape returned by the stream contract's config method. */
 export function isConfig(value: unknown): value is RawConfig {
-  return isRecord(value)
-    && typeof value.admin === 'string'
-    && typeof value.treasury === 'string'
-    && isInteger(value.fee_bps);
+  return (
+    isRecord(value) &&
+    typeof value.admin === 'string' &&
+    typeof value.treasury === 'string' &&
+    isInteger(value.fee_bps)
+  );
 }
 
 /** Convert a raw config response into its domain shape after validating it. */
 export function normalizeConfig(raw: unknown): StreamConfig {
   if (!isRecord(raw)) throw new ContractResponseError('config', '<response>', 'an object');
   if (typeof raw.admin !== 'string') throw new ContractResponseError('config', 'admin', 'a string');
-  if (typeof raw.treasury !== 'string') throw new ContractResponseError('config', 'treasury', 'a string');
+  if (typeof raw.treasury !== 'string')
+    throw new ContractResponseError('config', 'treasury', 'a string');
   if (!isInteger(raw.fee_bps)) throw new ContractResponseError('config', 'fee_bps', 'an integer');
   return { admin: raw.admin, treasury: raw.treasury, feeBps: raw.fee_bps };
 }
@@ -295,27 +300,29 @@ export interface RawEscrow {
 
 /** Check the runtime shape returned by the escrow contract. */
 export function isEscrow(value: unknown): value is RawEscrow {
-  return isRecord(value)
-    && typeof value.id === 'bigint'
-    && typeof value.payer === 'string'
-    && typeof value.payee === 'string'
-    && typeof value.arbiter === 'string'
-    && typeof value.token === 'string'
-    && typeof value.amount === 'bigint'
-    && typeof value.deadline === 'bigint'
-    && isInteger(value.status);
+  return (
+    isRecord(value) &&
+    typeof value.id === 'bigint' &&
+    typeof value.payer === 'string' &&
+    typeof value.payee === 'string' &&
+    typeof value.arbiter === 'string' &&
+    typeof value.token === 'string' &&
+    typeof value.amount === 'bigint' &&
+    typeof value.deadline === 'bigint' &&
+    isInteger(value.status)
+  );
 }
 
 function assertEscrow(value: unknown): asserts value is RawEscrow {
   if (!isRecord(value)) throw new ContractResponseError('escrow', '<response>', 'an object');
   const fields: Array<[string, (v: unknown) => boolean, string]> = [
-    ['id', v => typeof v === 'bigint', 'a bigint'],
-    ['payer', v => typeof v === 'string', 'a string'],
-    ['payee', v => typeof v === 'string', 'a string'],
-    ['arbiter', v => typeof v === 'string', 'a string'],
-    ['token', v => typeof v === 'string', 'a string'],
-    ['amount', v => typeof v === 'bigint', 'a bigint'],
-    ['deadline', v => typeof v === 'bigint', 'a bigint'],
+    ['id', (v) => typeof v === 'bigint', 'a bigint'],
+    ['payer', (v) => typeof v === 'string', 'a string'],
+    ['payee', (v) => typeof v === 'string', 'a string'],
+    ['arbiter', (v) => typeof v === 'string', 'a string'],
+    ['token', (v) => typeof v === 'string', 'a string'],
+    ['amount', (v) => typeof v === 'bigint', 'a bigint'],
+    ['deadline', (v) => typeof v === 'bigint', 'a bigint'],
     ['status', isInteger, 'an integer'],
   ];
   for (const [field, check, expected] of fields) {
@@ -341,7 +348,11 @@ export function normalizeEscrow(raw: unknown): Escrow {
 }
 
 const ESCROW_STATUSES: readonly EscrowStatus[] = [
-  'created', 'funded', 'released', 'refunded', 'cancelled',
+  'created',
+  'funded',
+  'released',
+  'refunded',
+  'cancelled',
 ];
 
 /**

@@ -420,9 +420,7 @@ export default function StreamsDashboard() {
                   </div>
                   <div className="flex justify-between text-[10px] text-slate-500">
                     <span>{formatBps(progress)} vested</span>
-                    <span>
-                      {formatDuration(streamMetrics?.remainingSeconds ?? 0)} remaining
-                    </span>
+                    <span>{formatDuration(streamMetrics?.remainingSeconds ?? 0)} remaining</span>
                   </div>
 
                   <dl className="grid grid-cols-2 gap-4 border-t border-slate-900 pt-4">

@@ -150,7 +150,7 @@ export function makeEscrowClient(overrides: Partial<StreamsClientOptions> = {}):
 }
 
 /** A successful simulation whose return value is `retval`. */
-export function simulationSuccess(retval: xdr.ScVal) {
+export function simulationSuccess(retval: xdr.ScVal, overrides: Record<string, unknown> = {}) {
   return {
     id: '1',
     latestLedger: 1,
@@ -159,6 +159,7 @@ export function simulationSuccess(retval: xdr.ScVal) {
     transactionData: undefined,
     minResourceFee: '0',
     result: { auth: [], retval },
+    ...overrides,
   } as unknown as SorobanRpc.Api.SimulateTransactionResponse;
 }
 

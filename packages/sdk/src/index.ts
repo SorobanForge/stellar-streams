@@ -4,6 +4,7 @@ import {
   Asset,
   Contract,
   FeeBumpTransaction,
+  Memo,
   StrKey,
   Transaction,
   TransactionBuilder,
@@ -26,11 +27,64 @@ import type {
 } from '@stellar-starter-kit/types';
 import { normalizeConfig, normalizeEscrow, normalizeStream } from '@stellar-starter-kit/types';
 
-/** Options for changing an operation from outside, e.g. cancelling it when a page unmounts. */
+/**
+ * A memo attached to a write transaction. Text memos are for exchange-style
+ * deposit tags; id memos carry a 64-bit unsigned integer. Both are passed to
+ * the transaction unchanged and default to no memo when omitted.
+ */
+export type TransactionMemo =
+  { type: 'text'; value: string } | { type: 'id'; value: string | number | bigint };
+
+/**
+ * Options for changing an operation from outside, e.g. cancelling it when a page
+ * unmounts, bumping the fee under load, or previewing a call without sending it.
+ */
 export interface WriteOptions {
   /** Aborts the wallet prompt, the submission, and the confirmation poll for this call. */
   signal?: AbortSignal;
+  /**
+   * Base fee for the transaction in stroops, as a decimal integer string.
+   * Overrides the client's default write fee. Resource fees discovered by the
+   * simulation are still added on top by Soroban assembly.
+   */
+  fee?: string;
+  /** Memo to attach to the transaction. Omit to leave the transaction memo-less. */
+  memo?: TransactionMemo;
+  /**
+   * Simulate and assemble the transaction without signing or submitting it.
+   * Resolves with the assembled transaction, its minimum resource fee, the
+   * simulated CPU/memory cost, and any authorization entries the call needs.
+   */
+  simulateOnly?: boolean;
 }
+
+/** The result of a submitted write. */
+export interface WriteResult {
+  /** Hash of the confirmed transaction. */
+  hash: string;
+}
+
+/** The result of a write call made with `simulateOnly: true`. */
+export interface SimulationResult {
+  /** The transaction assembled from the simulation, ready to be signed elsewhere. */
+  transaction: Transaction;
+  /** Minimum resource fee, in stroops, reported by the simulation. */
+  minResourceFee: string;
+  /** CPU instructions the invocation is expected to consume, as a decimal string. */
+  cpuInsns: string;
+  /** Memory bytes the invocation is expected to use, as a decimal string. */
+  memBytes: string;
+  /** Authorization entries discovered by the simulation; may be empty. */
+  auth: xdr.SorobanAuthorizationEntry[];
+}
+
+/**
+ * `simulateOnly: true` changes the return type of a write call; every other
+ * call still resolves with the confirmed transaction hash.
+ */
+export type WriteResultFor<O extends WriteOptions> = O extends { simulateOnly: true }
+  ? SimulationResult
+  : WriteResult;
 
 /**
  * Options for constructing a {@link StreamsClient}: where the `stream`
@@ -73,8 +127,22 @@ export interface WriteOptions {
 export interface StreamsClientOptions {
   /** The deployed contract id (C...): the `stream` contract for `StreamsClient`, the `escrow` contract for `EscrowClient`. */
   contractId: string;
-  /** Soroban RPC endpoint, e.g. https://soroban-testnet.stellar.org. */
-  rpcUrl: string;
+  /**
+   * Soroban RPC endpoint, e.g. https://soroban-testnet.stellar.org.
+   *
+   * Either this or {@link rpcUrls} is required. `rpcUrls` takes precedence
+   * when both are given.
+   */
+  rpcUrl?: string;
+  /**
+   * Soroban RPC endpoints ordered by preference: the first is the primary and
+   * later entries are failover hosts. Transport failures (a network error, a
+   * timeout, or a 5xx response) rotate to the next host; application errors
+   * such as a failed simulation do not. The last healthy host stays sticky.
+   *
+   * When set, this takes precedence over {@link rpcUrl}.
+   */
+  rpcUrls?: string[];
   /** Network passphrase the contract is deployed on. */
   networkPassphrase: string;
   /** Connected account used as the source/simulation account. */
@@ -86,10 +154,17 @@ export interface StreamsClientOptions {
   ) => Promise<string>;
   /**
    * The Soroban RPC calls made by this client. Defaults to a `SorobanRpc.Server`
-   * built from `rpcUrl`; pass an in-memory fake in tests to run the suite
-   * without a network.
+   * built from the configured URL(s); pass an in-memory fake in tests to run
+   * the suite without a network. Pass an array (one per `rpcUrls` entry) or use
+   * {@link transportFactory} to exercise failover with fakes.
    */
-  transport?: StreamsTransport;
+  transport?: StreamsTransport | StreamsTransport[];
+  /**
+   * Builds the transport for each configured RPC URL. Defaults to
+   * `(url) => new SorobanRpc.Server(url)`; inject one in tests to exercise
+   * failover without a network.
+   */
+  transportFactory?: (rpcUrl: string) => StreamsTransport;
   /** Default signal for write calls. A per-call signal takes precedence over it. */
   signal?: AbortSignal;
   /**
@@ -103,12 +178,28 @@ export interface StreamsClientOptions {
   /** How long to wait for a submitted transaction to confirm. Defaults to 30s. */
   pollTimeoutMs?: number;
   /**
+   * Called after a transport-level failure rotates the client to another RPC
+   * host. The rotation is also logged with `console.warn`; use this hook for
+   * structured telemetry.
+   */
+  onRpcFailover?: (event: RpcFailoverEvent) => void;
+  /**
    * Sponsor the submission fees of every write with a fee-bump transaction.
    * The connected wallet still signs the inner transaction, so the contract
    * sees the user as the source account; only the fee comes from `feeSource`.
    * Leave this unset to submit the wallet-signed transaction unchanged.
    */
   feeBump?: FeeBumpOptions;
+}
+
+/** Details of a {@link StreamsClientOptions.rpcUrls} host rotation. */
+export interface RpcFailoverEvent {
+  /** Host that failed. */
+  from: string;
+  /** Host the client will use for subsequent calls. */
+  to: string;
+  /** The transport error that triggered the rotation. */
+  error: unknown;
 }
 
 /** Configuration for {@link StreamsClientOptions.feeBump}. */
@@ -147,6 +238,136 @@ export interface StreamsTransport {
   getLatestLedger(): Promise<SorobanRpc.Api.GetLatestLedgerResponse>;
   /** Contract event scan, the transport `listStreams` pages through. */
   getEvents(request: SorobanRpc.Api.GetEventsRequest): Promise<SorobanRpc.Api.GetEventsResponse>;
+}
+
+/**
+ * Rotates {@link StreamsTransport} calls across configured RPC endpoints when a
+ * host fails at the transport level: a network error, a timeout, or a 5xx
+ * response. Application-level failures (contract errors reported by a
+ * simulation, a rejected transaction, an aborted call) are rethrown unchanged
+ * so they never hide a real problem behind another host.
+ *
+ * A rotated host stays active until it too fails, which keeps reads on one
+ * sticky node instead of round-robining every request.
+ */
+export class FailoverTransport implements StreamsTransport {
+  private index = 0;
+
+  constructor(
+    private readonly endpoints: Array<{ url: string; transport: StreamsTransport }>,
+    private readonly onRotate?: (event: RpcFailoverEvent) => void,
+  ) {
+    if (endpoints.length === 0) {
+      throw new Error('At least one RPC endpoint is required.');
+    }
+  }
+
+  /** The URL of the host currently serving requests. */
+  get activeUrl(): string {
+    return this.endpoints[this.index]!.url;
+  }
+
+  /** Every configured URL, in preference order. */
+  get urls(): string[] {
+    return this.endpoints.map((endpoint) => endpoint.url);
+  }
+
+  private async run<T>(call: (transport: StreamsTransport) => Promise<T>): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < this.endpoints.length; attempt++) {
+      const endpoint = this.endpoints[this.index]!;
+      try {
+        return await call(endpoint.transport);
+      } catch (error) {
+        lastError = error;
+        if (!isTransportFailure(error) || this.endpoints.length === 1) throw error;
+        const from = endpoint.url;
+        this.index = (this.index + 1) % this.endpoints.length;
+        const to = this.activeUrl;
+        console.warn(`[stellar-streams] RPC ${from} failed; failing over to ${to}.`, error);
+        this.onRotate?.({ from, to, error });
+      }
+    }
+    throw lastError;
+  }
+
+  getAccount(address: string): Promise<Account> {
+    return this.run((transport) => transport.getAccount(address));
+  }
+
+  simulateTransaction(tx: Transaction): Promise<SorobanRpc.Api.SimulateTransactionResponse> {
+    return this.run((transport) => transport.simulateTransaction(tx));
+  }
+
+  prepareTransaction(tx: Transaction): Promise<Transaction> {
+    return this.run((transport) => transport.prepareTransaction(tx));
+  }
+
+  sendTransaction(
+    tx: Transaction | FeeBumpTransaction,
+  ): Promise<SorobanRpc.Api.SendTransactionResponse> {
+    return this.run((transport) => transport.sendTransaction(tx));
+  }
+
+  getTransaction(hash: string): Promise<SorobanRpc.Api.GetTransactionResponse> {
+    return this.run((transport) => transport.getTransaction(hash));
+  }
+
+  getLatestLedger(): Promise<SorobanRpc.Api.GetLatestLedgerResponse> {
+    return this.run((transport) => transport.getLatestLedger());
+  }
+
+  getEvents(request: SorobanRpc.Api.GetEventsRequest): Promise<SorobanRpc.Api.GetEventsResponse> {
+    return this.run((transport) => transport.getEvents(request));
+  }
+}
+
+/**
+ * Whether an error came from reaching an RPC host rather than from the
+ * application response it returned. Both `fetch`/axios and the Stellar SDK
+ * report host failures with different shapes, so the classifier accepts the
+ * common cases and deliberately leaves everything else untouched.
+ */
+function isTransportFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === 'AbortError' || error.name === 'StreamsError') return false;
+  const status = httpStatus(error);
+  if (status !== undefined) return status >= 500 || status === 408 || status === 429;
+  const code = (error as { code?: unknown }).code;
+  if (
+    typeof code === 'string' &&
+    [
+      'ECONNABORTED',
+      'ECONNREFUSED',
+      'ECONNRESET',
+      'ENETUNREACH',
+      'ENOTFOUND',
+      'EAI_AGAIN',
+      'ETIMEDOUT',
+      'UND_ERR_CONNECT_TIMEOUT',
+      'UND_ERR_HEADERS_TIMEOUT',
+      'UND_ERR_SOCKET',
+    ].includes(code)
+  ) {
+    return true;
+  }
+  if (['NetworkError', 'TimeoutError', 'FetchError'].includes(error.name)) return true;
+  return /failed to fetch|fetch failed|network error|socket hang up|timed? ?out/i.test(
+    error.message,
+  );
+}
+
+/** Extracts an HTTP status from axios-, fetch- and `Response`-shaped errors. */
+function httpStatus(error: unknown): number | undefined {
+  const candidate = error as {
+    status?: unknown;
+    statusCode?: unknown;
+    response?: { status?: unknown };
+  };
+  for (const value of [candidate.status, candidate.statusCode, candidate.response?.status]) {
+    if (typeof value === 'number') return value;
+  }
+  return undefined;
 }
 
 /**
@@ -215,6 +436,8 @@ export function assetContractId(
 
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_POLL_TIMEOUT_MS = 30_000;
+/** Base fee used for write transactions when the caller does not pass `fee`. */
+const DEFAULT_WRITE_FEE = '1000000';
 /** Upper bound for the exponential backoff applied to `TRY_AGAIN_LATER`. */
 const MAX_BACKOFF_MS = 8_000;
 /** Must match `MAX_LABEL_LEN` in the stream contract. */
@@ -444,8 +667,14 @@ export interface ListStreamsOptions {
   /** Address to find streams for, as either the sender or the recipient. */
   address: string;
   /**
+   * Opaque paging token returned by a previous `listStreams` call. When set,
+   * the scan resumes immediately after that token and `startLedger`/`endLedger`
+   * must be omitted (the RPC API rejects mixing a cursor with a ledger range).
+   */
+  cursor?: string;
+  /**
    * First ledger to scan, inclusive. Defaults to
-   * `latestLedger - DEFAULT_EVENT_LOOKBACK_LEDGERS`, read from the RPC node.
+   * `latestLedger - maxLedgers`, read from the RPC node.
    * Must be within the node's event retention window; earlier ledgers are not
    * recoverable from `getEvents` and need an indexer.
    */
@@ -460,6 +689,40 @@ export interface ListStreamsOptions {
    * if the node rejects the request or the payloads are large.
    */
   pageSize?: number;
+  /**
+   * Maximum ledger span a single call will scan before returning its cursor.
+   * Defaults to {@link DEFAULT_EVENT_LOOKBACK_LEDGERS}. A page that crosses the
+   * boundary is returned whole, so the next call resumes without a gap.
+   */
+  maxLedgers?: number;
+  /** Aborts the scan between RPC pages. */
+  signal?: AbortSignal;
+}
+
+/** The page returned by {@link StreamsClient.listStreams}. */
+export interface ListStreamsResult {
+  /** Streams matching the address and cursor window, oldest first. */
+  streams: Stream[];
+  /** Opaque paging token to pass as `cursor` on the next call. */
+  cursor: string;
+}
+
+/**
+ * Raised when a `listStreams` cursor is not a paging token returned by the
+ * RPC API. Cursors are opaque, so a value from another network or a truncated
+ * token fails before any RPC request is made.
+ */
+export class InvalidCursorError extends Error {
+  /** The rejected cursor. */
+  readonly cursor: string;
+
+  constructor(cursor: string) {
+    super(
+      `Invalid cursor: ${cursor}. Expected the opaque paging token returned by a previous listStreams call.`,
+    );
+    this.name = 'InvalidCursorError';
+    this.cursor = cursor;
+  }
 }
 
 /**
@@ -499,6 +762,7 @@ export class EscrowError extends Error {
  */
 abstract class SorobanClient {
   protected readonly transport: StreamsTransport;
+  private readonly rpc: FailoverTransport;
   private readonly options: StreamsClientOptions;
   /**
    * The source account (and its sequence number), fetched once and shared by
@@ -524,7 +788,49 @@ abstract class SorobanClient {
    */
   constructor(options: StreamsClientOptions) {
     this.options = options;
-    this.transport = options.transport ?? new SorobanRpc.Server(options.rpcUrl);
+    const urls = configuredRpcUrls(options);
+    if (options.transport instanceof FailoverTransport) {
+      this.rpc = options.transport;
+    } else if (Array.isArray(options.transport)) {
+      if (options.transport.length === 0) {
+        throw new Error('Pass at least one injected transport, or leave `transport` unset.');
+      }
+      this.rpc = new FailoverTransport(
+        options.transport.map((transport, index) => ({
+          url: urls[index] ?? `injected transport ${index + 1}`,
+          transport,
+        })),
+        options.onRpcFailover,
+      );
+    } else if (options.transport) {
+      const url = urls[0] ?? 'injected transport';
+      this.rpc = new FailoverTransport(
+        [{ url, transport: options.transport }],
+        options.onRpcFailover,
+      );
+    } else {
+      if (urls.length === 0) {
+        throw new Error('Configure at least one RPC endpoint with `rpcUrl` or `rpcUrls`.');
+      }
+      const create =
+        options.transportFactory ??
+        ((url: string) => new SorobanRpc.Server(url) as StreamsTransport);
+      this.rpc = new FailoverTransport(
+        urls.map((url) => ({ url, transport: create(url) })),
+        options.onRpcFailover,
+      );
+    }
+    this.transport = this.rpc;
+  }
+
+  /** The RPC host currently serving requests, useful when diagnosing latency. */
+  get activeRpcUrl(): string {
+    return this.rpc.activeUrl;
+  }
+
+  /** Every configured RPC URL, in preference order. */
+  get rpcUrls(): string[] {
+    return this.rpc.urls;
   }
 
   /** Numeric contract codes the subclass knows, keyed by their stable names. */
@@ -630,16 +936,21 @@ abstract class SorobanClient {
   }
 
   /** Builds, signs, submits and confirms a state-changing contract call. */
-  protected async invoke(
+  protected async invoke<O extends WriteOptions>(
     method: string,
     args: xdr.ScVal[],
-    opts: WriteOptions = {},
-  ): Promise<{ hash: string }> {
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
     const { publicKey, signTransaction, networkPassphrase } = this.options;
-    if (!publicKey || !signTransaction) {
+    if (!publicKey) {
+      throw new Error('A connected wallet (publicKey) is required for this operation.');
+    }
+    if (!opts.simulateOnly && !signTransaction) {
       throw new Error('A connected wallet is required to submit transactions.');
     }
     const signal = opts.signal ?? this.options.signal;
+    const fee = opts.fee === undefined ? DEFAULT_WRITE_FEE : validateFee(opts.fee);
+    const memo = opts.memo === undefined ? undefined : toMemo(opts.memo);
 
     // A cached sequence can go stale if the account transacted elsewhere; in
     // that case re-fetch it once and rebuild instead of failing the call.
@@ -647,30 +958,40 @@ abstract class SorobanClient {
       throwIfAborted(signal);
       const account = await this.sourceAccount();
       throwIfAborted(signal);
-      const tx = new TransactionBuilder(account, {
-        fee: '1000000',
+      const builder = new TransactionBuilder(account, {
+        fee,
         networkPassphrase,
       })
         .addOperation(this.contract.call(method, ...args))
-        .setTimeout(30)
-        .build();
+        .setTimeout(30);
+      if (memo) builder.addMemo(memo);
+      const tx = builder.build();
 
       // Simulate before preparing so a call that cannot succeed fails with the
       // contract's own error instead of an opaque failure mid-assembly — and
-      // without opening a wallet prompt for a doomed transaction.
-      if (!this.options.skipSimulation) {
-        const simulated = await this.transport.simulateTransaction(tx);
+      // without opening a wallet prompt for a doomed transaction. A dry run
+      // always simulates, because that simulation *is* the result.
+      let simulated: SorobanRpc.Api.SimulateTransactionResponse | undefined;
+      if (opts.simulateOnly || !this.options.skipSimulation) {
+        simulated = await this.transport.simulateTransaction(tx);
         throwIfAborted(signal);
         if (SorobanRpc.Api.isSimulationError(simulated)) {
           throw this.simulationFailure(method, simulated.error);
         }
       }
 
+      if (opts.simulateOnly) {
+        return this.dryRun(
+          tx,
+          simulated as SorobanRpc.Api.SimulateTransactionSuccessResponse,
+        ) as WriteResultFor<O>;
+      }
+
       throwIfAborted(signal);
       const prepared = await this.transport.prepareTransaction(tx);
       // Never open a wallet prompt for a call the caller already cancelled.
       throwIfAborted(signal);
-      const signedXdr = await signTransaction(prepared.toXDR(), {
+      const signedXdr = await signTransaction!(prepared.toXDR(), {
         networkPassphrase,
         address: publicKey,
       });
@@ -689,8 +1010,28 @@ abstract class SorobanClient {
       // Invalidation point: once the network has accepted the transaction its
       // sequence number is consumed (whether it later succeeds or fails).
       this.invalidateAccount();
-      return this.poll(hash, signal);
+      return this.poll(hash, signal) as unknown as WriteResultFor<O>;
     }
+  }
+
+  /**
+   * Assembles a simulated transaction without signing or submitting it, and
+   * reports the resource estimates callers use to budget a write.
+   */
+  private dryRun(
+    tx: Transaction,
+    simulated: SorobanRpc.Api.SimulateTransactionSuccessResponse,
+  ): SimulationResult {
+    const assembled = SorobanRpc.assembleTransaction(tx, simulated).build();
+    const resources = simulated.transactionData?.build().resources();
+    return {
+      transaction: assembled,
+      minResourceFee: simulated.minResourceFee ?? '0',
+      cpuInsns: resources ? resources.instructions().toString() : '0',
+      // Soroban charges for both reading ledger entries and writing them back.
+      memBytes: resources ? (resources.diskReadBytes() + resources.writeBytes()).toString() : '0',
+      auth: simulated.result?.auth ?? [],
+    };
   }
 
   /**
@@ -882,10 +1223,7 @@ export class StreamsClient extends SorobanClient {
    * ```
    */
   async getStream(id: bigint | number | string): Promise<Stream | null> {
-    const raw = await this.simulate(
-      'get_stream',
-      nativeToScVal(BigInt(id), { type: 'u64' }),
-    );
+    const raw = await this.simulate('get_stream', nativeToScVal(BigInt(id), { type: 'u64' }));
     return raw === null ? null : normalizeStream(raw);
   }
 
@@ -975,32 +1313,45 @@ export class StreamsClient extends SorobanClient {
    * created in the scanned range" rather than "no streams".
    *
    * @param options - the address to search for, as sender or recipient, plus
-   * the ledger window and page size to scan it with.
-   * @returns the matching streams, ordered by the ledger their `created` event
-   * landed in, oldest first. Streams whose storage entry has been archived are
-   * skipped.
+   * the ledger window, page size and optional resume cursor.
+   * @returns `{ streams, cursor }`: the matching streams ordered by the ledger
+   * their `created` event landed in (oldest first), and the opaque paging token
+   * to pass back as `cursor` for the next incremental scan. Streams whose
+   * storage entry has been archived are skipped.
    * @throws Error when `address` is not a Stellar address or the ledger range
-   * is empty or unusable.
+   * is empty or unusable, or when a cursor is mixed with a ledger range.
+   * @throws InvalidCursorError when `cursor` is not an RPC paging token.
    * @throws StreamsError when a `getStream` lookup for a matched event fails.
    */
-  async listStreams(options: ListStreamsOptions): Promise<Stream[]> {
-    const { address } = options;
+  async listStreams(options: ListStreamsOptions): Promise<ListStreamsResult> {
+    const { address, cursor } = options;
     assertStreamAddress(address);
     const pageSize = options.pageSize ?? DEFAULT_EVENT_PAGE_SIZE;
     if (pageSize < 1) {
       throw new Error(`pageSize must be at least 1, got: ${pageSize}.`);
     }
+    const maxLedgers = options.maxLedgers ?? DEFAULT_EVENT_LOOKBACK_LEDGERS;
+    if (!Number.isInteger(maxLedgers) || maxLedgers < 1) {
+      throw new Error(`maxLedgers must be a positive integer, got: ${maxLedgers}.`);
+    }
+    if (cursor !== undefined) {
+      assertCursor(cursor);
+      if (options.startLedger !== undefined || options.endLedger !== undefined) {
+        throw new Error('cursor cannot be combined with startLedger or endLedger.');
+      }
+    }
+    const signal = options.signal;
 
     let startLedger = options.startLedger;
     let endLedger = options.endLedger;
-    if (startLedger === undefined) {
+    if (cursor === undefined && startLedger === undefined) {
       // Anchor the default window on the node's own tip: that is the only
       // reference guaranteed to keep the scan inside its event retention.
       const { sequence } = await this.transport.getLatestLedger();
-      startLedger = Math.max(1, sequence - DEFAULT_EVENT_LOOKBACK_LEDGERS);
+      startLedger = Math.max(1, sequence - maxLedgers);
       if (endLedger === undefined) endLedger = sequence;
     }
-    if (endLedger !== undefined && endLedger < startLedger) {
+    if (startLedger !== undefined && endLedger !== undefined && endLedger < startLedger) {
       throw new Error(`endLedger ${endLedger} precedes startLedger ${startLedger}.`);
     }
 
@@ -1014,36 +1365,74 @@ export class StreamsClient extends SorobanClient {
 
     const ids: bigint[] = [];
     const seen = new Set<string>();
-    /** Reads one page of events; returns whether the scan has reached its end. */
-    const collect = (events: SorobanRpc.Api.EventResponse[]): boolean => {
-      for (const event of events) {
-        if (endLedger !== undefined && event.ledger > endLedger) return true;
-        const id = createdStreamId(event, address);
-        if (id === null) continue;
-        const key = id.toString();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        ids.push(id);
-      }
-      return false;
-    };
+    let nextCursor = cursor ?? '';
+    let page: SorobanRpc.Api.GetEventsResponse;
 
-    // Soroban RPC rejects a getEvents request that mixes a cursor with a ledger
-    // range, so the scan opens in ledger mode and continues from the returned
-    // cursor, honouring endLedger on this side of the wire instead.
-    let page = await this.transport.getEvents({
-      filters,
-      startLedger,
-      ...(endLedger === undefined ? {} : { endLedger }),
-      limit: pageSize,
-    });
-    for (;;) {
-      if (collect(page.events)) break;
+    if (cursor !== undefined) {
+      // Soroban RPC rejects a getEvents request that mixes a cursor with a
+      // ledger range, so bound the window on this side of the wire.
+      page = await this.transport.getEvents({ filters, cursor, limit: pageSize });
+      throwIfAborted(signal);
+      if (endLedger === undefined) {
+        const from = cursorLedger(cursor);
+        endLedger = Math.min(page.latestLedger, from + maxLedgers);
+      }
+    } else {
+      page = await this.transport.getEvents({
+        filters,
+        startLedger: startLedger!,
+        ...(endLedger === undefined ? {} : { endLedger }),
+        limit: pageSize,
+      });
+      throwIfAborted(signal);
       // Freeze the tip at the first response so streams created while this call
       // runs cannot appear on a later page and shift the end from under it.
-      if (endLedger === undefined) endLedger = page.latestLedger;
-      if (page.events.length === 0 || !page.cursor) break;
+      if (endLedger === undefined) {
+        endLedger = Math.min(page.latestLedger, startLedger! + maxLedgers);
+      }
+    }
+
+    for (;;) {
+      throwIfAborted(signal);
+      if (cursor !== undefined) {
+        // A cursor scan takes each page whole: returning a mid-page cursor
+        // would re-fetch the same events forever. The window may overshoot by
+        // at most one page, and the returned cursor always makes progress.
+        for (const event of page.events) {
+          if (event.id) nextCursor = event.id;
+          collectStreamId(event, address, undefined, ids, seen);
+        }
+        const lastLedger = page.events.at(-1)?.ledger;
+        if (lastLedger !== undefined && endLedger !== undefined && lastLedger >= endLedger) break;
+        if (page.events.length === 0 || !page.cursor) {
+          if (page.cursor) nextCursor = page.cursor;
+          break;
+        }
+        nextCursor = page.cursor;
+        page = await this.transport.getEvents({ filters, cursor: page.cursor, limit: pageSize });
+        throwIfAborted(signal);
+        continue;
+      }
+
+      let reachedEnd = false;
+      for (const event of page.events) {
+        if (endLedger !== undefined && event.ledger > endLedger) {
+          reachedEnd = true;
+          break;
+        }
+        // Advancing by event id keeps the cursor at the last event this window
+        // consumed, so resuming cannot skip anything the page also carried.
+        if (event.id) nextCursor = event.id;
+        collectStreamId(event, address, endLedger, ids, seen);
+      }
+      if (reachedEnd) break;
+      if (page.events.length === 0 || !page.cursor) {
+        if (page.cursor) nextCursor = page.cursor;
+        break;
+      }
+      nextCursor = page.cursor;
       page = await this.transport.getEvents({ filters, cursor: page.cursor, limit: pageSize });
+      throwIfAborted(signal);
     }
 
     const streams: Stream[] = [];
@@ -1053,7 +1442,7 @@ export class StreamsClient extends SorobanClient {
       );
       streams.push(...batch.filter((stream): stream is Stream => stream !== null));
     }
-    return streams;
+    return { streams, cursor: nextCursor };
   }
 
   /**
@@ -1145,10 +1534,10 @@ export class StreamsClient extends SorobanClient {
    * console.log(`stream funded in ${hash}`);
    * ```
    */
-  async createStream(
+  async createStream<O extends WriteOptions = WriteOptions>(
     params: CreateStreamParams,
-    opts: WriteOptions = {},
-  ): Promise<{ hash: string }> {
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
     const label = params.label ?? '';
     const reference = params.reference ?? '';
     assertAddress(params.sender, 'sender');
@@ -1199,7 +1588,10 @@ export class StreamsClient extends SorobanClient {
    * }
    * ```
    */
-  async withdraw(id: bigint | number | string, opts: WriteOptions = {}): Promise<{ hash: string }> {
+  async withdraw<O extends WriteOptions = WriteOptions>(
+    id: bigint | number | string,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
     return this.invoke('withdraw', [nativeToScVal(BigInt(id), { type: 'u64' })], opts);
   }
 
@@ -1222,7 +1614,10 @@ export class StreamsClient extends SorobanClient {
    * console.log(cancelled?.cancelled === true); // true
    * ```
    */
-  async cancel(id: bigint | number | string, opts: WriteOptions = {}): Promise<{ hash: string }> {
+  async cancel<O extends WriteOptions = WriteOptions>(
+    id: bigint | number | string,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
     return this.invoke('cancel', [nativeToScVal(BigInt(id), { type: 'u64' })], opts);
   }
 }
@@ -1241,10 +1636,7 @@ export class EscrowClient extends SorobanClient {
 
   /** Fetch an escrow by id. Returns `null` if it does not exist. */
   async getEscrow(id: bigint | number | string): Promise<Escrow | null> {
-    const raw = await this.simulate(
-      'get_escrow',
-      nativeToScVal(BigInt(id), { type: 'u64' }),
-    );
+    const raw = await this.simulate('get_escrow', nativeToScVal(BigInt(id), { type: 'u64' }));
     return raw === null ? null : normalizeEscrow(raw);
   }
 
@@ -1252,10 +1644,10 @@ export class EscrowClient extends SorobanClient {
    * Create an escrow in the `created` (unfunded) state. `payer` must sign for
    * it; `id` is chosen by the caller and must not exist yet.
    */
-  async createEscrow(
+  async createEscrow<O extends WriteOptions = WriteOptions>(
     params: CreateEscrowParams,
-    opts: WriteOptions = {},
-  ): Promise<{ hash: string }> {
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
     assertTokenId(params.token);
     return this.invoke(
       'create_escrow',
@@ -1273,19 +1665,19 @@ export class EscrowClient extends SorobanClient {
   }
 
   /** Fund the escrow, transferring its amount of the token from the payer. */
-  async fundEscrow(
+  async fundEscrow<O extends WriteOptions = WriteOptions>(
     id: bigint | number | string,
-    opts: WriteOptions = {},
-  ): Promise<{ hash: string }> {
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
     return this.invoke('fund_escrow', [nativeToScVal(BigInt(id), { type: 'u64' })], opts);
   }
 
   /** Release the funds to the payee. `caller` must be the payer or the arbiter. */
-  async releaseEscrow(
+  async releaseEscrow<O extends WriteOptions = WriteOptions>(
     id: bigint | number | string,
     caller: string,
-    opts: WriteOptions = {},
-  ): Promise<{ hash: string }> {
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
     return this.invoke(
       'release_escrow',
       [nativeToScVal(BigInt(id), { type: 'u64' }), addressToScVal(caller)],
@@ -1294,11 +1686,11 @@ export class EscrowClient extends SorobanClient {
   }
 
   /** Refund the funds to the payer. `caller` must be the payee or the arbiter. */
-  async refundEscrow(
+  async refundEscrow<O extends WriteOptions = WriteOptions>(
     id: bigint | number | string,
     caller: string,
-    opts: WriteOptions = {},
-  ): Promise<{ hash: string }> {
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
     return this.invoke(
       'refund_escrow',
       [nativeToScVal(BigInt(id), { type: 'u64' }), addressToScVal(caller)],
@@ -1310,17 +1702,76 @@ export class EscrowClient extends SorobanClient {
    * Cancel the escrow. `caller` must be the payer; a funded escrow can only be
    * cancelled once its deadline has passed.
    */
-  async cancelEscrow(
+  async cancelEscrow<O extends WriteOptions = WriteOptions>(
     id: bigint | number | string,
     caller: string,
-    opts: WriteOptions = {},
-  ): Promise<{ hash: string }> {
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
     return this.invoke(
       'cancel_escrow',
       [nativeToScVal(BigInt(id), { type: 'u64' }), addressToScVal(caller)],
       opts,
     );
   }
+}
+
+/** The configured endpoints, primary first, without duplicates or blanks. */
+function configuredRpcUrls(options: StreamsClientOptions): string[] {
+  const urls: string[] = [];
+  const add = (url: string | undefined) => {
+    const trimmed = url?.trim();
+    if (trimmed && !urls.includes(trimmed)) urls.push(trimmed);
+  };
+  if (options.rpcUrls?.length) {
+    for (const url of options.rpcUrls) add(url);
+  } else {
+    add(options.rpcUrl);
+  }
+  return urls;
+}
+
+/** Validates a caller-supplied base fee and normalises it to a decimal string. */
+function validateFee(fee: string): string {
+  if (!/^\d+$/.test(fee)) {
+    throw new Error(`Invalid fee: ${fee}. Expected a decimal integer string of stroops.`);
+  }
+  const value = BigInt(fee);
+  if (value <= 0n) {
+    throw new Error(`Invalid fee: ${fee}. Must be greater than 0.`);
+  }
+  return value.toString();
+}
+
+/** Maximum value of a Stellar id memo: an unsigned 64-bit integer. */
+const MAX_MEMO_ID = 2n ** 64n - 1n;
+/** A text memo is capped at 28 UTF-8 bytes by the Stellar protocol. */
+const MAX_MEMO_TEXT_BYTES = 28;
+
+/** Converts a {@link TransactionMemo} into the SDK's `Memo` value. */
+function toMemo(memo: TransactionMemo): Memo {
+  if (memo.type === 'text') {
+    if (typeof memo.value !== 'string') {
+      throw new Error('Invalid memo: text memos require a string value.');
+    }
+    const bytes = new TextEncoder().encode(memo.value).length;
+    if (bytes > MAX_MEMO_TEXT_BYTES) {
+      throw new Error(`Invalid memo text: ${bytes} bytes. Must be at most ${MAX_MEMO_TEXT_BYTES}.`);
+    }
+    return Memo.text(memo.value);
+  }
+  if (memo.type !== 'id') {
+    throw new Error(`Invalid memo type: ${String((memo as { type?: unknown }).type)}.`);
+  }
+  let id: bigint;
+  try {
+    id = BigInt(memo.value);
+  } catch {
+    throw new Error(`Invalid memo id: ${String(memo.value)}. Expected an unsigned 64-bit integer.`);
+  }
+  if (id < 0n || id > MAX_MEMO_ID) {
+    throw new Error(`Invalid memo id: ${id}. Must be between 0 and ${MAX_MEMO_ID}.`);
+  }
+  return Memo.id(id.toString());
 }
 
 function assertTokenId(tokenId: string): void {
@@ -1398,6 +1849,44 @@ function assertMetadata(label: string, reference: string): void {
 /** A topic value, in the base64 XDR encoding `getEvents` filters expect. */
 function topicSymbol(symbol: string): string {
   return xdr.ScVal.scvSymbol(symbol).toXDR('base64');
+}
+
+/**
+ * A paging token is a TOID (19 decimal digits) and an event index (10 digits)
+ * separated by a hyphen. Older nodes emitted shorter numeric tokens, so the
+ * format check accepts any two decimal groups and leaves their meaning to the
+ * node.
+ */
+function assertCursor(cursor: string): void {
+  if (!/^\d+-\d+$/.test(cursor)) throw new InvalidCursorError(cursor);
+}
+
+/**
+ * The ledger a cursor points at. The TOID's high bits are the ledger sequence;
+ * accepting a bare ledger sequence keeps hand-written/test cursors usable.
+ */
+function cursorLedger(cursor: string): number {
+  const prefix = BigInt(cursor.slice(0, cursor.indexOf('-')));
+  const ledger = prefix > 0xffff_ffffn ? prefix >> 32n : prefix;
+  if (ledger > BigInt(Number.MAX_SAFE_INTEGER)) throw new InvalidCursorError(cursor);
+  return Number(ledger);
+}
+
+/** Adds a matching stream id to the page, deduplicated across pages. */
+function collectStreamId(
+  event: SorobanRpc.Api.EventResponse,
+  address: string,
+  endLedger: number | undefined,
+  ids: bigint[],
+  seen: Set<string>,
+): void {
+  if (endLedger !== undefined && event.ledger > endLedger) return;
+  const id = createdStreamId(event, address);
+  if (id === null) return;
+  const key = id.toString();
+  if (seen.has(key)) return;
+  seen.add(key);
+  ids.push(id);
 }
 
 /**

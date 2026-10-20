@@ -116,13 +116,12 @@ stream up by id, and exposes `refresh()` for after a create/withdraw/cancel.
 
 ### Dependencies
 
-This hook depends on the SDK's address-listing API tracked in
-[issue #94](https://github.com/SorobanForge/stellar-streams/issues/94)
-(`StreamsClient.listStreams({ address })`). Until that method ships,
-`useStreams` **degrades gracefully**: it returns an empty `streams` array with
-`loading: false` and `error: null` instead of throwing. When the SDK adds
-`listStreams`, the hook starts using it automatically — no consumer changes are
-needed.
+This hook uses the SDK's address-listing API
+(`StreamsClient.listStreams({ address })`). It accepts both the current
+`{ streams, cursor }` result and the legacy bare-array result, so it keeps
+working across SDK versions. If the method is unavailable, `useStreams`
+**degrades gracefully**: it returns an empty `streams` array with
+`loading: false` and `error: null` instead of throwing.
 
 ### Arguments
 
