@@ -8,11 +8,18 @@ vi.mock('@stellar/freighter-api', () => {
   const getAddress = vi.fn();
   const requestAccess = vi.fn();
   const signTransaction = vi.fn();
-  const api = { isConnected, getAddress, requestAccess, signTransaction };
+  const signAuthEntry = vi.fn();
+  const api = { isConnected, getAddress, requestAccess, signTransaction, signAuthEntry };
   return { ...api, default: api };
 });
 
-import { isConnected, getAddress, requestAccess, signTransaction } from '@stellar/freighter-api';
+import {
+  isConnected,
+  getAddress,
+  requestAccess,
+  signTransaction,
+  signAuthEntry,
+} from '@stellar/freighter-api';
 
 describe('FreighterAdapter', () => {
   beforeEach(() => {
@@ -82,5 +89,28 @@ describe('FreighterAdapter', () => {
       networkPassphrase: 'custom-passphrase',
       address: '',
     });
+  });
+
+  it('signAuthEntry delegates to freighter API', async () => {
+    vi.mocked(signAuthEntry).mockResolvedValue({
+      signedAuthEntry: 'signed-entry-xdr',
+      signerAddress: 'GB_FREIGHTER',
+    });
+    const adapter = newAdapter();
+    const signed = await adapter.signAuthEntry('entry-xdr', { network: 'MAINNET' });
+    expect(signed).toBe('signed-entry-xdr');
+    expect(signAuthEntry).toHaveBeenCalledWith('entry-xdr', {
+      networkPassphrase: 'Public Global Stellar Network ; September 2015',
+      address: '',
+    });
+  });
+
+  it('signAuthEntry throws when freighter returns no signature', async () => {
+    vi.mocked(signAuthEntry).mockResolvedValue({
+      signedAuthEntry: null,
+      signerAddress: 'GB_FREIGHTER',
+    });
+    const adapter = newAdapter();
+    await expect(adapter.signAuthEntry('entry-xdr')).rejects.toThrow('Failed to sign auth entry.');
   });
 });
