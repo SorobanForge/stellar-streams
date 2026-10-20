@@ -65,6 +65,59 @@ fn test_rounding_dust_goes_to_last_recipient() {
 }
 
 #[test]
+fn test_recipient_share_matches_rounding_and_last_recipient_dust() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register(&env);
+    let creator = account(&env);
+    let a = account(&env);
+    let b = account(&env);
+    let c = account(&env);
+    let id = client.create_split(
+        &creator,
+        &vec![&env, a, b, c],
+        &vec![&env, 1u32, 1u32, 1u32],
+    );
+
+    // For amount 2 the first two recipients round down to zero. The final
+    // recipient receives the full remainder, matching distribute's rule.
+    assert_eq!(client.recipient_share(&id, &0, &2), 0);
+    assert_eq!(client.recipient_share(&id, &1, &2), 0);
+    assert_eq!(client.recipient_share(&id, &2, &2), 2);
+
+    // For amount 100, the final recipient receives the extra unit of dust.
+    assert_eq!(client.recipient_share(&id, &0, &100), 33);
+    assert_eq!(client.recipient_share(&id, &1, &100), 33);
+    assert_eq!(client.recipient_share(&id, &2, &100), 34);
+}
+
+#[test]
+fn test_recipient_share_validations() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register(&env);
+    let recipient = account(&env);
+    let id = client.create_split(
+        &account(&env),
+        &vec![&env, recipient],
+        &vec![&env, 1u32],
+    );
+
+    assert_eq!(
+        client.try_recipient_share(&id, &1, &10),
+        Err(Ok(SplitError::RecipientIndexOutOfBounds)),
+    );
+    assert_eq!(
+        client.try_recipient_share(&id, &0, &0),
+        Err(Ok(SplitError::InvalidAmount)),
+    );
+    assert_eq!(
+        client.try_recipient_share(&99, &0, &10),
+        Err(Ok(SplitError::SplitNotFound)),
+    );
+}
+
+#[test]
 fn test_invalid_splits() {
     let env = Env::default();
     env.mock_all_auths();
