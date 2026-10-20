@@ -4,8 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { EscrowClient } from '@stellar-starter-kit/contracts';
-import Header from '../../components/Header';
-import Footer from '../../components/Footer';
+import { Footer, Header } from '@stellar-starter-kit/ui';
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   DEFAULT_SOROBAN_RPC_URL,

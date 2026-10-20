@@ -12,3 +12,4 @@ export type WalletProviderType = (typeof WALLET_PROVIDERS)[keyof typeof WALLET_P
 // Node's ESM resolver rejects extensionless relative imports.
 export * from './WalletProvider.js';
 export * from './adapters/index.js';
+export { NotSupportedError, isUserRejection, toSigningError } from './errors.js';

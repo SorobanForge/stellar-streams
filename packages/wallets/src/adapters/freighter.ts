@@ -7,6 +7,7 @@ const {
   isConnected: checkFreighterConnected,
   getAddress: getFreighterAddress,
   signTransaction: signFreighterTransaction,
+  signAuthEntry: signFreighterAuthEntry,
   requestAccess: requestFreighterAccess,
 } = freighterApi;
 import {
@@ -67,5 +68,16 @@ export class FreighterAdapter implements WalletAdapter {
       address: this.publicKey ?? '',
     });
     return signedTxXdr;
+  }
+
+  async signAuthEntry(entryXdr: string, opts?: SignTransactionOptions): Promise<string> {
+    const { signedAuthEntry } = await signFreighterAuthEntry(entryXdr, {
+      networkPassphrase: resolveNetworkPassphrase(opts),
+      address: this.publicKey ?? '',
+    });
+    if (!signedAuthEntry) {
+      throw new Error('Failed to sign auth entry.');
+    }
+    return signedAuthEntry;
   }
 }

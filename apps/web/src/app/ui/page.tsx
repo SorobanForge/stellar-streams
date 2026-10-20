@@ -13,15 +13,13 @@ import {
   TriangleAlert,
   Wallet,
 } from 'lucide-react';
-import { cn } from '@stellar-starter-kit/ui';
+import { cn, Footer, Header } from '@stellar-starter-kit/ui';
 import {
   formatAddress,
   formatBps,
   formatDuration,
   formatTokenAmount,
 } from '@stellar-starter-kit/utils';
-import Header from '../../components/Header';
-import Footer from '../../components/Footer';
 import { REPO_URL } from '../../lib/constants';
 
 /**

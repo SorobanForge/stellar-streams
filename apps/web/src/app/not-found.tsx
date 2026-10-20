@@ -1,8 +1,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Compass, Home } from 'lucide-react';
-import Header from '../components/Header';
-import Footer from '../components/Footer';
+import { Footer, Header } from '@stellar-starter-kit/ui';
 
 /**
  * Root not-found boundary. Next renders this for any unmatched route, so it
