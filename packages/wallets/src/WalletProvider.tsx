@@ -7,7 +7,8 @@ import {
   HanaAdapter,
   RabetAdapter,
   type WalletAdapter,
-} from './adapters';
+} from './adapters/index.js';
+import { isUserRejection, NotSupportedError, toSigningError } from './errors.js';
 
 export type WalletType = 'freighter' | 'albedo' | 'rabe' | 'hana';
 
@@ -22,6 +23,14 @@ export interface WalletContextType {
   disconnect: () => void;
   signTransaction: (
     xdr: string,
+    opts?: { network?: string; networkPassphrase?: string },
+  ) => Promise<string>;
+  /**
+   * Sign a Soroban authorization entry. Rejects with `NotSupportedError` when
+   * the active wallet cannot sign auth entries.
+   */
+  signAuthEntry: (
+    entryXdr: string,
     opts?: { network?: string; networkPassphrase?: string },
   ) => Promise<string>;
   setNetwork: (network: string) => void;
@@ -99,13 +108,24 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem(LOCAL_STORAGE_KEY_ADDRESS);
   }, []);
 
-  const signTransaction = useCallback(
-    async (xdr: string, opts?: { network?: string; networkPassphrase?: string }) => {
+  /** Signs through the active adapter and logs failures at the right level. */
+  const signWith = useCallback(
+    async (
+      method: 'signTransaction' | 'signAuthEntry',
+      xdr: string,
+      opts?: { network?: string; networkPassphrase?: string },
+    ): Promise<string> => {
+      const noun = method === 'signTransaction' ? 'transaction' : 'auth entry';
       if (!activeProvider || !activeAddress) {
-        throw new Error('No active wallet session to sign transaction.');
+        throw new Error(`No active wallet session to sign ${noun}.`);
       }
 
       const adapter = ADAPTERS[activeProvider];
+      const sign = adapter[method];
+      if (!sign) {
+        throw new NotSupportedError(method, adapter.name);
+      }
+
       const passphrase =
         opts?.networkPassphrase ||
         (network === 'TESTNET'
@@ -113,30 +133,30 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
           : 'Public Global Stellar Network ; September 2015');
 
       try {
-        return await adapter.signTransaction(xdr, {
-          networkPassphrase: passphrase,
-          network,
-        });
+        return await sign.call(adapter, xdr, { networkPassphrase: passphrase, network });
       } catch (err) {
-        let message = 'Failed to sign transaction.';
-        if (err instanceof Error) {
-          message = err.message;
-        } else if (typeof err === 'string') {
-          message = err;
-        }
-
-        if (
-          message.toLowerCase().includes('user rejected') ||
-          message.toLowerCase().includes('declined')
-        ) {
-          console.warn('Transaction signing cancelled by user:', err);
+        const error = toSigningError(err, `Failed to sign ${noun}.`);
+        if (isUserRejection(error.message)) {
+          console.warn(`${noun} signing cancelled by user:`, err);
         } else {
-          console.error('Transaction signing failed:', err);
+          console.error(`${noun} signing failed:`, err);
         }
-        throw new Error(message);
+        throw error;
       }
     },
     [activeProvider, activeAddress, network],
+  );
+
+  const signTransaction = useCallback(
+    (xdr: string, opts?: { network?: string; networkPassphrase?: string }) =>
+      signWith('signTransaction', xdr, opts),
+    [signWith],
+  );
+
+  const signAuthEntry = useCallback(
+    (entryXdr: string, opts?: { network?: string; networkPassphrase?: string }) =>
+      signWith('signAuthEntry', entryXdr, opts),
+    [signWith],
   );
 
   return (
@@ -151,6 +171,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         connect,
         disconnect,
         signTransaction,
+        signAuthEntry,
         setNetwork,
       }}
     >

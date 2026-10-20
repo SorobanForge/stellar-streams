@@ -4,8 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { EscrowClient } from '@stellar-starter-kit/contracts';
-import Header from '../../components/Header';
-import Footer from '../../components/Footer';
+import { Footer, Header } from '@stellar-starter-kit/ui';
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   DEFAULT_SOROBAN_RPC_URL,
@@ -288,16 +287,18 @@ export default function EscrowDemo() {
 
       if (result.result) {
         const data = result.result;
-        setLookupResult(normalizeEscrow({
-          id: BigInt(data.id),
-          payer: data.payer,
-          payee: data.payee,
-          arbiter: data.arbiter,
-          token: data.token,
-          amount: BigInt(data.amount),
-          deadline: BigInt(data.deadline),
-          status: Number(data.status),
-        } satisfies RawEscrow));
+        setLookupResult(
+          normalizeEscrow({
+            id: BigInt(data.id),
+            payer: data.payer,
+            payee: data.payee,
+            arbiter: data.arbiter,
+            token: data.token,
+            amount: BigInt(data.amount),
+            deadline: BigInt(data.deadline),
+            status: Number(data.status),
+          } satisfies RawEscrow),
+        );
 
         if (!silent) {
           addLog('fetch', 'success', `Fetched details for escrow ID ${escrowId.toString()}`);

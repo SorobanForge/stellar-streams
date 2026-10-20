@@ -173,6 +173,54 @@ fn test_escrow_cancel_before_deadline_fails() {
 }
 
 #[test]
+fn test_escrow_create_with_past_deadline_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    let client = register(&env);
+
+    // Move the ledger past the deadline offered below.
+    advance_time(&env, 1000);
+
+    let res = client.try_create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &500);
+    assert_eq!(res, Err(Ok(EscrowError::InvalidDeadline)));
+    assert!(client.get_escrow(&1).is_none());
+}
+
+#[test]
+fn test_escrow_create_with_deadline_equal_to_now_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    let client = register(&env);
+
+    // The fresh Env starts with a ledger timestamp of 0; a deadline of 0 is
+    // equal to the current ledger time and must be rejected.
+    let res = client.try_create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &0);
+    assert_eq!(res, Err(Ok(EscrowError::InvalidDeadline)));
+
+    // Same rule holds at any non-zero timestamp.
+    advance_time(&env, 1000);
+    let res2 = client.try_create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    assert_eq!(res2, Err(Ok(EscrowError::InvalidDeadline)));
+
+    // One second later the same deadline is in the past, also rejected...
+    advance_time(&env, 1);
+    let res3 = client.try_create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    assert_eq!(res3, Err(Ok(EscrowError::InvalidDeadline)));
+
+    // ...and a strictly future deadline is accepted.
+    client.create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1002);
+    assert_eq!(client.get_escrow(&1).unwrap().deadline, 1002);
+}
+
+#[test]
 fn test_escrow_invalid_state_transitions() {
     let env = Env::default();
     env.mock_all_auths();

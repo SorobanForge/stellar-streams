@@ -133,6 +133,15 @@ cargo deny --manifest-path contracts/Cargo.toml check
 cargo build --manifest-path contracts/Cargo.toml --target wasm32v1-none --release
 ```
 
+### SDK guide (`/docs/sdk.md`)
+
+The SDK guide is the copy-pasteable reference for integrators: it covers creating a
+`StreamsClient` in SSR-safe and wallet-backed setups, reading a stream and config, each write
+method (`createStream`, `withdraw`, `cancel`), and typed contract errors from the SDK.
+
+Read it alongside the app implementation in `apps/web/src/app/streams/page.tsx` and the typed
+client in `packages/sdk/src/index.ts`.
+
 ### Component gallery (`/ui`)
 
 The dashboard renders every shared UI primitive — buttons, form controls, badges, alerts,

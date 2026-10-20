@@ -1,5 +1,9 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
+// `test_claimable_vested_view_costs` prints the numbers it measures, which is the
+// only reason the test build needs `std` in this otherwise `no_std` crate.
+#[cfg(test)]
+extern crate std;
 
 use contract_version::CONTRACT_VERSION;
 use soroban_sdk::{
@@ -104,6 +108,17 @@ pub enum DataKey {
     Admin,
     Treasury,
     FeeBps,
+}
+
+/// Both vesting numbers of a stream, computed from a single storage read.
+/// Issue #83: callers that poll a stream for what is vested *and* what the
+/// recipient can take right now used to pay two full reads of the same entry
+/// by calling `vested` and `claimable` back to back.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VestingSummary {
+    pub vested: i128,
+    pub claimable: i128,
 }
 
 /// Emitted when a stream is created.
@@ -606,6 +621,20 @@ impl StreamContract {
             .get(&DataKey::Stream(stream_id))
             .ok_or(StreamError::StreamNotFound)?;
         Ok(vested_amount(&stream, env.ledger().timestamp()))
+    }
+
+    /// View both `vested` and `claimable` from a single storage read. Callers
+    /// that need the two numbers together avoid reading (and deserializing)
+    /// the stream entry twice by using this instead of calling both views.
+    /// Issue #83.
+    pub fn vesting_summary(env: Env, stream_id: u64) -> Result<VestingSummary, StreamError> {
+        let stream: Stream = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Stream(stream_id))
+            .ok_or(StreamError::StreamNotFound)?;
+        let vested = vested_amount(&stream, env.ledger().timestamp());
+        Ok(VestingSummary { vested, claimable: (vested - stream.withdrawn).max(0) })
     }
 
     /// Fetch a stream by id.

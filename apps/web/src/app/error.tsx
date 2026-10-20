@@ -3,8 +3,7 @@
 import React, { useEffect } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, ArrowLeft, Home, RefreshCw } from 'lucide-react';
-import Header from '../components/Header';
-import Footer from '../components/Footer';
+import { Footer, Header } from '@stellar-starter-kit/ui';
 
 /**
  * Route-level error boundary. Next requires this to be a Client Component; it

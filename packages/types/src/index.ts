@@ -1,3 +1,5 @@
+import { computeVestedAmount } from '@stellar-starter-kit/utils';
+
 export type StellarNetwork = 'local' | 'testnet' | 'mainnet';
 
 export interface StellarConfig {
@@ -51,8 +53,68 @@ export interface RawStream {
   cancelled: boolean;
 }
 
+/** Error raised when a decoded contract response does not match its expected shape. */
+export class ContractResponseError extends TypeError {
+  readonly contract: string;
+  readonly field: string;
+
+  constructor(contract: string, field: string, expected: string) {
+    super(`Invalid ${contract} contract response: field "${field}" must be ${expected}.`);
+    this.name = 'ContractResponseError';
+    this.contract = contract;
+    this.field = field;
+  }
+}
+
+type UnknownRecord = Record<string, unknown>;
+const isRecord = (value: unknown): value is UnknownRecord =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+const isInteger = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value);
+
+/** Check the runtime shape returned by the stream contract. */
+export function isStream(value: unknown): value is RawStream {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === 'bigint' &&
+    typeof value.sender === 'string' &&
+    typeof value.recipient === 'string' &&
+    typeof value.token === 'string' &&
+    typeof value.total_amount === 'bigint' &&
+    typeof value.withdrawn === 'bigint' &&
+    typeof value.start_time === 'bigint' &&
+    typeof value.end_time === 'bigint' &&
+    typeof value.cliff_time === 'bigint' &&
+    typeof value.label === 'string' &&
+    typeof value.reference === 'string' &&
+    typeof value.cancelled === 'boolean'
+  );
+}
+
+function assertStream(value: unknown): asserts value is RawStream {
+  const fields: Array<[string, (v: unknown) => boolean, string]> = [
+    ['id', (v) => typeof v === 'bigint', 'a bigint'],
+    ['sender', (v) => typeof v === 'string', 'a string'],
+    ['recipient', (v) => typeof v === 'string', 'a string'],
+    ['token', (v) => typeof v === 'string', 'a string'],
+    ['total_amount', (v) => typeof v === 'bigint', 'a bigint'],
+    ['withdrawn', (v) => typeof v === 'bigint', 'a bigint'],
+    ['start_time', (v) => typeof v === 'bigint', 'a bigint'],
+    ['end_time', (v) => typeof v === 'bigint', 'a bigint'],
+    ['cliff_time', (v) => typeof v === 'bigint', 'a bigint'],
+    ['label', (v) => typeof v === 'string', 'a string'],
+    ['reference', (v) => typeof v === 'string', 'a string'],
+    ['cancelled', (v) => typeof v === 'boolean', 'a boolean'],
+  ];
+  if (!isRecord(value)) throw new ContractResponseError('stream', '<response>', 'an object');
+  for (const [field, check, expected] of fields) {
+    if (!check(value[field])) throw new ContractResponseError('stream', field, expected);
+  }
+}
+
 /** Convert the generated snake_case contract result into the UI domain shape. */
-export function normalizeStream(raw: RawStream): Stream {
+export function normalizeStream(raw: unknown): Stream {
+  assertStream(raw);
   return {
     id: raw.id.toString(),
     sender: raw.sender,
@@ -74,6 +136,33 @@ export interface StreamConfig {
   admin: string;
   treasury: string;
   feeBps: number;
+}
+
+/** Raw values returned by the Soroban `get_config` method. */
+export interface RawConfig {
+  admin: string;
+  treasury: string;
+  fee_bps: number;
+}
+
+/** Check the runtime shape returned by the stream contract's config method. */
+export function isConfig(value: unknown): value is RawConfig {
+  return (
+    isRecord(value) &&
+    typeof value.admin === 'string' &&
+    typeof value.treasury === 'string' &&
+    isInteger(value.fee_bps)
+  );
+}
+
+/** Convert a raw config response into its domain shape after validating it. */
+export function normalizeConfig(raw: unknown): StreamConfig {
+  if (!isRecord(raw)) throw new ContractResponseError('config', '<response>', 'an object');
+  if (typeof raw.admin !== 'string') throw new ContractResponseError('config', 'admin', 'a string');
+  if (typeof raw.treasury !== 'string')
+    throw new ContractResponseError('config', 'treasury', 'a string');
+  if (!isInteger(raw.fee_bps)) throw new ContractResponseError('config', 'fee_bps', 'an integer');
+  return { admin: raw.admin, treasury: raw.treasury, feeBps: raw.fee_bps };
 }
 
 /**
@@ -133,11 +222,46 @@ export function normalizeSplit(raw: RawSplit): Split {
 }
 
 /** Derives a human-facing status for a stream at a given timestamp. */
+export interface StreamMetrics {
+  status: StreamStatus;
+  progressBps: number;
+  claimable: bigint;
+  remainingSeconds: number;
+}
+
+/** Derive all time-dependent stream values from the same schedule and timestamp. */
+export function getStreamMetrics(stream: Stream, now: number): StreamMetrics {
+  const totalAmount = BigInt(stream.totalAmount);
+  const vested = computeVestedAmount(
+    {
+      totalAmount,
+      startTime: stream.startTime,
+      endTime: stream.endTime,
+      cliffTime: stream.cliffTime,
+    },
+    now,
+  );
+  const withdrawn = BigInt(stream.withdrawn);
+  const claimable = vested > withdrawn ? vested - withdrawn : 0n;
+  const status = stream.cancelled
+    ? 'cancelled'
+    : now < stream.startTime || now < stream.cliffTime
+      ? 'scheduled'
+      : now >= stream.endTime
+        ? 'completed'
+        : 'streaming';
+
+  return {
+    status,
+    progressBps: totalAmount > 0n ? Number((vested * 10_000n) / totalAmount) : 0,
+    claimable,
+    remainingSeconds: Math.max(0, stream.endTime - now),
+  };
+}
+
+/** Derives a human-facing status for a stream at a given timestamp. */
 export function getStreamStatus(stream: Stream, now: number): StreamStatus {
-  if (stream.cancelled) return 'cancelled';
-  if (now < stream.startTime || now < stream.cliffTime) return 'scheduled';
-  if (now >= stream.endTime) return 'completed';
-  return 'streaming';
+  return getStreamMetrics(stream, now).status;
 }
 
 /**
@@ -174,8 +298,41 @@ export interface RawEscrow {
   status: number;
 }
 
+/** Check the runtime shape returned by the escrow contract. */
+export function isEscrow(value: unknown): value is RawEscrow {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'bigint' &&
+    typeof value.payer === 'string' &&
+    typeof value.payee === 'string' &&
+    typeof value.arbiter === 'string' &&
+    typeof value.token === 'string' &&
+    typeof value.amount === 'bigint' &&
+    typeof value.deadline === 'bigint' &&
+    isInteger(value.status)
+  );
+}
+
+function assertEscrow(value: unknown): asserts value is RawEscrow {
+  if (!isRecord(value)) throw new ContractResponseError('escrow', '<response>', 'an object');
+  const fields: Array<[string, (v: unknown) => boolean, string]> = [
+    ['id', (v) => typeof v === 'bigint', 'a bigint'],
+    ['payer', (v) => typeof v === 'string', 'a string'],
+    ['payee', (v) => typeof v === 'string', 'a string'],
+    ['arbiter', (v) => typeof v === 'string', 'a string'],
+    ['token', (v) => typeof v === 'string', 'a string'],
+    ['amount', (v) => typeof v === 'bigint', 'a bigint'],
+    ['deadline', (v) => typeof v === 'bigint', 'a bigint'],
+    ['status', isInteger, 'an integer'],
+  ];
+  for (const [field, check, expected] of fields) {
+    if (!check(value[field])) throw new ContractResponseError('escrow', field, expected);
+  }
+}
+
 /** Convert a generated snake_case escrow result into the domain shape. */
-export function normalizeEscrow(raw: RawEscrow): Escrow {
+export function normalizeEscrow(raw: unknown): Escrow {
+  assertEscrow(raw);
   const status = ESCROW_STATUSES[Number(raw.status)];
   if (!status) throw new Error(`Unknown escrow status index: ${raw.status}`);
   return {
@@ -191,7 +348,11 @@ export function normalizeEscrow(raw: RawEscrow): Escrow {
 }
 
 const ESCROW_STATUSES: readonly EscrowStatus[] = [
-  'created', 'funded', 'released', 'refunded', 'cancelled',
+  'created',
+  'funded',
+  'released',
+  'refunded',
+  'cancelled',
 ];
 
 /**

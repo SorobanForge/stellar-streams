@@ -152,10 +152,8 @@ export interface UseStreamsResult {
 }
 
 /**
- * Parameters the SDK's `listStreams` is expected to accept once issue #94
- * ("feat(sdk): list streams for an address from contract events") ships.
- * `signal` is optional so older SDK builds that do not support cancellation
- * can still be called.
+ * Parameters the SDK's `listStreams` accepts. `signal` is optional so older SDK
+ * builds that do not support cancellation can still be called.
  */
 export interface ListStreamsParams {
   /** Account whose sender/recipient streams should be returned. */
@@ -168,20 +166,21 @@ export interface ListStreamsParams {
   signal?: AbortSignal;
 }
 
-/** Structural view of the listing method the SDK will expose (issue #94). */
+/** Structural view of the listing method the SDK exposes. */
 type StreamsLister = {
-  listStreams?: (params: ListStreamsParams) => Promise<Stream[]>;
+  listStreams?: (
+    params: ListStreamsParams,
+  ) => Promise<Stream[] | { streams: Stream[]; cursor?: string }>;
 };
 
 /**
  * Loads the streams that involve `address` (sender or recipient) through the
  * SDK's `listStreams`, re-fetching whenever the client or address changes.
  *
- * This hook intentionally depends on the SDK listing API tracked in
- * [issue #94](https://github.com/SorobanForge/stellar-streams/issues/94). Until
- * that method ships, `useStreams` degrades gracefully: it returns an empty
- * `streams` array, `loading: false`, and no error instead of throwing. Once the
- * SDK exposes `listStreams`, no hook changes are needed.
+ * The SDK result is either the current `{ streams, cursor }` page or the legacy
+ * bare array; both are accepted. If the method is unavailable, `useStreams`
+ * degrades gracefully: it returns an empty `streams` array,
+ * `loading: false`, and no error instead of throwing.
  *
  * An empty result (a valid address with no streams) also resolves to an empty
  * array with no error. In-flight work is aborted on unmount and whenever the
@@ -238,7 +237,7 @@ export function useStreams(
     try {
       const found = await listStreams.call(client, { address, signal: controller.signal });
       if (!mounted.current || request !== requestId.current || controller.signal.aborted) return;
-      setStreams(Array.isArray(found) ? found : []);
+      setStreams(Array.isArray(found) ? found : found.streams);
     } catch (err) {
       // An aborted request is not an error: the component unmounted or the
       // address changed while it was in flight.

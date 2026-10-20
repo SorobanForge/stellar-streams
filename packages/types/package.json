@@ -4,8 +4,22 @@
   "private": true,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@stellar-starter-kit/utils": "workspace:*"
+  },
+  "sideEffects": false,
   "scripts": {
-    "build": "tsc",
+    "build": "tsc --project tsconfig.build.json",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

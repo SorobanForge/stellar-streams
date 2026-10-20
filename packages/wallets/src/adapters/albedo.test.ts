@@ -9,6 +9,7 @@ vi.mock('@albedo-link/intent', () => ({
 
 import albedo from '@albedo-link/intent';
 import { AlbedoAdapter } from './albedo';
+import type { WalletAdapter } from './adapter';
 
 describe('AlbedoAdapter', () => {
   const adapter = new AlbedoAdapter();
@@ -49,6 +50,10 @@ describe('AlbedoAdapter', () => {
       signed_message: '',
     } as unknown as Awaited<ReturnType<typeof albedo.publicKey>>);
     await expect(adapter.connect()).rejects.toThrow('Failed to retrieve public key from wallet.');
+  });
+
+  it('does not expose auth-entry signing', () => {
+    expect((adapter as WalletAdapter).signAuthEntry).toBeUndefined();
   });
 
   it('signTransaction delegates to albedo tx', async () => {

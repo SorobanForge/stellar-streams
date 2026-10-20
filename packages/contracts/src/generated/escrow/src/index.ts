@@ -54,7 +54,8 @@ export const EscrowError = {
   5: {message:"InvalidStateTransition"},
   6: {message:"DeadlineNotReached"},
   7: {message:"DeadlineExpired"},
-  8: {message:"AlreadyFinalized"}
+  8: {message:"AlreadyFinalized"},
+  9: {message:"InvalidDeadline"}
 }
 
 export enum EscrowStatus {

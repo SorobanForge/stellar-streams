@@ -1,9 +1,6 @@
 'use client';
 
 import React, { useState } from 'react';
-import Header from '../../components/Header';
-import Footer from '../../components/Footer';
-import Logo from '../../components/Logo';
 import Link from 'next/link';
 import {
   BookOpen,
@@ -16,7 +13,7 @@ import {
   LifeBuoy,
   ArrowRightLeft,
 } from 'lucide-react';
-import { cn } from '@stellar-starter-kit/ui';
+import { cn, Footer, Header, Logo } from '@stellar-starter-kit/ui';
 import { REPO_URL } from '../../lib/constants';
 
 const DOCS_SECTIONS = {
@@ -187,6 +184,16 @@ pnpm build`}
             <h4 className="text-sm font-bold text-white">packages/wallets</h4>
             <p className="mt-1 text-xs text-slate-400">
               Unified React providers and hooks wrapping Freighter, Albedo, Hana, and Rabet wallets.
+              See the{' '}
+              <a
+                href={`${REPO_URL}/blob/main/packages/wallets/README.md`}
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold text-cyan-400 hover:underline"
+              >
+                supported-wallet matrix and troubleshooting
+              </a>{' '}
+              for capabilities, mounting, and error handling.
             </p>
           </div>
           <div className="rounded-xl border border-slate-900 bg-slate-950/20 p-5">

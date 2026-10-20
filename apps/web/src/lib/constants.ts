@@ -1,9 +1,9 @@
 /**
  * Canonical repository location, shared by every component that links to
- * GitHub. When the repository moves or is renamed, update this one constant —
- * do not repeat the URL as a literal per file.
+ * GitHub. The UI package owns the constant because its Header and Footer use
+ * it; this re-export keeps app-side imports stable.
  */
-export const REPO_URL = 'https://github.com/SorobanForge/stellar-streams';
+export { REPO_URL } from '@stellar-starter-kit/ui';
 
 /**
  * Defaults used only when the matching `NEXT_PUBLIC_*` variable is unset.

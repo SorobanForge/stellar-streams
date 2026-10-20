@@ -3,10 +3,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Github, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
-import Logo from './Logo';
-import { REPO_URL } from '../lib/constants';
+import { Logo } from './Logo';
+import { REPO_URL } from '../constants';
 
-export default function Header() {
+export function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -174,3 +174,5 @@ export default function Header() {
     </header>
   );
 }
+
+export default Header;

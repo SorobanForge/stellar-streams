@@ -42,12 +42,11 @@ describe('WalletAdapter interface', () => {
     }
   });
 
-  it('only some adapters expose optional signAuthEntry', () => {
-    for (const adapter of adapters) {
-      if (adapter.signAuthEntry) {
-        expect(typeof adapter.signAuthEntry).toBe('function');
-      }
-    }
+  it('exposes signAuthEntry only on adapters whose wallet API supports it', () => {
+    const supporting = adapters
+      .filter((adapter) => typeof adapter.signAuthEntry === 'function')
+      .map((adapter) => adapter.id);
+    expect(supporting).toEqual(['freighter']);
   });
 });
 

@@ -1,15 +1,14 @@
 'use client';
 
-import React from 'react';
+import * as React from 'react';
 import { Star, Github } from 'lucide-react';
 import { CONTRACT_VERSION } from '@stellar-starter-kit/contracts';
-import Logo from './Logo';
-import { REPO_URL } from '../lib/constants';
+import { Logo } from './Logo';
+import { REPO_URL } from '../constants';
 
-const REPO = REPO_URL;
 const NETWORK_LABEL = (process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? 'testnet').toUpperCase();
 
-export default function Footer() {
+export function Footer() {
   return (
     <footer
       className="relative z-10 border-t border-slate-900 bg-[#04040a] py-16"
@@ -30,7 +29,7 @@ export default function Footer() {
             </p>
             <div className="mt-6 flex items-center gap-4 text-slate-500">
               <a
-                href={REPO}
+                href={REPO_URL}
                 target="_blank"
                 rel="noreferrer"
                 className="transition-colors hover:text-white"
@@ -86,7 +85,7 @@ export default function Footer() {
             <ul className="space-y-2 text-sm text-slate-400">
               <li>
                 <a
-                  href={`${REPO}/blob/main/CONTRIBUTING.md`}
+                  href={`${REPO_URL}/blob/main/CONTRIBUTING.md`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="transition-colors hover:text-white"
@@ -96,7 +95,7 @@ export default function Footer() {
               </li>
               <li>
                 <a
-                  href={`${REPO}/blob/main/SECURITY.md`}
+                  href={`${REPO_URL}/blob/main/SECURITY.md`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="transition-colors hover:text-white"
@@ -106,7 +105,7 @@ export default function Footer() {
               </li>
               <li>
                 <a
-                  href={`${REPO}/blob/main/LICENSE`}
+                  href={`${REPO_URL}/blob/main/LICENSE`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="transition-colors hover:text-white"
@@ -137,3 +136,5 @@ export default function Footer() {
     </footer>
   );
 }
+
+export default Footer;
