@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
+import { Button, Input } from '@stellar-starter-kit/ui';
 import { getStreamMetrics, type Stream } from '@stellar-starter-kit/types';
 import {
   formatAddress,
@@ -30,6 +31,11 @@ import {
   DEFAULT_SOROBAN_RPC_URL,
   DEFAULT_TOKEN_CONTRACT_ID,
 } from '../../lib/constants';
+import {
+  getStreamDurationSeconds,
+  getStreamCliffSeconds,
+  validateStreamInput,
+} from '../../lib/stream-validation';
 
 // framer-motion stays out of the initial route bundle; the banner only loads
 // when an error/success message is shown.
