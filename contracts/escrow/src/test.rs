@@ -630,3 +630,112 @@ fn test_version_matches_shared_constant() {
     let client = register(&env);
     assert_eq!(client.version(), CONTRACT_VERSION);
 }
+
+#[test]
+fn test_milestones_release_each_once_in_order() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    token.mint(&payer, 1000);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+    client.set_milestones(&1, &payer, &vec![&env, 400, 600]);
+    client.fund_escrow(&1);
+
+    client.release_milestone(&1, &0, &arbiter);
+    assert_eq!(token.balance(&payee), 400);
+    assert_eq!(client.get_escrow(&1).unwrap().status, EscrowStatus::Funded);
+    assert!(client.is_milestone_released(&1, &0));
+    assert!(!client.is_milestone_released(&1, &1));
+
+    assert_eq!(
+        client.try_release_milestone(&1, &0, &arbiter),
+        Err(Ok(EscrowError::MilestoneAlreadyReleased))
+    );
+    assert_eq!(
+        client.try_release_milestone(&1, &2, &arbiter),
+        Err(Ok(EscrowError::MilestoneIndexOutOfRange))
+    );
+    assert_eq!(
+        client.try_release_escrow(&1, &arbiter),
+        Err(Ok(EscrowError::InvalidStateTransition))
+    );
+
+    client.release_milestone(&1, &1, &arbiter);
+    assert_eq!(token.balance(&payee), 1000);
+    assert_eq!(client.get_escrow(&1).unwrap().status, EscrowStatus::Released);
+    assert_eq!(client.get_milestones(&1).unwrap(), vec![&env, 400, 600]);
+}
+
+#[test]
+fn test_milestone_refund_returns_only_unreleased_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    token.mint(&payer, 1000);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+    client.set_milestones(&1, &payer, &vec![&env, 400, 600]);
+    client.fund_escrow(&1);
+    client.release_milestone(&1, &0, &payer);
+    assert_eq!(token.balance(&payee), 400);
+
+    advance_time(&env, 1000);
+    client.refund_escrow(&1, &arbiter);
+    assert_eq!(token.balance(&payer), 600);
+    assert_eq!(token.balance(&client.address), 0);
+    assert_eq!(client.get_escrow(&1).unwrap().status, EscrowStatus::Refunded);
+}
+
+#[test]
+fn test_milestone_release_after_deadline_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    token.mint(&payer, 1000);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+    client.set_milestones(&1, &payer, &vec![&env, 400, 600]);
+    client.fund_escrow(&1);
+    advance_time(&env, 1001);
+
+    assert_eq!(
+        client.try_release_milestone(&1, &0, &arbiter),
+        Err(Ok(EscrowError::DeadlineExpired))
+    );
+    assert_eq!(token.balance(&payee), 0);
+}
+
+#[test]
+fn test_milestone_schedule_must_sum_to_escrow_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+    assert_eq!(
+        client.try_set_milestones(&1, &payer, &vec![&env, 400, 500]),
+        Err(Ok(EscrowError::MilestoneScheduleInvalid))
+    );
+    assert_eq!(
+        client.try_set_milestones(&1, &payer, &vec![&env, 1000]),
+        Err(Ok(EscrowError::MilestoneScheduleInvalid))
+    );
+    assert_eq!(client.get_milestones(&1), None);
+}
