@@ -53,7 +53,9 @@ export class FreighterAdapter implements WalletAdapter {
   }
 
   async getPublicKey(): Promise<string> {
-    if (this.publicKey) return this.publicKey;
+    // Always ask the extension — a cached key could belong to a different
+    // account or browser profile, which is exactly what session restore has
+    // to detect. The result is still cached for the signing methods.
     const res = await getFreighterAddress();
     if (!res.address) {
       throw new Error('Failed to retrieve public key from wallet.');

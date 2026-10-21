@@ -21,6 +21,8 @@ import {
   formatAddress,
   formatTokenAmount,
   parseTokenAmount,
+  computeClaimable,
+  computeProtocolFee,
   formatBps,
   formatDuration,
 } from '@stellar-starter-kit/utils';
@@ -209,9 +211,11 @@ export default function StreamsDashboard() {
   const streamMetrics = stream ? getStreamMetrics(stream, nowSeconds) : null;
   const status = streamMetrics?.status ?? null;
   const progress = streamMetrics?.progressBps ?? 0;
-  const claimable = streamMetrics?.claimable ?? contractClaimable;
-  const feeBpsValue = feeBps ?? 0;
-  const feeAmount = feeBpsValue > 0 ? (claimable * BigInt(feeBpsValue)) / 10000n : 0n;
+  // Net/fee math mirrors the contract's `withdraw` exactly; keep these in
+  // sync with contracts/stream/src/lib.rs (see computeClaimable/computeProtocolFee
+  // in packages/utils).
+  const claimable = stream ? computeClaimable(stream, nowSeconds) : contractClaimable;
+  const feeAmount = computeProtocolFee(claimable, feeBps ?? 0);
   const netAmount = claimable - feeAmount;
 
   return (

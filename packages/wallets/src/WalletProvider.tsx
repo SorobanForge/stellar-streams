@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import {
   AlbedoAdapter,
   FreighterAdapter,
@@ -17,6 +17,7 @@ export interface WalletContextType {
   activeProvider: WalletType | null;
   isConnected: boolean;
   isConnecting: boolean;
+  isRestoring: boolean;
   network: string;
   error: string | null;
   connect: (provider: WalletType) => Promise<void>;
@@ -55,19 +56,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [network, setNetwork] = useState<string>('TESTNET');
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  /** True while a persisted session is being verified against the extension. */
+  const [isRestoring, setIsRestoring] = useState<boolean>(false);
+  /** Monotonically increasing id used to discard stale restore results. */
+  const restoreId = useRef(0);
 
   const adapterFor = useCallback((provider: WalletType): WalletAdapter => ADAPTERS[provider], []);
-
-  // Auto-reconnect from localStorage on mount
-  useEffect(() => {
-    const savedProvider = localStorage.getItem(LOCAL_STORAGE_KEY_PROVIDER) as WalletType | null;
-    const savedAddress = localStorage.getItem(LOCAL_STORAGE_KEY_ADDRESS);
-
-    if (savedProvider && savedAddress) {
-      setActiveProvider(savedProvider);
-      setActiveAddress(savedAddress);
-    }
-  }, []);
 
   const connect = useCallback(
     async (provider: WalletType) => {
@@ -101,11 +95,66 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   );
 
   const disconnect = useCallback(() => {
+    // Invalidate any in-flight restore so it cannot resurrect this session.
+    restoreId.current++;
     setActiveAddress(null);
     setActiveProvider(null);
     setError(null);
     localStorage.removeItem(LOCAL_STORAGE_KEY_PROVIDER);
     localStorage.removeItem(LOCAL_STORAGE_KEY_ADDRESS);
+  }, []);
+
+  // Auto-reconnect from localStorage on mount. A persisted session is only
+  // reported as connected once the extension confirms it, so an uninstalled
+  // wallet or a different browser profile cannot fake a live session.
+  useEffect(() => {
+    const savedProvider = localStorage.getItem(LOCAL_STORAGE_KEY_PROVIDER) as WalletType | null;
+    const savedAddress = localStorage.getItem(LOCAL_STORAGE_KEY_ADDRESS);
+
+    if (!savedProvider || !savedAddress) return;
+
+    const adapter: WalletAdapter | undefined =
+      savedProvider in ADAPTERS ? ADAPTERS[savedProvider] : undefined;
+    const id = ++restoreId.current;
+    let active = true;
+    setIsRestoring(true);
+
+    (async () => {
+      try {
+        if (!adapter) {
+          throw new Error(`Unsupported wallet provider: ${savedProvider}`);
+        }
+        if (!(await adapter.isAvailable().catch(() => false))) {
+          throw new Error(`${adapter.name} wallet extension is not available.`);
+        }
+        const currentKey = await adapter.getPublicKey();
+
+        if (!active || id !== restoreId.current) return;
+        if (!currentKey || currentKey !== savedAddress) {
+          throw new Error('Stored address does not match the wallet.');
+        }
+
+        setActiveProvider(savedProvider);
+        setActiveAddress(savedAddress);
+      } catch {
+        if (!active || id !== restoreId.current) return;
+        // Extension missing, disconnected, or unverifiable: clear the stale
+        // persisted session and expose the disconnected state. This mirrors
+        // `disconnect` without bumping restoreId, so the finally block below
+        // can still settle isRestoring.
+        setActiveAddress(null);
+        setActiveProvider(null);
+        setError(null);
+        localStorage.removeItem(LOCAL_STORAGE_KEY_PROVIDER);
+        localStorage.removeItem(LOCAL_STORAGE_KEY_ADDRESS);
+      } finally {
+        if (active && id === restoreId.current) setIsRestoring(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   /** Signs through the active adapter and logs failures at the right level. */
@@ -166,6 +215,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         activeProvider,
         isConnected: !!activeAddress,
         isConnecting,
+        isRestoring,
         network,
         error,
         connect,

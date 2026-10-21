@@ -216,6 +216,52 @@ export function computeVestedAmount(schedule: VestingSchedule, now: number): big
   return (totalAmount * elapsed) / duration;
 }
 
+/**
+ * Computes the amount claimable by the recipient at `now`, mirroring the
+ * `claimable` view and the claimable calculation inside `withdraw` in the
+ * `stream` Soroban contract (contracts/stream/src/lib.rs):
+ *
+ * claimable = max(vested - withdrawn, 0)
+ *
+ * The vested amount uses the same integer arithmetic as `computeVestedAmount`.
+ *
+ * The parameter is structural rather than an import of `Stream` from
+ * `@stellar-starter-kit/types` so this package stays dependency-free and the
+ * types -> utils dependency never becomes a cycle.
+ */
+export interface ClaimableStream {
+  totalAmount: string | bigint | number;
+  startTime: number;
+  endTime: number;
+  cliffTime: number;
+  withdrawn: string | bigint | number;
+}
+
+export function computeClaimable(stream: ClaimableStream, now: number): bigint {
+  const vested = computeVestedAmount(
+    {
+      totalAmount: BigInt(stream.totalAmount),
+      startTime: stream.startTime,
+      endTime: stream.endTime,
+      cliffTime: stream.cliffTime,
+    },
+    now,
+  );
+  const withdrawn = BigInt(stream.withdrawn);
+  const claimable = vested - withdrawn;
+  return claimable > 0n ? claimable : 0n;
+}
+
+/**
+ * Computes the protocol fee on a claimable amount, mirroring the `withdraw`
+ * logic in the `stream` Soroban contract (contracts/stream/src/lib.rs):
+ *
+ * fee = claimable * feeBps / 10_000   (integer division, truncated toward zero)
+ */
+export function computeProtocolFee(claimable: bigint, feeBps: number): bigint {
+  return (claimable * BigInt(feeBps)) / 10_000n;
+}
+
 /** How much of the stream has vested, expressed in basis points (0–10000). */
 export function computeProgressBps(schedule: VestingSchedule, now: number): number {
   const { totalAmount, endTime, startTime } = schedule;

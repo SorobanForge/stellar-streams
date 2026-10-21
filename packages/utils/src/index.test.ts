@@ -6,12 +6,15 @@ import {
   mulDiv,
   formatDuration,
   computeVestedAmount,
+  computeClaimable,
+  computeProtocolFee,
   computeProgressBps,
   formatBps,
   formatTokenAmount,
   parseTokenAmount,
   XLM_DECIMALS,
   vestingCurve,
+  type ClaimableStream,
 } from './index';
 
 describe('formatAddress', () => {
@@ -232,6 +235,85 @@ describe('vesting math', () => {
     expect(computeProgressBps(schedule, 1_000)).toBe(10_000);
     expect(formatBps(5_000)).toBe('50%');
     expect(formatBps(2_550)).toBe('25.5%');
+  });
+});
+
+describe('claimable and protocol-fee math', () => {
+  const baseStream: ClaimableStream = {
+    totalAmount: '1000',
+    withdrawn: '0',
+    startTime: 0,
+    endTime: 1_000,
+    cliffTime: 0,
+  };
+
+  const now = (seconds: number) => ({ stream: baseStream, now: seconds });
+
+  it('computes claimable as vested minus withdrawn', () => {
+    // vested(500) = 1000 * 500 / 1000 = 500; withdrawn = 0
+    expect(computeClaimable({ ...now(500).stream, withdrawn: '0' }, 500)).toBe(500n);
+    // fully vested: vested(1000) = 1000; withdrawn = 0
+    expect(computeClaimable({ ...now(1000).stream, withdrawn: '0' }, 1000)).toBe(1000n);
+  });
+
+  it('returns 0 when nothing is vested yet', () => {
+    expect(computeClaimable({ ...now(0).stream, withdrawn: '0' }, 0)).toBe(0n);
+    expect(computeClaimable({ ...now(-100).stream, withdrawn: '0' }, -100)).toBe(0n);
+  });
+
+  it('returns 0 when previously withdrawn funds exceed vested', () => {
+    expect(computeClaimable({ ...now(500).stream, withdrawn: '600' }, 500)).toBe(0n);
+    expect(computeClaimable({ ...now(500).stream, withdrawn: '500' }, 500)).toBe(0n);
+  });
+
+  it('handles a stream with previously withdrawn funds', () => {
+    // vested(500) = 500; withdrawn = 300; claimable = 200
+    expect(computeClaimable({ ...now(500).stream, withdrawn: '300' }, 500)).toBe(200n);
+  });
+
+  it('handles a partially vested stream', () => {
+    // vested(250) = 1000 * 250 / 1000 = 250; withdrawn = 0
+    expect(computeClaimable({ ...now(250).stream, withdrawn: '0' }, 250)).toBe(250n);
+  });
+
+  it('applies integer truncation to vesting', () => {
+    // totalAmount = 1, end = 3: vested(1) = 1 * 1 / 3 = 0 (truncated)
+    const small = { ...baseStream, totalAmount: '1', endTime: 3 };
+    expect(computeClaimable({ ...small, withdrawn: '0' }, 1)).toBe(0n);
+    // totalAmount = 5, end = 2: vested(1) = 5 * 1 / 2 = 2 (2.5 truncated)
+    const small2 = { ...baseStream, totalAmount: '5', endTime: 2 };
+    expect(computeClaimable({ ...small2, withdrawn: '0' }, 1)).toBe(2n);
+  });
+
+  it('computes a 250 bps protocol fee', () => {
+    // 1000 * 250 / 10_000 = 25
+    expect(computeProtocolFee(1000n, 250)).toBe(25n);
+  });
+
+  it('computes a zero protocol fee', () => {
+    expect(computeProtocolFee(1000n, 0)).toBe(0n);
+    expect(computeProtocolFee(0n, 250)).toBe(0n);
+  });
+
+  it('truncates small protocol fees toward zero', () => {
+    // 7 * 250 / 10_000 = 1750 / 10_000 = 0 (truncated)
+    expect(computeProtocolFee(7n, 250)).toBe(0n);
+    // 9999 * 1 / 10_000 = 0 (truncated)
+    expect(computeProtocolFee(9999n, 1)).toBe(0n);
+    // 10000 * 1 / 10_000 = 1
+    expect(computeProtocolFee(10000n, 1)).toBe(1n);
+  });
+
+  it('computes the max 1000 bps fee', () => {
+    // 1000 * 1000 / 10_000 = 100
+    expect(computeProtocolFee(1000n, 1_000)).toBe(100n);
+  });
+
+  it('derives net claimable as claimable minus fee', () => {
+    const claimable = computeClaimable({ ...now(500).stream, withdrawn: '0' }, 500); // 500
+    const fee = computeProtocolFee(claimable, 250); // 500 * 250 / 10_000 = 12
+    expect(fee).toBe(12n);
+    expect(claimable - fee).toBe(488n);
   });
 });
 
