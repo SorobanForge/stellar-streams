@@ -48,7 +48,8 @@ export class HanaAdapter implements WalletAdapter {
   }
 
   async getPublicKey(): Promise<string> {
-    if (this.publicKey) return this.publicKey;
+    // Never serve a cached key: restore has to see the account the extension
+    // currently holds. The fetched key is still cached for signing.
     this.publicKey = await this.getPublicKeyFromWallet();
     return this.publicKey;
   }

@@ -42,7 +42,8 @@ export class RabetAdapter implements WalletAdapter {
   }
 
   async getPublicKey(): Promise<string> {
-    if (this.publicKey) return this.publicKey;
+    // Never serve a cached key: restore has to see the account the extension
+    // currently holds. The fetched key is still cached for signing.
     const res = await this.rabet.connect();
     const publicKey = res.publicKey;
     if (!publicKey) {

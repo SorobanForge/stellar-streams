@@ -63,70 +63,6 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
   const adapterFor = useCallback((provider: WalletType): WalletAdapter => ADAPTERS[provider], []);
 
-  // Auto-reconnect from localStorage on mount
-  useEffect(() => {
-    const savedProvider = localStorage.getItem(LOCAL_STORAGE_KEY_PROVIDER) as WalletType | null;
-    const savedAddress = localStorage.getItem(LOCAL_STORAGE_KEY_ADDRESS);
-
-    if (!savedProvider || !savedAddress) return;
-
-    const id = ++restoreId.current;
-    let active = true;
-    setIsRestoring(true);
-
-    (async () => {
-      let currentKey: string | null = null;
-      try {
-        if (savedProvider === 'freighter') {
-          const connection = await checkFreighterConnected();
-          if (!connection.isConnected) {
-            throw new Error('Freighter wallet extension is not available.');
-          }
-          const res = await getFreighterAddress();
-          currentKey = res.address;
-        } else if (savedProvider === 'albedo') {
-          const res = await albedo.publicKey({});
-          currentKey = res.pubkey;
-        } else if (savedProvider === 'rabe') {
-          const rabet = (window as Window & { rabet?: RabetInterface }).rabet;
-          if (!rabet) {
-            throw new Error('Rabet wallet extension is not available.');
-          }
-          const res = await rabet.connect();
-          currentKey = res.publicKey;
-        } else if (savedProvider === 'hana') {
-          const hana = (window as Window & { hanaWallet?: HanaInterface }).hanaWallet;
-          if (!hana) {
-            throw new Error('Hana wallet extension is not available.');
-          }
-          const res = await hana.send('stellar:getPublicKey');
-          currentKey = typeof res === 'string' ? res : res.publicKey || '';
-        } else {
-          throw new Error(`Unsupported wallet provider: ${savedProvider}`);
-        }
-
-        if (!active || id !== restoreId.current) return;
-        if (!currentKey || currentKey !== savedAddress) {
-          throw new Error('Stored address does not match the wallet.');
-        }
-
-        setActiveProvider(savedProvider);
-        setActiveAddress(savedAddress);
-      } catch {
-        if (!active || id !== restoreId.current) return;
-        // Extension missing, disconnected, or unverifiable: clear the stale
-        // persisted session and expose the disconnected state.
-        disconnect();
-      } finally {
-        if (active && id === restoreId.current) setIsRestoring(false);
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
   const connect = useCallback(
     async (provider: WalletType) => {
       setIsConnecting(true);
@@ -166,6 +102,59 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setError(null);
     localStorage.removeItem(LOCAL_STORAGE_KEY_PROVIDER);
     localStorage.removeItem(LOCAL_STORAGE_KEY_ADDRESS);
+  }, []);
+
+  // Auto-reconnect from localStorage on mount. A persisted session is only
+  // reported as connected once the extension confirms it, so an uninstalled
+  // wallet or a different browser profile cannot fake a live session.
+  useEffect(() => {
+    const savedProvider = localStorage.getItem(LOCAL_STORAGE_KEY_PROVIDER) as WalletType | null;
+    const savedAddress = localStorage.getItem(LOCAL_STORAGE_KEY_ADDRESS);
+
+    if (!savedProvider || !savedAddress) return;
+
+    const adapter: WalletAdapter | undefined =
+      savedProvider in ADAPTERS ? ADAPTERS[savedProvider] : undefined;
+    const id = ++restoreId.current;
+    let active = true;
+    setIsRestoring(true);
+
+    (async () => {
+      try {
+        if (!adapter) {
+          throw new Error(`Unsupported wallet provider: ${savedProvider}`);
+        }
+        if (!(await adapter.isAvailable().catch(() => false))) {
+          throw new Error(`${adapter.name} wallet extension is not available.`);
+        }
+        const currentKey = await adapter.getPublicKey();
+
+        if (!active || id !== restoreId.current) return;
+        if (!currentKey || currentKey !== savedAddress) {
+          throw new Error('Stored address does not match the wallet.');
+        }
+
+        setActiveProvider(savedProvider);
+        setActiveAddress(savedAddress);
+      } catch {
+        if (!active || id !== restoreId.current) return;
+        // Extension missing, disconnected, or unverifiable: clear the stale
+        // persisted session and expose the disconnected state. This mirrors
+        // `disconnect` without bumping restoreId, so the finally block below
+        // can still settle isRestoring.
+        setActiveAddress(null);
+        setActiveProvider(null);
+        setError(null);
+        localStorage.removeItem(LOCAL_STORAGE_KEY_PROVIDER);
+        localStorage.removeItem(LOCAL_STORAGE_KEY_ADDRESS);
+      } finally {
+        if (active && id === restoreId.current) setIsRestoring(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   /** Signs through the active adapter and logs failures at the right level. */
