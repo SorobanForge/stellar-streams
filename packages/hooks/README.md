@@ -93,6 +93,25 @@ Polling is opt-in via `pollMs`. When `pollMs` is greater than `0` and both
 interval is cleared when the component unmounts or when `pollMs`, `client`, or
 `id` change. Pass `0` (the default) to disable automatic re-fetching.
 
+### Request deduplication
+
+Mounting a dashboard renders several components that each call `useStream` for
+the same stream in the same tick. The hook shares one in-flight read per client
+and stream id, so concurrent `getStream` / `claimable` calls resolve from a
+single RPC round-trip instead of one simulation per hook.
+
+- A shared entry exists only while its promise is pending. It is dropped as
+  soon as the promise settles, so a later read (or a remount) always fetches
+  fresh data and a failed read is retried rather than replayed.
+- `refresh()` bypasses the cache and always performs a new read. Use it after a
+  withdraw or cancel, when a pending value from another component's read would
+  be stale.
+- Reads are scoped to the client instance: two differently configured clients
+  never share a result, even for the same stream id.
+- `useStreams` is deliberately not deduplicated. Each listing carries its own
+  `AbortSignal`, so sharing a promise would let one caller's cancellation abort
+  another caller's request.
+
 ### Loading, error, refresh and cleanup semantics
 
 - `loading` is `true` while a refresh is in flight and `false` once it
@@ -240,6 +259,17 @@ default exports or additional entry points. The dashboard does not currently
 import these hooks.
 
 ---
+
+## Development
+
+```bash
+pnpm --filter @stellar-starter-kit/hooks test
+pnpm --filter @stellar-starter-kit/hooks typecheck
+pnpm --filter @stellar-starter-kit/hooks lint
+```
+
+Tests use Vitest with jsdom and a fake `StreamsClient`, so no network access is
+required.
 
 ## Architecture
 
