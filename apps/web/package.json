@@ -2,12 +2,14 @@
   "name": "@stellar-starter-kit/web",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@stellar-starter-kit/ui": "workspace:*",
@@ -35,6 +37,7 @@
     "postcss": "^8.4.38",
     "@tailwindcss/postcss": "^4.3.2",
     "tailwindcss": "^4.3.2",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   }
 }

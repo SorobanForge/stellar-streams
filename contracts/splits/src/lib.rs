@@ -1,5 +1,6 @@
 #![no_std]
 
+use contract_version::CONTRACT_VERSION;
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Env, Vec,
 };
@@ -128,8 +129,7 @@ impl SplitsContract {
         from.require_auth();
 
         let key = DataKey::Split(split_id);
-        let split: Split =
-            env.storage().persistent().get(&key).ok_or(SplitError::SplitNotFound)?;
+        let split: Split = env.storage().persistent().get(&key).ok_or(SplitError::SplitNotFound)?;
 
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
         env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
@@ -165,6 +165,12 @@ impl SplitsContract {
     /// The id that will be assigned to the next split.
     pub fn next_split_id(env: Env) -> u64 {
         env.storage().instance().get(&DataKey::NextId).unwrap_or(1)
+    }
+
+    /// The contract interface version, shared by every contract in the
+    /// workspace.
+    pub fn version(_env: Env) -> u32 {
+        CONTRACT_VERSION
     }
 }
 

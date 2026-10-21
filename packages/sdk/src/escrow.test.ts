@@ -67,7 +67,7 @@ describe('EscrowClient reads', () => {
       arbiter: ARBITER,
       token: CONTRACT_ID,
       amount: '500000000',
-      deadline: 2_000,
+      deadline: '2000',
       status: 'funded',
     });
   });
@@ -142,7 +142,7 @@ describe('EscrowClient writes', () => {
       arbiter: ARBITER,
       token: CONTRACT_ID,
       amount: '500000000',
-      deadline: 2_000,
+      deadline: '2000',
     });
 
     const args = callArgs(rpc.prepareTransaction.mock.calls[0]![0]);
@@ -164,7 +164,7 @@ describe('EscrowClient writes', () => {
         arbiter: ARBITER,
         token: PUBLIC_KEY, // a G... account, not a token contract
         amount: '1',
-        deadline: 2_000,
+        deadline: '2000',
       }),
     ).rejects.toThrow('Invalid token contract id');
     expect(rpc.calls()).toBe(0);

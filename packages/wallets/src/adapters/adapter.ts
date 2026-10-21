@@ -39,6 +39,11 @@ export interface WalletAdapter {
   getPublicKey(): Promise<string>;
   /** Sign a transaction XDR and return the signed envelope XDR. */
   signTransaction(xdr: string, opts?: SignTransactionOptions): Promise<string>;
-  /** Optional: sign an auth entry. */
-  signAuthEntry?(xdr: string, opts?: SignTransactionOptions): Promise<string>;
+  /**
+   * Sign a Soroban authorization entry, returning the signed entry XDR.
+   *
+   * Only implement this when the wallet's SDK exposes auth-entry signing;
+   * `WalletProvider.signAuthEntry` throws `NotSupportedError` otherwise.
+   */
+  signAuthEntry?(entryXdr: string, opts?: SignTransactionOptions): Promise<string>;
 }

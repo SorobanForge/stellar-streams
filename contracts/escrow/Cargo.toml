@@ -8,6 +8,7 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+contract-version = { path = "../version", version = "0.1.0" }
 soroban-sdk = { workspace = true }
 
 [dev-dependencies]

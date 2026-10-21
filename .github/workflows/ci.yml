@@ -149,3 +149,6 @@ jobs:
 
       - name: Build Projects
         run: pnpm run build
+
+      - name: Check Package Entry Points
+        run: pnpm run test:exports

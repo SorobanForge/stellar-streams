@@ -1,5 +1,6 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
+use contract_version::CONTRACT_VERSION;
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Env,
 };
@@ -20,6 +21,7 @@ pub enum EscrowError {
     DeadlineNotReached = 6,
     DeadlineExpired = 7,
     AlreadyFinalized = 8,
+    InvalidDeadline = 9,
 }
 
 #[contracttype]
@@ -124,6 +126,13 @@ impl EscrowContract {
     ) -> Result<u64, EscrowError> {
         if amount <= 0 {
             return Err(EscrowError::InvalidAmount);
+        }
+
+        // A deadline at or before the current ledger time would let the payer
+        // cancel a funded escrow immediately, robbing the payee of the window
+        // the deadline is supposed to guarantee.
+        if deadline <= env.ledger().timestamp() {
+            return Err(EscrowError::InvalidDeadline);
         }
 
         payer.require_auth();
@@ -295,6 +304,12 @@ impl EscrowContract {
     /// The id that will be assigned to the next escrow.
     pub fn next_escrow_id(env: Env) -> u64 {
         env.storage().instance().get(&DataKey::NextId).unwrap_or(1)
+    }
+
+    /// The contract interface version, shared by every contract in the
+    /// workspace.
+    pub fn version(_env: Env) -> u32 {
+        CONTRACT_VERSION
     }
 }
 

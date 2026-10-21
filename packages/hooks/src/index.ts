@@ -141,3 +141,125 @@ export function useStream(
 
   return { stream, claimable, loading, error, refresh };
 }
+
+export interface UseStreamsResult {
+  /** Streams involving the address, or an empty array while loading / unsupported. */
+  streams: Stream[];
+  loading: boolean;
+  error: string | null;
+  /** Re-run the listing, e.g. after creating or cancelling a stream. */
+  refresh: () => Promise<void>;
+}
+
+/**
+ * Parameters the SDK's `listStreams` accepts. `signal` is optional so older SDK
+ * builds that do not support cancellation can still be called.
+ */
+export interface ListStreamsParams {
+  /** Account whose sender/recipient streams should be returned. */
+  address: string;
+  /** First ledger to scan; the SDK documents its own default. */
+  startLedger?: number;
+  /** Number of events to request per RPC page. */
+  pageSize?: number;
+  /** Cancels the in-flight RPC scan when the hook unmounts or the address changes. */
+  signal?: AbortSignal;
+}
+
+/** Structural view of the listing method the SDK exposes. */
+type StreamsLister = {
+  listStreams?: (
+    params: ListStreamsParams,
+  ) => Promise<Stream[] | { streams: Stream[]; cursor?: string }>;
+};
+
+/**
+ * Loads the streams that involve `address` (sender or recipient) through the
+ * SDK's `listStreams`, re-fetching whenever the client or address changes.
+ *
+ * The SDK result is either the current `{ streams, cursor }` page or the legacy
+ * bare array; both are accepted. If the method is unavailable, `useStreams`
+ * degrades gracefully: it returns an empty `streams` array,
+ * `loading: false`, and no error instead of throwing.
+ *
+ * An empty result (a valid address with no streams) also resolves to an empty
+ * array with no error. In-flight work is aborted on unmount and whenever the
+ * address or client changes, so a stale response can never overwrite newer
+ * state.
+ */
+export function useStreams(
+  client: StreamsClient | null,
+  address: string | null | undefined,
+): UseStreamsResult {
+  const [streams, setStreams] = useState<Stream[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const mounted = useRef(true);
+  /** Monotonic token: only the latest request may commit state. */
+  const requestId = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  const refresh = useCallback(async () => {
+    const request = ++requestId.current;
+    abortRef.current?.abort();
+    abortRef.current = null;
+
+    if (!client || !address) {
+      setStreams([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    const listStreams = (client as StreamsClient & StreamsLister).listStreams;
+    if (typeof listStreams !== 'function') {
+      // The SDK listing API (issue #94) has not shipped yet. An empty list is a
+      // safer degradation than an error banner on a dashboard that works.
+      setStreams([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setLoading(true);
+    setError(null);
+
+    try {
+      const found = await listStreams.call(client, { address, signal: controller.signal });
+      if (!mounted.current || request !== requestId.current || controller.signal.aborted) return;
+      setStreams(Array.isArray(found) ? found : found.streams);
+    } catch (err) {
+      // An aborted request is not an error: the component unmounted or the
+      // address changed while it was in flight.
+      if (!mounted.current || request !== requestId.current || controller.signal.aborted) return;
+      setStreams([]);
+      setError(err instanceof Error ? err.message : 'Failed to load streams');
+    } finally {
+      if (mounted.current && request === requestId.current) setLoading(false);
+      if (abortRef.current === controller) abortRef.current = null;
+    }
+  }, [client, address]);
+
+  useEffect(() => {
+    void refresh();
+    return () => {
+      // Invalidate and abort the request when the address/client changes or the
+      // component unmounts.
+      requestId.current += 1;
+      abortRef.current?.abort();
+      abortRef.current = null;
+    };
+  }, [refresh]);
+
+  return { streams, loading, error, refresh };
+}
