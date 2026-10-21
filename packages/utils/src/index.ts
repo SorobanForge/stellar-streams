@@ -3,8 +3,6 @@
  * All monetary math is done with `bigint` to avoid IEEE-754 precision loss.
  */
 
-import type { Stream } from '@stellar-starter-kit/types';
-
 /** Decimal places of native XLM and of every Stellar Asset Contract (SAC). */
 export const XLM_DECIMALS = 7;
 
@@ -226,8 +224,20 @@ export function computeVestedAmount(schedule: VestingSchedule, now: number): big
  * claimable = max(vested - withdrawn, 0)
  *
  * The vested amount uses the same integer arithmetic as `computeVestedAmount`.
+ *
+ * The parameter is structural rather than an import of `Stream` from
+ * `@stellar-starter-kit/types` so this package stays dependency-free and the
+ * types -> utils dependency never becomes a cycle.
  */
-export function computeClaimable(stream: Stream, now: number): bigint {
+export interface ClaimableStream {
+  totalAmount: string | bigint | number;
+  startTime: number;
+  endTime: number;
+  cliffTime: number;
+  withdrawn: string | bigint | number;
+}
+
+export function computeClaimable(stream: ClaimableStream, now: number): bigint {
   const vested = computeVestedAmount(
     {
       totalAmount: BigInt(stream.totalAmount),

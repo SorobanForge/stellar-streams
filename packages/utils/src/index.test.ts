@@ -14,8 +14,8 @@ import {
   parseTokenAmount,
   XLM_DECIMALS,
   vestingCurve,
+  type ClaimableStream,
 } from './index';
-import type { Stream } from '@stellar-starter-kit/types';
 
 describe('formatAddress', () => {
   it('shortens long public keys', () => {
@@ -239,17 +239,12 @@ describe('vesting math', () => {
 });
 
 describe('claimable and protocol-fee math', () => {
-  const baseStream: Stream = {
-    id: '1',
-    sender: 'GCA...',
-    recipient: 'GCB...',
-    token: 'native',
+  const baseStream: ClaimableStream = {
     totalAmount: '1000',
     withdrawn: '0',
     startTime: 0,
     endTime: 1_000,
     cliffTime: 0,
-    cancelled: false,
   };
 
   const now = (seconds: number) => ({ stream: baseStream, now: seconds });
