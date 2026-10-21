@@ -1,5 +1,7 @@
 import { computeVestedAmount } from '@stellar-starter-kit/utils';
 
+export * from './branded.js';
+
 export type StellarNetwork = 'local' | 'testnet' | 'mainnet';
 
 export interface StellarConfig {

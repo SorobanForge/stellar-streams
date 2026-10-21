@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { StreamsClient } from '@stellar-starter-kit/sdk';
 import type { Stream } from '@stellar-starter-kit/types';
+import { dedupeRequest } from './request-cache.js';
 
 /** Tracks browser connectivity as a lightweight proxy for network status. */
 export function useStellarNetworkStatus(): boolean {
@@ -34,6 +35,11 @@ export interface UseStreamResult {
 /**
  * Loads a single stream (and its claimable balance) from a `StreamsClient`,
  * re-fetching whenever the client or id changes, and exposing a `refresh`.
+ *
+ * Concurrent reads of the same stream are deduplicated: hooks that mount in the
+ * same tick with the same client and id share one `getStream` call (and one
+ * `claimable` call) instead of each firing their own simulation. `refresh()`
+ * bypasses that cache and always performs a fresh read.
  */
 export function useStream(
   client: StreamsClient | null,
@@ -54,33 +60,48 @@ export function useStream(
     };
   }, []);
 
-  const refresh = useCallback(async () => {
-    if (!client || id === null) {
-      setStream(null);
-      setClaimable(0n);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const [nextStream, nextClaimable] = await Promise.all([
-        client.getStream(id),
-        client.claimable(id).catch(() => 0n),
-      ]);
-      if (!mounted.current) return;
-      setStream(nextStream);
-      setClaimable(nextClaimable);
-    } catch (err) {
-      if (!mounted.current) return;
-      setError(err instanceof Error ? err.message : 'Failed to load stream');
-    } finally {
-      if (mounted.current) setLoading(false);
-    }
-  }, [client, id]);
+  /**
+   * Reads the stream and its claimable balance. Automatic reads share the
+   * in-flight cache; `bypassCache` is used by the manual `refresh()` so a user
+   * action never receives a pending value from another component's read.
+   */
+  const load = useCallback(
+    async (bypassCache: boolean) => {
+      if (!client || id === null) {
+        setStream(null);
+        setClaimable(0n);
+        return;
+      }
+      setLoading(true);
+      setError(null);
+      try {
+        const readStream = () => client.getStream(id);
+        const readClaimable = () => client.claimable(id).catch(() => 0n);
+        const [nextStream, nextClaimable] = await Promise.all([
+          bypassCache ? readStream() : dedupeRequest(client, `stream:${String(id)}`, readStream),
+          bypassCache
+            ? readClaimable()
+            : dedupeRequest(client, `claimable:${String(id)}`, readClaimable),
+        ]);
+        if (!mounted.current) return;
+        setStream(nextStream);
+        setClaimable(nextClaimable);
+      } catch (err) {
+        if (!mounted.current) return;
+        setError(err instanceof Error ? err.message : 'Failed to load stream');
+      } finally {
+        if (mounted.current) setLoading(false);
+      }
+    },
+    [client, id],
+  );
+
+  /** Manual refresh: always bypasses the in-flight cache. */
+  const refresh = useCallback(() => load(true), [load]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void load(false);
+  }, [load]);
 
   // Handle polling with visibility awareness
   useEffect(() => {
