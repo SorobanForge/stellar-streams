@@ -52,3 +52,6 @@ temp-old-modules/
 # Lockfiles - this repository uses pnpm only (see CONTRIBUTING.md)
 package-lock.json
 yarn.lock
+
+# Generated API reference (typedoc output — regenerate with `pnpm --filter @stellar-starter-kit/sdk docs`)
+docs/api/

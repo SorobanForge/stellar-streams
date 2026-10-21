@@ -3,9 +3,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Github, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
-import Logo from './Logo';
+import { Logo } from './Logo';
+import { REPO_URL } from '../constants';
 
-export default function Header() {
+export function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -104,7 +105,7 @@ export default function Header() {
 
         <div className="flex items-center gap-4">
           <a
-            href="https://github.com/SorobanForge/stellar-streams"
+            href={REPO_URL}
             target="_blank"
             rel="noreferrer"
             className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-800 bg-slate-900/50 text-slate-300 transition-colors hover:bg-slate-900 hover:text-white"
@@ -173,3 +174,5 @@ export default function Header() {
     </header>
   );
 }
+
+export default Header;

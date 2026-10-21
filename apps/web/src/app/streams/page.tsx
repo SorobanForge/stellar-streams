@@ -2,44 +2,52 @@
 
 import React, { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { motion, AnimatePresence } from 'framer-motion';
+import dynamic from 'next/dynamic';
 import {
   ArrowLeft,
   Loader2,
   AlertCircle,
-  CheckCircle2,
   ExternalLink,
   Droplets,
   Ban,
   Search,
-  Play,
   Wallet,
 } from 'lucide-react';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
-import { getStreamStatus, type Stream } from '@stellar-starter-kit/types';
+import { Button, Footer, Header, Input } from '@stellar-starter-kit/ui';
+import { getStreamMetrics, type Stream } from '@stellar-starter-kit/types';
 import {
   formatAddress,
   formatTokenAmount,
   parseTokenAmount,
-  computeProgressBps,
   formatBps,
   formatDuration,
 } from '@stellar-starter-kit/utils';
-import Header from '../../components/Header';
-import Footer from '../../components/Footer';
+import {
+  DEFAULT_NETWORK_PASSPHRASE,
+  DEFAULT_SOROBAN_RPC_URL,
+  DEFAULT_TOKEN_CONTRACT_ID,
+} from '../../lib/constants';
+import {
+  getStreamDurationSeconds,
+  getStreamCliffSeconds,
+  validateStreamInput,
+} from '../../lib/stream-validation';
 
-const RPC_URL = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? 'https://soroban-testnet.stellar.org';
+// framer-motion stays out of the initial route bundle; the banner only loads
+// when an error/success message is shown.
+const NotificationBanner = dynamic(() => import('../../components/NotificationBanner'), {
+  ssr: false,
+});
+
+const RPC_URL = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? DEFAULT_SOROBAN_RPC_URL;
 const NETWORK_PASSPHRASE =
-  process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ?? 'Test SDF Network ; September 2015';
+  process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ?? DEFAULT_NETWORK_PASSPHRASE;
 const CONTRACT_ID = process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID ?? '';
-// Testnet native XLM SAC; any SEP-41 token contract id works.
-const DEFAULT_TOKEN =
-  process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ||
-  'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
+// Testnet native XLM SAC by default; any SEP-41 token contract id works.
+const DEFAULT_TOKEN = process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID || DEFAULT_TOKEN_CONTRACT_ID;
 const EXPERT_URL = process.env.NEXT_PUBLIC_STELLAR_EXPERT_URL ?? 'https://stellar.expert';
-
-const DAY = 86_400;
 
 export default function StreamsDashboard() {
   const { activeAddress, isConnected, isConnecting, connect, disconnect, signTransaction } =
@@ -59,7 +67,7 @@ export default function StreamsDashboard() {
   // Lookup.
   const [lookupId, setLookupId] = useState('');
   const [stream, setStream] = useState<Stream | null>(null);
-  const [claimable, setClaimable] = useState<bigint>(0n);
+  const [contractClaimable, setContractClaimable] = useState<bigint>(0n);
   const [streamToken, setStreamToken] = useState<TokenMetadata | null>(null);
   const [loadingStream, setLoadingStream] = useState(false);
   const [feeBps, setFeeBps] = useState<number | null>(null);
@@ -86,6 +94,19 @@ export default function StreamsDashboard() {
     }
   }, []);
 
+  const formErrors = useMemo(
+    () =>
+      validateStreamInput({
+        recipient,
+        token,
+        amount,
+        durationDays,
+        cliffDays,
+      }),
+    [amount, cliffDays, durationDays, recipient, token],
+  );
+  const isFormValid = Object.keys(formErrors).length === 0;
+
   const loadStream = useCallback(
     async (id: string) => {
       if (!id) return;
@@ -93,7 +114,7 @@ export default function StreamsDashboard() {
       try {
         const found = await client.getStream(id);
         setStream(found);
-        setClaimable(found ? await client.claimable(id).catch(() => 0n) : 0n);
+        setContractClaimable(found ? await client.claimable(id).catch(() => 0n) : 0n);
         // Amounts are in the token's smallest unit; read its decimals to display them.
         setStreamToken(found ? await client.getTokenMetadata(found.token).catch(() => null) : null);
         // Fetch protocol config for feeBps
@@ -142,14 +163,19 @@ export default function StreamsDashboard() {
       return;
     }
 
+    if (!isFormValid) {
+      notify('error', 'Fix the highlighted stream details before submitting.');
+      return;
+    }
+
     setBusy(true);
     setError(null);
     setSuccess(null);
     try {
       const now = Math.floor(Date.now() / 1000);
       const startTime = now;
-      const endTime = now + Math.floor(Number(durationDays) * DAY);
-      const cliffTime = now + Math.floor(Number(cliffDays) * DAY);
+      const endTime = now + getStreamDurationSeconds(durationDays);
+      const cliffTime = now + getStreamCliffSeconds(cliffDays);
 
       const { decimals } = await client.getTokenMetadata(token.trim());
       const { hash } = await client.createStream({
@@ -179,23 +205,14 @@ export default function StreamsDashboard() {
       ? `${formatTokenAmount(raw, streamToken.decimals)} ${streamToken.symbol}`
       : `${raw.toString()} (base units)`;
 
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const streamMetrics = stream ? getStreamMetrics(stream, nowSeconds) : null;
+  const status = streamMetrics?.status ?? null;
+  const progress = streamMetrics?.progressBps ?? 0;
+  const claimable = streamMetrics?.claimable ?? contractClaimable;
   const feeBpsValue = feeBps ?? 0;
   const feeAmount = feeBpsValue > 0 ? (claimable * BigInt(feeBpsValue)) / 10000n : 0n;
   const netAmount = claimable - feeAmount;
-
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const status = stream ? getStreamStatus(stream, nowSeconds) : null;
-  const progress = stream
-    ? computeProgressBps(
-        {
-          totalAmount: BigInt(stream.totalAmount),
-          startTime: stream.startTime,
-          endTime: stream.endTime,
-          cliffTime: stream.cliffTime,
-        },
-        nowSeconds,
-      )
-    : 0;
 
   return (
     <div className="min-h-screen bg-[#06060c] text-slate-100 selection:bg-purple-500/30 selection:text-purple-200">
@@ -276,27 +293,12 @@ export default function StreamsDashboard() {
           )}
         </div>
 
-        <AnimatePresence>
-          {(error || success) && (
-            <motion.div
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className={`mb-6 flex items-start gap-3 rounded-xl border p-4 text-sm ${
-                error
-                  ? 'border-rose-500/20 bg-rose-500/5 text-rose-300'
-                  : 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300'
-              }`}
-            >
-              {error ? (
-                <AlertCircle className="mt-0.5 h-5 w-5 shrink-0" />
-              ) : (
-                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
-              )}
-              <p className="font-light">{error ?? success}</p>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <NotificationBanner
+          kind={error ? 'error' : success ? 'success' : null}
+          message={error ?? success ?? ''}
+          className="mb-6"
+          enterFrom="top"
+        />
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
           {/* Create */}
@@ -308,83 +310,64 @@ export default function StreamsDashboard() {
               New stream
             </h2>
 
-            <label className="block">
-              <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                Recipient
-              </span>
-              <input
-                value={recipient}
-                onChange={(e) => setRecipient(e.target.value)}
-                placeholder="G..."
-                required
-                className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
-              />
-            </label>
+            <Input
+              label="Recipient"
+              value={recipient}
+              onChange={(e) => setRecipient(e.target.value)}
+              placeholder="G..."
+              aria-invalid={Boolean(formErrors.recipient)}
+              error={formErrors.recipient}
+            />
 
-            <label className="block">
-              <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                Token contract
-              </span>
-              <input
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="C..."
-                required
-                className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
-              />
-            </label>
+            <Input
+              label="Token contract"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="C..."
+              aria-invalid={Boolean(formErrors.token)}
+              error={formErrors.token}
+            />
 
             <div className="grid grid-cols-2 gap-4">
-              <label className="block">
-                <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                  Amount
-                </span>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  required
-                  className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
-                />
-              </label>
-              <label className="block">
-                <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                  Duration (days)
-                </span>
-                <input
-                  type="number"
-                  min="1"
-                  value={durationDays}
-                  onChange={(e) => setDurationDays(e.target.value)}
-                  required
-                  className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
-                />
-              </label>
-            </div>
-
-            <label className="block">
-              <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                Cliff (days, 0 = none)
-              </span>
-              <input
+              <Input
+                label="Amount"
                 type="number"
                 min="0"
-                value={cliffDays}
-                onChange={(e) => setCliffDays(e.target.value)}
-                className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
+                step="any"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                aria-invalid={Boolean(formErrors.amount)}
+                error={formErrors.amount}
               />
-            </label>
+              <Input
+                label="Duration (days)"
+                type="number"
+                min="1"
+                value={durationDays}
+                onChange={(e) => setDurationDays(e.target.value)}
+                aria-invalid={Boolean(formErrors.durationDays)}
+                error={formErrors.durationDays}
+              />
+            </div>
 
-            <button
+            <Input
+              label="Cliff (days, 0 = none)"
+              type="number"
+              min="0"
+              value={cliffDays}
+              onChange={(e) => setCliffDays(e.target.value)}
+              aria-invalid={Boolean(formErrors.cliffDays)}
+              error={formErrors.cliffDays}
+            />
+
+            <Button
               type="submit"
-              disabled={busy || !isConnected || !CONTRACT_ID}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 to-cyan-500 px-6 py-3 text-sm font-semibold text-white shadow-lg transition hover:brightness-110 disabled:pointer-events-none disabled:opacity-40"
+              disabled={busy || !isConnected || !CONTRACT_ID || !isFormValid}
+              loading={busy}
+              className="w-full"
             >
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              Create stream
-            </button>
+              {busy ? 'Creating stream' : 'Create stream'}
+            </Button>
           </form>
 
           {/* Inspect */}
@@ -441,9 +424,7 @@ export default function StreamsDashboard() {
                   </div>
                   <div className="flex justify-between text-[10px] text-slate-500">
                     <span>{formatBps(progress)} vested</span>
-                    <span>
-                      {formatDuration(Math.max(0, stream.endTime - nowSeconds))} remaining
-                    </span>
+                    <span>{formatDuration(streamMetrics?.remainingSeconds ?? 0)} remaining</span>
                   </div>
 
                   <dl className="grid grid-cols-2 gap-4 border-t border-slate-900 pt-4">
@@ -497,7 +478,7 @@ export default function StreamsDashboard() {
                       onClick={() =>
                         runAction('Withdraw', () => client.withdraw(stream.id), stream.id)
                       }
-                      disabled={busy || !isConnected || claimable <= 0n || stream.cancelled}
+                      disabled={busy || !isConnected || contractClaimable <= 0n || stream.cancelled}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-900 disabled:pointer-events-none disabled:opacity-40"
                     >
                       <Droplets className="h-3.5 w-3.5 text-cyan-400" /> Withdraw

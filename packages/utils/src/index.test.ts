@@ -3,6 +3,7 @@ import {
   formatAddress,
   formatStroopsToXlm,
   parseXlmToStroops,
+  mulDiv,
   formatDuration,
   computeVestedAmount,
   computeProgressBps,
@@ -10,6 +11,7 @@ import {
   formatTokenAmount,
   parseTokenAmount,
   XLM_DECIMALS,
+  vestingCurve,
 } from './index';
 
 describe('formatAddress', () => {
@@ -65,6 +67,112 @@ describe('parseXlmToStroops', () => {
     expect(() => parseXlmToStroops('abc')).toThrow();
     expect(() => parseXlmToStroops('')).toThrow();
     expect(() => parseXlmToStroops('.')).toThrow();
+  });
+});
+
+describe('parseXlmToStroops malformed-input table', () => {
+  const malformed =
+    'Expected a plain decimal number such as "1.5" (scientific notation, NaN and Infinity are not supported).';
+  const nonFinite = 'Expected a finite decimal number (e.g. "1.5").';
+
+  const cases: Array<{
+    label: string;
+    input: string | number;
+    expected?: bigint;
+    error?: string;
+  }> = [
+    {
+      label: 'rejects scientific notation supplied as a string',
+      input: '1e7',
+      error: `Invalid XLM amount: "1e7". ${malformed}`,
+    },
+    {
+      label: 'rejects the Infinity string',
+      input: 'Infinity',
+      error: `Invalid XLM amount: "Infinity". ${malformed}`,
+    },
+    {
+      label: 'trims surrounding whitespace',
+      input: ' 1.2 ',
+      expected: 12_000_000n,
+    },
+    { label: 'accepts a leading decimal point', input: '.5', expected: 5_000_000n },
+    { label: 'accepts a trailing decimal point', input: '1.', expected: 10_000_000n },
+    {
+      label: 'truncates sub-stroop precision toward zero',
+      input: '-0.00000001',
+      expected: 0n,
+    },
+    {
+      label: 'truncates positive sub-stroop precision to zero',
+      input: '0.00000001',
+      expected: 0n,
+    },
+    { label: 'parses the smallest positive stroop', input: '0.0000001', expected: 1n },
+    {
+      label: 'expands exponential notation from number inputs',
+      input: 1e7,
+      // 1e7 is ten million XLM, not scientific notation for one XLM.
+      expected: 100_000_000_000_000n,
+    },
+    {
+      label: 'parses small numeric values without exponential-notation errors',
+      input: 0.0000001,
+      expected: 1n,
+    },
+    {
+      label: 'truncates negative sub-stroop number inputs like strings',
+      input: -0.00000001,
+      expected: 0n,
+    },
+    {
+      label: 'rejects NaN with a finite-number message',
+      input: NaN,
+      error: `Invalid XLM amount: NaN. ${nonFinite}`,
+    },
+    {
+      label: 'rejects Infinity with a finite-number message',
+      input: Infinity,
+      error: `Invalid XLM amount: Infinity. ${nonFinite}`,
+    },
+    {
+      label: 'rejects -Infinity with a finite-number message',
+      input: -Infinity,
+      error: `Invalid XLM amount: -Infinity. ${nonFinite}`,
+    },
+    {
+      label: 'rejects an empty string',
+      input: '',
+      error: `Invalid XLM amount: "". ${malformed}`,
+    },
+    {
+      label: 'rejects a lone decimal point',
+      input: '.',
+      error: `Invalid XLM amount: ".". ${malformed}`,
+    },
+    {
+      label: 'rejects a lone minus sign',
+      input: '-',
+      error: `Invalid XLM amount: "-". ${malformed}`,
+    },
+    {
+      label: 'rejects multiple decimal points',
+      input: '1.2.3',
+      error: `Invalid XLM amount: "1.2.3". ${malformed}`,
+    },
+    {
+      label: 'rejects thousands separators',
+      input: '1,000',
+      error: `Invalid XLM amount: "1,000". ${malformed}`,
+    },
+  ];
+
+  it.each(cases)('$label', ({ input, expected, error }) => {
+    if (error !== undefined) {
+      expect(() => parseXlmToStroops(input)).toThrowError(error);
+    } else {
+      expect(parseXlmToStroops(input)).toBe(expected);
+    }
   });
 });
 
@@ -179,5 +287,127 @@ describe('parseTokenAmount', () => {
   it('rejects invalid input', () => {
     expect(() => parseTokenAmount('abc', 6)).toThrow('Invalid token amount');
     expect(() => parseTokenAmount('1', -1)).toThrow('Invalid token decimals');
+  });
+});
+
+describe('mulDiv', () => {
+  it('returns floor of a*b/c for small values', () => {
+    expect(mulDiv(10n, 3n, 4n)).toBe(7n);
+  });
+
+  it('throws on division by zero', () => {
+    expect(() => mulDiv(1n, 2n, 0n)).toThrow('mulDiv: division by zero');
+  });
+
+  it('handles values near i128 bounds', () => {
+    const max = 2n ** 127n - 1n;
+    expect(mulDiv(max, 1n, 1n)).toBe(max);
+    expect(mulDiv(max, 2n, 2n)).toBe(max);
+  });
+
+  it('handles remainder division with floor semantics', () => {
+    expect(mulDiv(7n, 1n, 2n)).toBe(3n);
+    expect(mulDiv(100n, 33n, 7n)).toBe(471n);
+  });
+});
+
+describe('vestingCurve', () => {
+  it('returns { t, vested }[] including both endpoints and the exact cliff point', () => {
+    const stream = {
+      start: 1_000,
+      cliff: 1_400,
+      end: 2_000,
+      deposit: 10_000n,
+    };
+    const curve = vestingCurve(stream, 10);
+
+    expect(curve[0].t).toBe(1_000);
+    expect(curve[0].vested).toBe(0n);
+
+    expect(curve[curve.length - 1].t).toBe(2_000);
+    expect(curve[curve.length - 1].vested).toBe(10_000n);
+
+    const cliffPoint = curve.find((p) => p.t === 1_400);
+    expect(cliffPoint).toBeDefined();
+    expect(cliffPoint!.vested).toBe(4_000n);
+
+    const beforeCliff = curve.filter((p) => p.t < 1_400);
+    expect(beforeCliff.length).toBeGreaterThan(0);
+    for (const p of beforeCliff) {
+      expect(p.vested).toBe(0n);
+    }
+  });
+
+  it('asserts monotonicity and that vested values never exceed the deposit', () => {
+    const stream = {
+      start: 100,
+      cliff: 350,
+      end: 1_000,
+      deposit: 5_000n,
+    };
+    const curve = vestingCurve(stream, 25);
+
+    expect(curve.length).toBeGreaterThanOrEqual(25);
+    for (let i = 0; i < curve.length; i++) {
+      expect(curve[i].vested).toBeLessThanOrEqual(5_000n);
+      expect(curve[i].vested).toBeGreaterThanOrEqual(0n);
+
+      if (i > 0) {
+        expect(curve[i].vested >= curve[i - 1].vested).toBe(true);
+        expect(curve[i].t).toBeGreaterThan(curve[i - 1].t);
+      }
+    }
+  });
+
+  it('is pure and deterministic for a given input', () => {
+    const stream = {
+      start: 0,
+      cliff: 200,
+      end: 800,
+      deposit: 1_000_000n,
+    };
+    const curve1 = vestingCurve(stream, 15);
+    const curve2 = vestingCurve(stream, 15);
+
+    expect(curve1).toEqual(curve2);
+  });
+
+  it('accepts both shorthand and formal VestingSchedule / Stream property names', () => {
+    const shorthand = { start: 100, cliff: 300, end: 500, deposit: 2_000n };
+    const formal = { startTime: 100, cliffTime: 300, endTime: 500, totalAmount: 2_000n };
+
+    const curveShort = vestingCurve(shorthand, 10);
+    const curveFormal = vestingCurve(formal, 10);
+
+    expect(curveShort).toEqual(curveFormal);
+  });
+
+  it('handles string amounts and number deposits', () => {
+    const fromString = vestingCurve({ start: 0, cliff: 100, end: 200, deposit: '5000' }, 5);
+    const fromBigInt = vestingCurve({ start: 0, cliff: 100, end: 200, deposit: 5000n }, 5);
+    const fromNumber = vestingCurve({ start: 0, cliff: 100, end: 200, deposit: 5000 }, 5);
+
+    expect(fromString).toEqual(fromBigInt);
+    expect(fromNumber).toEqual(fromBigInt);
+  });
+
+  it('handles cliff equal to start and cliff equal to end', () => {
+    const cliffAtStart = vestingCurve({ start: 0, cliff: 0, end: 100, deposit: 100n }, 5);
+    expect(cliffAtStart[0].t).toBe(0);
+    expect(cliffAtStart[cliffAtStart.length - 1].t).toBe(100);
+    expect(cliffAtStart[cliffAtStart.length - 1].vested).toBe(100n);
+
+    const cliffAtEnd = vestingCurve({ start: 0, cliff: 100, end: 100, deposit: 100n }, 5);
+    const endPoint = cliffAtEnd.find((p) => p.t === 100);
+    expect(endPoint?.vested).toBe(100n);
+    const midPoint = cliffAtEnd.find((p) => p.t < 100);
+    if (midPoint) {
+      expect(midPoint.vested).toBe(0n);
+    }
+  });
+
+  it('handles edge case where start equals end', () => {
+    const single = vestingCurve({ start: 500, cliff: 500, end: 500, deposit: 1_000n });
+    expect(single).toEqual([{ t: 500, vested: 1_000n }]);
   });
 });

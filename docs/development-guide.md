@@ -125,9 +125,39 @@ cargo fmt --manifest-path contracts/Cargo.toml --all
 # Run Clippy lints (also available as `pnpm lint:contracts`)
 cargo clippy --manifest-path contracts/Cargo.toml --all-targets -- -D warnings
 
+# Check dependency advisories, licenses, bans, and sources with cargo-deny
+# (config lives in contracts/deny.toml; CI runs the same check)
+cargo deny --manifest-path contracts/Cargo.toml check
+
 # Build optimized WASM for deployment
 cargo build --manifest-path contracts/Cargo.toml --target wasm32v1-none --release
 ```
+
+### SDK guide (`/docs/sdk.md`)
+
+The SDK guide is the copy-pasteable reference for integrators: it covers creating a
+`StreamsClient` in SSR-safe and wallet-backed setups, reading a stream and config, each write
+method (`createStream`, `withdraw`, `cancel`), and typed contract errors from the SDK.
+
+Read it alongside the app implementation in `apps/web/src/app/streams/page.tsx` and the typed
+client in `packages/sdk/src/index.ts`.
+
+### Component gallery (`/ui`)
+
+The dashboard renders every shared UI primitive — buttons, form controls, badges, alerts,
+cards, typography, and the `@stellar-starter-kit/utils` formatting output — in all variants and
+states on a single internal page:
+
+```bash
+pnpm run dev        # then open http://localhost:3000/ui
+```
+
+Use it for design review and screenshot diffing without wiring components into a real flow. The
+page lives at `apps/web/src/app/ui/page.tsx`, is reachable by URL only, and is deliberately not
+linked from the site header. When you change a class recipe on the `streams` or `escrow` pages,
+update the matching recipe in the gallery so the review surface stays accurate. If the team later
+wants a richer story, a Storybook migration can be filed as a follow-up — for now the gallery keeps
+the dependency footprint at zero.
 
 ### Test snapshots
 
@@ -147,7 +177,7 @@ cargo test --manifest-path contracts/Cargo.toml -p stream
 A snapshot is a record of the ledgers, storage, events and token balances a test
 left behind, so it changes whenever the behaviour under test changes: adding a
 storage write, bumping a TTL, or editing an event payload rewrites the affected
-files. It also changes when a test's *setup* changes, because the accounts a
+files. It also changes when a test's _setup_ changes, because the accounts a
 test uses are derived from the order in which they are registered — moving a
 `register_contract`/`AccountProvider::generate()` call rewrites every address,
 contract id and nonce in that crate's snapshots. Commit the rewritten files
@@ -162,7 +192,7 @@ cargo test --manifest-path contracts/Cargo.toml && git status --short contracts/
 ```
 
 An empty output means the snapshots on disk match what the tests generate.
-Files listed as modified are stale; files listed as *untracked* are new
+Files listed as modified are stale; files listed as _untracked_ are new
 snapshots for tests that did not exist before.
 
 Orphaned snapshots — a file whose test has since been deleted or renamed — are
@@ -177,3 +207,36 @@ grep -oP '(?<=fn )\w+(?=\(\))' contracts/stream/src/test.rs | sort
 
 A name in the first list but not the second is an orphan; in the second but not
 the first means the snapshot is simply missing and one test run will create it.
+
+---
+
+## 3. Generating the SDK API Reference
+
+`packages/sdk` publishes its full public surface — `StreamsClient` and its
+methods, `StreamsError`, `assetContractId`, `StreamsClientOptions`,
+`TokenMetadata` and the error-code unions — as an HTML API reference built with
+[TypeDoc](https://typedoc.org). Every exported member carries JSDoc with
+`@param`, `@returns`, `@throws` and copy-pasteable `@example` blocks, which
+TypeDoc renders into the site so contributors can check signatures and usage
+against the generated reference instead of only the README snippet.
+
+### Regenerate
+
+```bash
+pnpm --filter @stellar-starter-kit/sdk docs
+```
+
+This runs `typedoc` with the config at
+[`packages/sdk/typedoc.json`](../packages/sdk/typedoc.json) and writes the site
+to `docs/api/` (an `index.html` plus per-symbol pages under `classes/`,
+`functions/`, `interfaces/` and `types/`).
+
+### The output is not committed
+
+`docs/api/` is a generated artifact and is **gitignored** (see `.gitignore`);
+regenerate it locally whenever the SDK's public surface or its doc comments
+change, rather than committing the rendered HTML. Add or update the JSDoc on the
+exported members in `packages/sdk/src/index.ts` and re-run the command above to
+refresh the reference. The build reports `Found 0 errors and 0 warnings` when
+every `{@link}` resolves; a broken intra-package link surfaces there as a
+warning, not a silent gap.

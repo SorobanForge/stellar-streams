@@ -5,6 +5,7 @@ members = [
     "escrow",
     "stream",
     "splits",
+    "version",
 ]
 
 [workspace.dependencies]

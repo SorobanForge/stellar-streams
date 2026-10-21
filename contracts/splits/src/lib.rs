@@ -1,5 +1,6 @@
 #![no_std]
 
+use contract_version::CONTRACT_VERSION;
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Env, Vec,
 };
@@ -18,6 +19,7 @@ pub enum SplitError {
     DuplicateRecipient = 5,
     SplitNotFound = 6,
     Unauthorized = 7,
+    ShareOverflow = 8,
 }
 
 /// An immutable, reusable split configuration: a set of recipients with
@@ -94,7 +96,7 @@ impl SplitsContract {
                     return Err(SplitError::DuplicateRecipient);
                 }
             }
-            total_shares += share;
+            total_shares = total_shares.checked_add(share).ok_or(SplitError::ShareOverflow)?;
         }
 
         let id = next_id(&env);
@@ -126,11 +128,11 @@ impl SplitsContract {
 
         from.require_auth();
 
-        let split: Split = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Split(split_id))
-            .ok_or(SplitError::SplitNotFound)?;
+        let key = DataKey::Split(split_id);
+        let split: Split = env.storage().persistent().get(&key).ok_or(SplitError::SplitNotFound)?;
+
+        env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
 
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&from, env.current_contract_address(), &amount);
@@ -163,6 +165,12 @@ impl SplitsContract {
     /// The id that will be assigned to the next split.
     pub fn next_split_id(env: Env) -> u64 {
         env.storage().instance().get(&DataKey::NextId).unwrap_or(1)
+    }
+
+    /// The contract interface version, shared by every contract in the
+    /// workspace.
+    pub fn version(_env: Env) -> u32 {
+        CONTRACT_VERSION
     }
 }
 
