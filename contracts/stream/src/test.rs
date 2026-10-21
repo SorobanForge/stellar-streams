@@ -485,7 +485,7 @@ fn test_fee_cap_boundary() {
     // First withdraw: full amount minus fee.
     assert_eq!(client4_.withdraw(&id4), 990);
     // Second withdraw: nothing left to withdraw.
-    assert_eq!(client4.try_withdraw(&id4), Err(Ok(StreamError::NothingToWithdraw)));
+    assert_eq!(client4_.try_withdraw(&id4), Err(Ok(StreamError::NothingToWithdraw)));
 }
 
 #[test]
