@@ -51,10 +51,13 @@ describe('FreighterAdapter', () => {
   it('connect retrieves address via requestAccess', async () => {
     vi.mocked(isConnected).mockResolvedValue({ isConnected: true });
     vi.mocked(requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER' });
+    vi.mocked(getAddress).mockResolvedValue({ address: 'GB_FREIGHTER' });
     const adapter = newAdapter();
     const key = await adapter.connect();
     expect(key).toBe('GB_FREIGHTER');
-    expect(adapter.getPublicKey()).resolves.toBe('GB_FREIGHTER');
+    // getPublicKey asks the extension again instead of serving a cached key.
+    await expect(adapter.getPublicKey()).resolves.toBe('GB_FREIGHTER');
+    expect(getAddress).toHaveBeenCalledTimes(1);
   });
 
   it('connect falls back to getAddress when requestAccess fails', async () => {
