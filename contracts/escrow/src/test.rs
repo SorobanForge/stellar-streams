@@ -185,7 +185,7 @@ fn test_escrow_create_with_past_deadline_fails() {
     // Move the ledger past the deadline offered below.
     advance_time(&env, 1000);
 
-    let res = client.try_create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &500);
+    let res = client.try_create_escrow(&payer, &payee, &arbiter, &token.id, &500, &500);
     assert_eq!(res, Err(Ok(EscrowError::InvalidDeadline)));
     assert!(client.get_escrow(&1).is_none());
 }
@@ -202,21 +202,21 @@ fn test_escrow_create_with_deadline_equal_to_now_fails() {
 
     // The fresh Env starts with a ledger timestamp of 0; a deadline of 0 is
     // equal to the current ledger time and must be rejected.
-    let res = client.try_create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &0);
+    let res = client.try_create_escrow(&payer, &payee, &arbiter, &token.id, &500, &0);
     assert_eq!(res, Err(Ok(EscrowError::InvalidDeadline)));
 
     // Same rule holds at any non-zero timestamp.
     advance_time(&env, 1000);
-    let res2 = client.try_create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    let res2 = client.try_create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
     assert_eq!(res2, Err(Ok(EscrowError::InvalidDeadline)));
 
     // One second later the same deadline is in the past, also rejected...
     advance_time(&env, 1);
-    let res3 = client.try_create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1000);
+    let res3 = client.try_create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
     assert_eq!(res3, Err(Ok(EscrowError::InvalidDeadline)));
 
     // ...and a strictly future deadline is accepted.
-    client.create_escrow(&1, &payer, &payee, &arbiter, &token.id, &500, &1002);
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1002);
     assert_eq!(client.get_escrow(&1).unwrap().deadline, 1002);
 }
 
