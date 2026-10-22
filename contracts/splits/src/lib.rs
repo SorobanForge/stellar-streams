@@ -1,5 +1,6 @@
 #![no_std]
 
+use contract_version::CONTRACT_VERSION;
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Env, Vec,
 };
@@ -19,6 +20,7 @@ pub enum SplitError {
     SplitNotFound = 6,
     Unauthorized = 7,
     ShareOverflow = 8,
+    RecipientIndexOutOfBounds = 9,
 }
 
 /// An immutable, reusable split configuration: a set of recipients with
@@ -137,16 +139,11 @@ impl SplitsContract {
         token_client.transfer(&from, env.current_contract_address(), &amount);
 
         let len = split.recipients.len();
-        let total = split.total_shares as i128;
         let mut distributed: i128 = 0;
 
         for i in 0..len {
             let recipient = split.recipients.get(i).unwrap();
-            let portion = if i == len - 1 {
-                amount - distributed
-            } else {
-                amount * split.shares.get(i).unwrap() as i128 / total
-            };
+            let portion = recipient_portion(&split, i, amount, distributed);
             token_client.transfer(&env.current_contract_address(), &recipient, &portion);
             distributed += portion;
         }
@@ -161,9 +158,43 @@ impl SplitsContract {
         env.storage().persistent().get(&DataKey::Split(split_id))
     }
 
+    /// Return the amount a recipient would receive for a hypothetical distribution.
+    /// The final recipient gets the remainder, matching `distribute` exactly.
+    pub fn recipient_share(
+        env: Env,
+        split_id: u64,
+        index: u32,
+        amount: i128,
+    ) -> Result<i128, SplitError> {
+        if amount <= 0 {
+            return Err(SplitError::InvalidAmount);
+        }
+
+        let split: Split = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Split(split_id))
+            .ok_or(SplitError::SplitNotFound)?;
+        if index >= split.recipients.len() {
+            return Err(SplitError::RecipientIndexOutOfBounds);
+        }
+
+        let mut distributed = 0;
+        for i in 0..index {
+            distributed += recipient_portion(&split, i, amount, distributed);
+        }
+        Ok(recipient_portion(&split, index, amount, distributed))
+    }
+
     /// The id that will be assigned to the next split.
     pub fn next_split_id(env: Env) -> u64 {
         env.storage().instance().get(&DataKey::NextId).unwrap_or(1)
+    }
+
+    /// The contract interface version, shared by every contract in the
+    /// workspace.
+    pub fn version(_env: Env) -> u32 {
+        CONTRACT_VERSION
     }
 }
 
@@ -171,6 +202,14 @@ fn next_id(env: &Env) -> u64 {
     let id: u64 = env.storage().instance().get(&DataKey::NextId).unwrap_or(1);
     env.storage().instance().set(&DataKey::NextId, &(id + 1));
     id
+}
+
+fn recipient_portion(split: &Split, index: u32, amount: i128, distributed: i128) -> i128 {
+    if index == split.recipients.len() - 1 {
+        amount - distributed
+    } else {
+        amount * split.shares.get(index).unwrap() as i128 / split.total_shares as i128
+    }
 }
 
 mod test;

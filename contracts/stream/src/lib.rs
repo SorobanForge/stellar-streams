@@ -1,6 +1,11 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
+// `test_claimable_vested_view_costs` prints the numbers it measures, which is the
+// only reason the test build needs `std` in this otherwise `no_std` crate.
+#[cfg(test)]
+extern crate std;
 
+use contract_version::CONTRACT_VERSION;
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Env,
     String, Vec,
@@ -54,6 +59,10 @@ pub enum StreamError {
     StreamPaused = 16,
     /// Issue #182: reserved for future strict-idempotency variant.
     NotPaused = 17,
+    /// Issue #181: `top_up` was called after the stream's schedule had ended.
+    StreamCompleted = 18,
+    /// Issue #181: `top_up` arithmetic would exceed the supported range.
+    AmountOverflow = 19,
 }
 
 /// A single linear payment stream. Tokens are locked in the contract and vest
@@ -99,6 +108,17 @@ pub enum DataKey {
     Admin,
     Treasury,
     FeeBps,
+}
+
+/// Both vesting numbers of a stream, computed from a single storage read.
+/// Issue #83: callers that poll a stream for what is vested *and* what the
+/// recipient can take right now used to pay two full reads of the same entry
+/// by calling `vested` and `claimable` back to back.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VestingSummary {
+    pub vested: i128,
+    pub claimable: i128,
 }
 
 /// Emitted when a stream is created.
@@ -394,6 +414,59 @@ impl StreamContract {
         Ok(ids)
     }
 
+    /// Add `amount` to a stream's deposit while preserving its payment rate.
+    ///
+    /// Only the stream's sender (the payer) may top it up, and only while the
+    /// stream is still streaming: cancelled streams and streams whose schedule
+    /// has already ended are rejected. The end time is extended by
+    /// `amount * duration / total_amount`, so tokens that have already vested
+    /// stay vested and the recipient keeps earning at the same pace.
+    pub fn top_up(env: Env, stream_id: u64, amount: i128) -> Result<(), StreamError> {
+        let key = DataKey::Stream(stream_id);
+        let mut stream: Stream =
+            env.storage().persistent().get(&key).ok_or(StreamError::StreamNotFound)?;
+
+        stream.sender.require_auth();
+
+        if amount <= 0 {
+            return Err(StreamError::InvalidAmount);
+        }
+        if stream.cancelled {
+            return Err(StreamError::AlreadyCancelled);
+        }
+        if env.ledger().timestamp() >= stream.end_time {
+            return Err(StreamError::StreamCompleted);
+        }
+
+        // Extend the schedule at the stream's current rate. Flooring the
+        // division can only nudge the new rate up, never make already-vested
+        // tokens vest again more slowly.
+        let duration = i128::from(stream.end_time - stream.start_time);
+        let extension =
+            amount.checked_mul(duration).ok_or(StreamError::AmountOverflow)? / stream.total_amount;
+        let extension = u64::try_from(extension).map_err(|_| StreamError::AmountOverflow)?;
+        let new_end_time =
+            stream.end_time.checked_add(extension).ok_or(StreamError::AmountOverflow)?;
+        let new_total =
+            stream.total_amount.checked_add(amount).ok_or(StreamError::AmountOverflow)?;
+
+        // Persist before the transfer, like `withdraw`, so a token callback can
+        // never observe a deposit that has not been fully recorded yet.
+        stream.total_amount = new_total;
+        stream.end_time = new_end_time;
+        env.storage().persistent().set(&key, &stream);
+        env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+
+        token::Client::new(&env, &stream.token).transfer(
+            &stream.sender,
+            env.current_contract_address(),
+            &amount,
+        );
+
+        Ok(())
+    }
+
     /// Withdraw the currently vested (and not yet withdrawn) amount to the recipient.
     /// Returns the net amount transferred after any protocol fee.
     pub fn withdraw(env: Env, stream_id: u64) -> Result<i128, StreamError> {
@@ -523,6 +596,12 @@ impl StreamContract {
             .publish(&env);
         Ok(())
     }
+    /// The contract interface version, shared by every contract in the
+    /// workspace.
+    pub fn version(_env: Env) -> u32 {
+        CONTRACT_VERSION
+    }
+
     pub fn claimable(env: Env, stream_id: u64) -> Result<i128, StreamError> {
         let stream: Stream = env
             .storage()
@@ -542,6 +621,20 @@ impl StreamContract {
             .get(&DataKey::Stream(stream_id))
             .ok_or(StreamError::StreamNotFound)?;
         Ok(vested_amount(&stream, env.ledger().timestamp()))
+    }
+
+    /// View both `vested` and `claimable` from a single storage read. Callers
+    /// that need the two numbers together avoid reading (and deserializing)
+    /// the stream entry twice by using this instead of calling both views.
+    /// Issue #83.
+    pub fn vesting_summary(env: Env, stream_id: u64) -> Result<VestingSummary, StreamError> {
+        let stream: Stream = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Stream(stream_id))
+            .ok_or(StreamError::StreamNotFound)?;
+        let vested = vested_amount(&stream, env.ledger().timestamp());
+        Ok(VestingSummary { vested, claimable: (vested - stream.withdrawn).max(0) })
     }
 
     /// Fetch a stream by id.
@@ -602,7 +695,7 @@ fn validate_stream(
 }
 
 /// Linearly vested amount of a stream at a given timestamp.
-fn vested_amount(stream: &Stream, now: u64) -> i128 {
+pub(crate) fn vested_amount(stream: &Stream, now: u64) -> i128 {
     if now < stream.start_time || now < stream.cliff_time {
         return 0;
     }

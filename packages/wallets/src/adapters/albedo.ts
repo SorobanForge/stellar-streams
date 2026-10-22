@@ -24,7 +24,8 @@ export class AlbedoAdapter implements WalletAdapter {
   }
 
   async getPublicKey(): Promise<string> {
-    if (this.publicKey) return this.publicKey;
+    // Never serve a cached key: restore has to see the account the extension
+    // currently holds. The fetched key is still cached for signing.
     const res = await albedo.publicKey({});
     const publicKey = res.pubkey;
     if (!publicKey) {

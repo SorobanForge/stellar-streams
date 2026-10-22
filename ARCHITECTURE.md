@@ -74,6 +74,16 @@ Design rules:
 Vesting math is intentionally simple and integer-only. Formula in
 `contracts/stream/src/lib.rs` is mirrored in TypeScript.
 
+### Contract versioning
+
+`stream`, `splits`, and `escrow` each expose `version() -> u32`, sourced from the
+single `CONTRACT_VERSION` constant in
+[`contracts/version/src/lib.rs`](./contracts/version/src/lib.rs). The value
+identifies the interface generation, not the deployed WASM: a release that
+changes an interface bumps that constant once and every contract reports the
+new value. The generated TypeScript bindings expose the same view, and the
+dashboard footer shows the version next to the network name.
+
 ---
 
 ## Client layer (`packages/`)
@@ -84,7 +94,7 @@ Vesting math is intentionally simple and integer-only. Formula in
 | `types`     | `Stream`, `StreamConfig`, `CreateStreamParams`, status derivation.                                                              |
 | `utils`     | BigInt stroop formatting/parsing, duration formatting, vesting math.                                                            |
 | `hooks`     | [`useStream` + `useStellarNetworkStatus`](packages/hooks/README.md) — loads a stream + claimable balance with optional polling. |
-| `wallets`   | Unified React context over Freighter, Albedo, Rabet, and Hana.                                                                  |
+| `wallets`   | Unified React context over Freighter, Albedo, Rabet, Hana, and Ledger.                                                          |
 | `ui`        | Shared UI primitives and the Tailwind class helper.                                                                             |
 | `contracts` | Generated Soroban TypeScript bindings plus network constants.                                                                   |
 

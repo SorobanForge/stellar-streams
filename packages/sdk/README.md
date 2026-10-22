@@ -101,6 +101,82 @@ const { decimals, symbol } = await client.getTokenMetadata(tokenContractId);
 console.log(`Token ${symbol} uses ${decimals} decimal places`);
 ```
 
+### Custom Fees and Memos
+
+Every write call accepts an optional `fee` (in stroops, as a string) and `memo`.
+A custom fee overrides the client's default base fee; the transaction is still
+assembled with the resource fee the simulation discovers. Memos may be `text`
+(exchange-style tags) or a 64-bit `id`.
+
+```typescript
+await client.withdraw(streamId, {
+  fee: '2500000',
+  memo: { type: 'text', value: 'INV-2026-0042' },
+});
+
+await client.createStream(params, {
+  memo: { type: 'id', value: '9007199254740993' },
+});
+```
+
+When neither option is passed, writes keep the default fee (`1000000` stroops)
+and no memo.
+
+### Dry Runs and Resource Estimates
+
+Pass `simulateOnly: true` to simulate and assemble a write without opening a
+wallet prompt or submitting anything. The result contains the assembled
+transaction plus the resource estimates a UI can display:
+
+```typescript
+const estimate = await client.createStream(params, { simulateOnly: true });
+
+estimate.minResourceFee; // '123456' stroops
+estimate.cpuInsns; // '1000000'
+estimate.memBytes; // '4096'
+estimate.auth; // xdr.SorobanAuthorizationEntry[]
+estimate.transaction; // Transaction ready to sign elsewhere
+```
+
+Simulation failures still reject with `StreamsError`, and no `sendTransaction`
+or signer call is made.
+
+### RPC Failover
+
+Configure `rpcUrls` with the primary host first and one or more backups. Network
+errors, timeouts, and 5xx responses rotate to the next host; contract and
+simulation errors do not. The healthy host stays sticky, and `activeRpcUrl`
+reports which one is in use.
+
+```typescript
+const client = new StreamsClient({
+  contractId,
+  rpcUrls: ['https://rpc-primary.example', 'https://rpc-backup.example'],
+  networkPassphrase,
+  publicKey,
+  signTransaction,
+  onRpcFailover: ({ from, to }) => console.warn(`RPC ${from} -> ${to}`),
+});
+
+client.activeRpcUrl; // 'https://rpc-primary.example'
+```
+
+### Listing Streams with Cursors
+
+`listStreams` returns `{ streams, cursor }`. Pass the cursor back to resume an
+incremental scan without re-reading earlier events, and use `maxLedgers` to
+bound how many ledgers one call scans.
+
+```typescript
+const first = await client.listStreams({ address, maxLedgers: 500 });
+console.log(first.streams.map((stream) => stream.id));
+
+// Later (or in a background indexer): resume exactly after the last event.
+const next = await client.listStreams({ address, cursor: first.cursor, maxLedgers: 500 });
+```
+
+Cursors are opaque strings; an invalid one rejects with `InvalidCursorError`.
+
 ---
 
 ## Error Handling

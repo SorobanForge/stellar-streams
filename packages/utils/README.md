@@ -73,6 +73,27 @@ parseXlmToStroops('100'); // 1_000_000_000n
 parseXlmToStroops('one'); // throws: Invalid XLM amount
 ```
 
+`parseXlmToStroops` accepts a plain decimal string — an optional leading `-`,
+digits, and at most one `.` — with optional surrounding whitespace. Number
+inputs are expanded out of exponential notation before parsing, so numeric and
+string inputs behave the same at small magnitudes. Fractional digits beyond
+seven places are **truncated toward zero**, which means anything smaller than
+one stroop parses to `0n` rather than throwing; validate positivity yourself
+when zero is not acceptable.
+
+| Input                | Result                                         |
+| :------------------- | :--------------------------------------------- |
+| `' 1.2 '`            | `12_000_000n` (surrounding whitespace is ok)   |
+| `'.5'`               | `5_000_000n`                                   |
+| `'1.'`               | `10_000_000n`                                  |
+| `'0.00000001'`       | `0n` (sub-stroop precision is dropped)         |
+| `'-0.00000001'`      | `0n` (truncation is toward zero, not `-1n`)    |
+| `1e7` (number)       | `100_000_000_000_000n` (ten million XLM)       |
+| `0.0000001` (number) | `1n` (exponent form is expanded, not rejected) |
+| `'1e7'` (string)     | throws: scientific notation is not supported   |
+| `NaN` / `Infinity`   | throws: expected a finite decimal number       |
+| `''`, `'.'`, `'-'`   | throws: expected a plain decimal number        |
+
 ### `formatDuration(seconds: number): string`
 
 Formats a duration in seconds into a compact string. Negative input is clamped

@@ -27,7 +27,7 @@ for example in `apps/web/package.json`:
 The hooks are exported from the package root:
 
 ```ts
-import { useStream, useStellarNetworkStatus } from '@stellar-starter-kit/hooks';
+import { useStream, useStreams, useStellarNetworkStatus } from '@stellar-starter-kit/hooks';
 ```
 
 The hooks are not yet imported anywhere in `apps/web`; they are available for
@@ -93,6 +93,25 @@ Polling is opt-in via `pollMs`. When `pollMs` is greater than `0` and both
 interval is cleared when the component unmounts or when `pollMs`, `client`, or
 `id` change. Pass `0` (the default) to disable automatic re-fetching.
 
+### Request deduplication
+
+Mounting a dashboard renders several components that each call `useStream` for
+the same stream in the same tick. The hook shares one in-flight read per client
+and stream id, so concurrent `getStream` / `claimable` calls resolve from a
+single RPC round-trip instead of one simulation per hook.
+
+- A shared entry exists only while its promise is pending. It is dropped as
+  soon as the promise settles, so a later read (or a remount) always fetches
+  fresh data and a failed read is retried rather than replayed.
+- `refresh()` bypasses the cache and always performs a new read. Use it after a
+  withdraw or cancel, when a pending value from another component's read would
+  be stale.
+- Reads are scoped to the client instance: two differently configured clients
+  never share a result, even for the same stream id.
+- `useStreams` is deliberately not deduplicated. Each listing carries its own
+  `AbortSignal`, so sharing a promise would let one caller's cancellation abort
+  another caller's request.
+
 ### Loading, error, refresh and cleanup semantics
 
 - `loading` is `true` while a refresh is in flight and `false` once it
@@ -103,6 +122,78 @@ interval is cleared when the component unmounts or when `pollMs`, `client`, or
   called manually (for example after a withdraw or cancel).
 - A `mounted` ref guards state updates after unmount, and the poll interval is
   cleared on cleanup, so no state updates or timers survive the component.
+
+---
+
+## `useStreams`
+
+### Purpose
+
+Lists every stream that involves an address (as sender or recipient). The hook
+keeps that read declarative for pages that currently only support looking a
+stream up by id, and exposes `refresh()` for after a create/withdraw/cancel.
+
+### Dependencies
+
+This hook uses the SDK's address-listing API
+(`StreamsClient.listStreams({ address })`). It accepts both the current
+`{ streams, cursor }` result and the legacy bare-array result, so it keeps
+working across SDK versions. If the method is unavailable, `useStreams`
+**degrades gracefully**: it returns an empty `streams` array with
+`loading: false` and `error: null` instead of throwing.
+
+### Arguments
+
+| Name      | Type                          | Description                                                                                                 |
+| :-------- | :---------------------------- | :---------------------------------------------------------------------------------------------------------- |
+| `client`  | `StreamsClient \| null`       | The streams client used to list. Pass `null` when no contract is configured.                                |
+| `address` | `string \| null \| undefined` | The account whose streams should be listed. Pass `null`/`undefined` when no wallet is connected or for SSR. |
+
+### Return value
+
+| Name      | Type                  | Description                                                         |
+| :-------- | :-------------------- | :------------------------------------------------------------------ |
+| `streams` | `Stream[]`            | Streams involving the address, or `[]` while loading / unsupported. |
+| `loading` | `boolean`             | `true` while a listing is in flight.                                |
+| `error`   | `string \| null`      | Error message if listing failed, otherwise `null`.                  |
+| `refresh` | `() => Promise<void>` | Re-run the listing, e.g. after creating or cancelling a stream.     |
+
+### Usage example
+
+```tsx
+import { useStreams } from '@stellar-starter-kit/hooks';
+import { useWallet } from '@stellar-starter-kit/wallets';
+
+function MyStreams({ client }: { client: StreamsClient | null }) {
+  const { activeAddress } = useWallet();
+  const { streams, loading, error, refresh } = useStreams(client, activeAddress);
+
+  if (loading) return <div>Loading streams…</div>;
+  if (error) return <div>Failed to load streams: {error}</div>;
+  if (streams.length === 0) return <div>No streams yet.</div>;
+
+  return (
+    <ul>
+      {streams.map((stream) => (
+        <li key={stream.id}>Stream #{stream.id}</li>
+      ))}
+      <button onClick={refresh}>Refresh</button>
+    </ul>
+  );
+}
+```
+
+### Loading, error and cleanup semantics
+
+- `streams` starts as `[]`; an address with no streams is a successful empty
+  result, not an error.
+- Changing `client` or `address` re-runs the listing and aborts the previous
+  request.
+- In-flight work is cancelled with an `AbortSignal` on unmount and on address
+  changes; stale responses are ignored, so state cannot be overwritten by an
+  older request.
+- A real listing failure clears `streams` and sets `error`; an aborted request
+  never sets a user-facing error.
 
 ---
 
@@ -160,14 +251,25 @@ Inside the monorepo, `@stellar-starter-kit/hooks` is consumed through a
 the package root:
 
 ```ts
-import { useStream, useStellarNetworkStatus } from '@stellar-starter-kit/hooks';
+import { useStream, useStreams, useStellarNetworkStatus } from '@stellar-starter-kit/hooks';
 ```
 
-The package's public API is exactly the two named exports above; there are no
+The package's public API is exactly the three named exports above; there are no
 default exports or additional entry points. The dashboard does not currently
 import these hooks.
 
 ---
+
+## Development
+
+```bash
+pnpm --filter @stellar-starter-kit/hooks test
+pnpm --filter @stellar-starter-kit/hooks typecheck
+pnpm --filter @stellar-starter-kit/hooks lint
+```
+
+Tests use Vitest with jsdom and a fake `StreamsClient`, so no network access is
+required.
 
 ## Architecture
 

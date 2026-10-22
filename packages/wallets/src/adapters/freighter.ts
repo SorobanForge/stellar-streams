@@ -1,14 +1,20 @@
-import {
-  isConnected as checkFreighterConnected,
-  getAddress as getFreighterAddress,
-  signTransaction as signFreighterTransaction,
-  requestAccess as requestFreighterAccess,
-} from '@stellar/freighter-api';
+// @stellar/freighter-api ships CommonJS, so a default import is the only form
+// Node's ESM resolver can load; named imports from it work under a bundler but
+// throw at runtime everywhere else.
+import freighterApi from '@stellar/freighter-api';
+
+const {
+  isConnected: checkFreighterConnected,
+  getAddress: getFreighterAddress,
+  signTransaction: signFreighterTransaction,
+  signAuthEntry: signFreighterAuthEntry,
+  requestAccess: requestFreighterAccess,
+} = freighterApi;
 import {
   resolveNetworkPassphrase,
   type WalletAdapter,
   type SignTransactionOptions,
-} from './adapter';
+} from './adapter.js';
 import type { WalletType } from '../WalletProvider';
 
 /** Adapter for the Freighter wallet extension (@stellar/freighter-api v6). */
@@ -47,7 +53,9 @@ export class FreighterAdapter implements WalletAdapter {
   }
 
   async getPublicKey(): Promise<string> {
-    if (this.publicKey) return this.publicKey;
+    // Always ask the extension — a cached key could belong to a different
+    // account or browser profile, which is exactly what session restore has
+    // to detect. The result is still cached for the signing methods.
     const res = await getFreighterAddress();
     if (!res.address) {
       throw new Error('Failed to retrieve public key from wallet.');
@@ -62,5 +70,16 @@ export class FreighterAdapter implements WalletAdapter {
       address: this.publicKey ?? '',
     });
     return signedTxXdr;
+  }
+
+  async signAuthEntry(entryXdr: string, opts?: SignTransactionOptions): Promise<string> {
+    const { signedAuthEntry } = await signFreighterAuthEntry(entryXdr, {
+      networkPassphrase: resolveNetworkPassphrase(opts),
+      address: this.publicKey ?? '',
+    });
+    if (!signedAuthEntry) {
+      throw new Error('Failed to sign auth entry.');
+    }
+    return signedAuthEntry;
   }
 }

@@ -3,15 +3,19 @@ import {
   formatAddress,
   formatStroopsToXlm,
   parseXlmToStroops,
+  mulDiv,
   formatDuration,
   formatRelativeTime,
   computeVestedAmount,
+  computeClaimable,
+  computeProtocolFee,
   computeProgressBps,
   formatBps,
   formatTokenAmount,
   parseTokenAmount,
   XLM_DECIMALS,
   vestingCurve,
+  type ClaimableStream,
 } from './index';
 
 describe('formatAddress', () => {
@@ -67,6 +71,112 @@ describe('parseXlmToStroops', () => {
     expect(() => parseXlmToStroops('abc')).toThrow();
     expect(() => parseXlmToStroops('')).toThrow();
     expect(() => parseXlmToStroops('.')).toThrow();
+  });
+});
+
+describe('parseXlmToStroops malformed-input table', () => {
+  const malformed =
+    'Expected a plain decimal number such as "1.5" (scientific notation, NaN and Infinity are not supported).';
+  const nonFinite = 'Expected a finite decimal number (e.g. "1.5").';
+
+  const cases: Array<{
+    label: string;
+    input: string | number;
+    expected?: bigint;
+    error?: string;
+  }> = [
+    {
+      label: 'rejects scientific notation supplied as a string',
+      input: '1e7',
+      error: `Invalid XLM amount: "1e7". ${malformed}`,
+    },
+    {
+      label: 'rejects the Infinity string',
+      input: 'Infinity',
+      error: `Invalid XLM amount: "Infinity". ${malformed}`,
+    },
+    {
+      label: 'trims surrounding whitespace',
+      input: ' 1.2 ',
+      expected: 12_000_000n,
+    },
+    { label: 'accepts a leading decimal point', input: '.5', expected: 5_000_000n },
+    { label: 'accepts a trailing decimal point', input: '1.', expected: 10_000_000n },
+    {
+      label: 'truncates sub-stroop precision toward zero',
+      input: '-0.00000001',
+      expected: 0n,
+    },
+    {
+      label: 'truncates positive sub-stroop precision to zero',
+      input: '0.00000001',
+      expected: 0n,
+    },
+    { label: 'parses the smallest positive stroop', input: '0.0000001', expected: 1n },
+    {
+      label: 'expands exponential notation from number inputs',
+      input: 1e7,
+      // 1e7 is ten million XLM, not scientific notation for one XLM.
+      expected: 100_000_000_000_000n,
+    },
+    {
+      label: 'parses small numeric values without exponential-notation errors',
+      input: 0.0000001,
+      expected: 1n,
+    },
+    {
+      label: 'truncates negative sub-stroop number inputs like strings',
+      input: -0.00000001,
+      expected: 0n,
+    },
+    {
+      label: 'rejects NaN with a finite-number message',
+      input: NaN,
+      error: `Invalid XLM amount: NaN. ${nonFinite}`,
+    },
+    {
+      label: 'rejects Infinity with a finite-number message',
+      input: Infinity,
+      error: `Invalid XLM amount: Infinity. ${nonFinite}`,
+    },
+    {
+      label: 'rejects -Infinity with a finite-number message',
+      input: -Infinity,
+      error: `Invalid XLM amount: -Infinity. ${nonFinite}`,
+    },
+    {
+      label: 'rejects an empty string',
+      input: '',
+      error: `Invalid XLM amount: "". ${malformed}`,
+    },
+    {
+      label: 'rejects a lone decimal point',
+      input: '.',
+      error: `Invalid XLM amount: ".". ${malformed}`,
+    },
+    {
+      label: 'rejects a lone minus sign',
+      input: '-',
+      error: `Invalid XLM amount: "-". ${malformed}`,
+    },
+    {
+      label: 'rejects multiple decimal points',
+      input: '1.2.3',
+      error: `Invalid XLM amount: "1.2.3". ${malformed}`,
+    },
+    {
+      label: 'rejects thousands separators',
+      input: '1,000',
+      error: `Invalid XLM amount: "1,000". ${malformed}`,
+    },
+  ];
+
+  it.each(cases)('$label', ({ input, expected, error }) => {
+    if (error !== undefined) {
+      expect(() => parseXlmToStroops(input)).toThrowError(error);
+    } else {
+      expect(parseXlmToStroops(input)).toBe(expected);
+    }
   });
 });
 
@@ -173,6 +283,85 @@ describe('vesting math', () => {
   });
 });
 
+describe('claimable and protocol-fee math', () => {
+  const baseStream: ClaimableStream = {
+    totalAmount: '1000',
+    withdrawn: '0',
+    startTime: 0,
+    endTime: 1_000,
+    cliffTime: 0,
+  };
+
+  const now = (seconds: number) => ({ stream: baseStream, now: seconds });
+
+  it('computes claimable as vested minus withdrawn', () => {
+    // vested(500) = 1000 * 500 / 1000 = 500; withdrawn = 0
+    expect(computeClaimable({ ...now(500).stream, withdrawn: '0' }, 500)).toBe(500n);
+    // fully vested: vested(1000) = 1000; withdrawn = 0
+    expect(computeClaimable({ ...now(1000).stream, withdrawn: '0' }, 1000)).toBe(1000n);
+  });
+
+  it('returns 0 when nothing is vested yet', () => {
+    expect(computeClaimable({ ...now(0).stream, withdrawn: '0' }, 0)).toBe(0n);
+    expect(computeClaimable({ ...now(-100).stream, withdrawn: '0' }, -100)).toBe(0n);
+  });
+
+  it('returns 0 when previously withdrawn funds exceed vested', () => {
+    expect(computeClaimable({ ...now(500).stream, withdrawn: '600' }, 500)).toBe(0n);
+    expect(computeClaimable({ ...now(500).stream, withdrawn: '500' }, 500)).toBe(0n);
+  });
+
+  it('handles a stream with previously withdrawn funds', () => {
+    // vested(500) = 500; withdrawn = 300; claimable = 200
+    expect(computeClaimable({ ...now(500).stream, withdrawn: '300' }, 500)).toBe(200n);
+  });
+
+  it('handles a partially vested stream', () => {
+    // vested(250) = 1000 * 250 / 1000 = 250; withdrawn = 0
+    expect(computeClaimable({ ...now(250).stream, withdrawn: '0' }, 250)).toBe(250n);
+  });
+
+  it('applies integer truncation to vesting', () => {
+    // totalAmount = 1, end = 3: vested(1) = 1 * 1 / 3 = 0 (truncated)
+    const small = { ...baseStream, totalAmount: '1', endTime: 3 };
+    expect(computeClaimable({ ...small, withdrawn: '0' }, 1)).toBe(0n);
+    // totalAmount = 5, end = 2: vested(1) = 5 * 1 / 2 = 2 (2.5 truncated)
+    const small2 = { ...baseStream, totalAmount: '5', endTime: 2 };
+    expect(computeClaimable({ ...small2, withdrawn: '0' }, 1)).toBe(2n);
+  });
+
+  it('computes a 250 bps protocol fee', () => {
+    // 1000 * 250 / 10_000 = 25
+    expect(computeProtocolFee(1000n, 250)).toBe(25n);
+  });
+
+  it('computes a zero protocol fee', () => {
+    expect(computeProtocolFee(1000n, 0)).toBe(0n);
+    expect(computeProtocolFee(0n, 250)).toBe(0n);
+  });
+
+  it('truncates small protocol fees toward zero', () => {
+    // 7 * 250 / 10_000 = 1750 / 10_000 = 0 (truncated)
+    expect(computeProtocolFee(7n, 250)).toBe(0n);
+    // 9999 * 1 / 10_000 = 0 (truncated)
+    expect(computeProtocolFee(9999n, 1)).toBe(0n);
+    // 10000 * 1 / 10_000 = 1
+    expect(computeProtocolFee(10000n, 1)).toBe(1n);
+  });
+
+  it('computes the max 1000 bps fee', () => {
+    // 1000 * 1000 / 10_000 = 100
+    expect(computeProtocolFee(1000n, 1_000)).toBe(100n);
+  });
+
+  it('derives net claimable as claimable minus fee', () => {
+    const claimable = computeClaimable({ ...now(500).stream, withdrawn: '0' }, 500); // 500
+    const fee = computeProtocolFee(claimable, 250); // 500 * 250 / 10_000 = 12
+    expect(fee).toBe(12n);
+    expect(claimable - fee).toBe(488n);
+  });
+});
+
 describe('formatTokenAmount', () => {
   it('formats a 6-decimal token (e.g. USDC)', () => {
     expect(formatTokenAmount(1_000_000n, 6)).toBe('1');
@@ -228,6 +417,27 @@ describe('parseTokenAmount', () => {
   });
 });
 
+describe('mulDiv', () => {
+  it('returns floor of a*b/c for small values', () => {
+    expect(mulDiv(10n, 3n, 4n)).toBe(7n);
+  });
+
+  it('throws on division by zero', () => {
+    expect(() => mulDiv(1n, 2n, 0n)).toThrow('mulDiv: division by zero');
+  });
+
+  it('handles values near i128 bounds', () => {
+    const max = 2n ** 127n - 1n;
+    expect(mulDiv(max, 1n, 1n)).toBe(max);
+    expect(mulDiv(max, 2n, 2n)).toBe(max);
+  });
+
+  it('handles remainder division with floor semantics', () => {
+    expect(mulDiv(7n, 1n, 2n)).toBe(3n);
+    expect(mulDiv(100n, 33n, 7n)).toBe(471n);
+  });
+});
+
 describe('vestingCurve', () => {
   it('returns { t, vested }[] including both endpoints and the exact cliff point', () => {
     const stream = {
@@ -238,20 +448,16 @@ describe('vestingCurve', () => {
     };
     const curve = vestingCurve(stream, 10);
 
-    // Endpoints
     expect(curve[0].t).toBe(1_000);
     expect(curve[0].vested).toBe(0n);
 
     expect(curve[curve.length - 1].t).toBe(2_000);
     expect(curve[curve.length - 1].vested).toBe(10_000n);
 
-    // Exact cliff point exists
     const cliffPoint = curve.find((p) => p.t === 1_400);
     expect(cliffPoint).toBeDefined();
-    // At cliff (t=1400, elapsed=400, duration=1000), 10_000 * 400 / 1000 = 4_000
     expect(cliffPoint!.vested).toBe(4_000n);
 
-    // Points strictly before cliff are 0
     const beforeCliff = curve.filter((p) => p.t < 1_400);
     expect(beforeCliff.length).toBeGreaterThan(0);
     for (const p of beforeCliff) {
@@ -270,14 +476,11 @@ describe('vestingCurve', () => {
 
     expect(curve.length).toBeGreaterThanOrEqual(25);
     for (let i = 0; i < curve.length; i++) {
-      // Never exceeds deposit
       expect(curve[i].vested).toBeLessThanOrEqual(5_000n);
       expect(curve[i].vested).toBeGreaterThanOrEqual(0n);
 
       if (i > 0) {
-        // Monotonic non-decreasing vested values
         expect(curve[i].vested >= curve[i - 1].vested).toBe(true);
-        // Strictly ascending timestamps
         expect(curve[i].t).toBeGreaterThan(curve[i - 1].t);
       }
     }
@@ -316,13 +519,11 @@ describe('vestingCurve', () => {
   });
 
   it('handles cliff equal to start and cliff equal to end', () => {
-    // Cliff at start
     const cliffAtStart = vestingCurve({ start: 0, cliff: 0, end: 100, deposit: 100n }, 5);
     expect(cliffAtStart[0].t).toBe(0);
     expect(cliffAtStart[cliffAtStart.length - 1].t).toBe(100);
     expect(cliffAtStart[cliffAtStart.length - 1].vested).toBe(100n);
 
-    // Cliff at end
     const cliffAtEnd = vestingCurve({ start: 0, cliff: 100, end: 100, deposit: 100n }, 5);
     const endPoint = cliffAtEnd.find((p) => p.t === 100);
     expect(endPoint?.vested).toBe(100n);

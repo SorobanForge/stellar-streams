@@ -75,14 +75,59 @@ export function formatStroopsToXlm(stroops: bigint | number | string): string {
 }
 
 /**
+ * Expands a number's exponential notation into a plain decimal string so number
+ * inputs parse exactly like the equivalent string input. `Number#toString`
+ * switches to exponent form for very small/large magnitudes (e.g. `1e-8`);
+ * passing that text to `parseTokenAmount` would otherwise reject a valid value.
+ */
+function numberToDecimalString(value: number): string {
+  const text = value.toString();
+  const match = /^(-?)(\d+)(?:\.(\d+))?e([+-]?\d+)$/.exec(text);
+  if (!match) return text;
+
+  const [, sign, whole, fraction = '', exponentText] = match;
+  const exponent = Number(exponentText);
+  const digits = whole + fraction;
+  const point = whole.length + exponent;
+
+  if (point <= 0) return `${sign}0.${'0'.repeat(-point)}${digits}`;
+  if (point >= digits.length) return `${sign}${digits}${'0'.repeat(point - digits.length)}`;
+  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
+}
+
+/**
  * Parses a human-readable XLM amount into stroops. Equivalent to
  * `parseTokenAmount(xlm, XLM_DECIMALS)`; use that for non-XLM tokens.
+ *
+ * Accepted input is a plain decimal number (an optional `-`, digits, and at
+ * most one `.`) with optional surrounding whitespace: `'1'`, `' 1.2 '`, `'.5'`
+ * and `'1.'` all parse. Number inputs are first expanded from any exponential
+ * notation, so `0.0000001` behaves exactly like `'0.0000001'`.
+ *
+ * Fractional digits beyond seven places are truncated toward zero, so any
+ * amount smaller than one stroop — including `0.00000001` and
+ * `-0.00000001` — parses to `0n` instead of throwing. Callers that require a
+ * positive amount should check the result themselves.
+ *
+ * Scientific notation (`'1e7'`), `NaN`, `Infinity`, and other non-decimal
+ * shapes throw an `Invalid XLM amount` error that names the offending input.
  */
 export function parseXlmToStroops(xlm: string | number): bigint {
+  // Reject non-finite numbers up front so the message explains the real
+  // problem rather than complaining about their string form.
+  if (typeof xlm === 'number' && !Number.isFinite(xlm)) {
+    throw new Error(
+      `Invalid XLM amount: ${String(xlm)}. Expected a finite decimal number (e.g. "1.5").`,
+    );
+  }
+
+  const decimal = typeof xlm === 'number' ? numberToDecimalString(xlm) : xlm;
   try {
-    return parseTokenAmount(xlm, XLM_DECIMALS);
+    return parseTokenAmount(decimal, XLM_DECIMALS);
   } catch {
-    throw new Error(`Invalid XLM amount: ${String(xlm)}`);
+    throw new Error(
+      `Invalid XLM amount: ${JSON.stringify(xlm)}. Expected a plain decimal number such as "1.5" (scientific notation, NaN and Infinity are not supported).`,
+    );
   }
 }
 
@@ -210,6 +255,52 @@ export function computeVestedAmount(schedule: VestingSchedule, now: number): big
   return (totalAmount * elapsed) / duration;
 }
 
+/**
+ * Computes the amount claimable by the recipient at `now`, mirroring the
+ * `claimable` view and the claimable calculation inside `withdraw` in the
+ * `stream` Soroban contract (contracts/stream/src/lib.rs):
+ *
+ * claimable = max(vested - withdrawn, 0)
+ *
+ * The vested amount uses the same integer arithmetic as `computeVestedAmount`.
+ *
+ * The parameter is structural rather than an import of `Stream` from
+ * `@stellar-starter-kit/types` so this package stays dependency-free and the
+ * types -> utils dependency never becomes a cycle.
+ */
+export interface ClaimableStream {
+  totalAmount: string | bigint | number;
+  startTime: number;
+  endTime: number;
+  cliffTime: number;
+  withdrawn: string | bigint | number;
+}
+
+export function computeClaimable(stream: ClaimableStream, now: number): bigint {
+  const vested = computeVestedAmount(
+    {
+      totalAmount: BigInt(stream.totalAmount),
+      startTime: stream.startTime,
+      endTime: stream.endTime,
+      cliffTime: stream.cliffTime,
+    },
+    now,
+  );
+  const withdrawn = BigInt(stream.withdrawn);
+  const claimable = vested - withdrawn;
+  return claimable > 0n ? claimable : 0n;
+}
+
+/**
+ * Computes the protocol fee on a claimable amount, mirroring the `withdraw`
+ * logic in the `stream` Soroban contract (contracts/stream/src/lib.rs):
+ *
+ * fee = claimable * feeBps / 10_000   (integer division, truncated toward zero)
+ */
+export function computeProtocolFee(claimable: bigint, feeBps: number): bigint {
+  return (claimable * BigInt(feeBps)) / 10_000n;
+}
+
 /** How much of the stream has vested, expressed in basis points (0–10000). */
 export function computeProgressBps(schedule: VestingSchedule, now: number): number {
   const { totalAmount, endTime, startTime } = schedule;
@@ -226,6 +317,17 @@ export function computeProgressBps(schedule: VestingSchedule, now: number): numb
 export function formatBps(bps: number): string {
   const clamped = Math.max(0, Math.min(10_000, bps));
   return `${(clamped / 100).toFixed(clamped % 100 === 0 ? 0 : 1)}%`;
+}
+
+/**
+ * Returns floor(a * b / c) for bigint inputs.
+ *
+ * Matches the contract's integer math: multiplication happens in bigint (no
+ * i128 overflow risk at the call site), then floor division. Throws if c === 0n.
+ */
+export function mulDiv(a: bigint, b: bigint, c: bigint): bigint {
+  if (c === 0n) throw new Error('mulDiv: division by zero');
+  return (a * b) / c;
 }
 
 /** A single point on a vesting curve suitable for plotting on a chart. */
