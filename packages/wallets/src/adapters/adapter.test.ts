@@ -42,6 +42,13 @@ describe('WalletAdapter interface', () => {
     }
   });
 
+  it('exposes disconnect only on adapters whose wallet API supports it', () => {
+    const supporting = adapters
+      .filter((adapter) => typeof adapter.disconnect === 'function')
+      .map((adapter) => adapter.id);
+    expect(supporting).toEqual(['rabe']);
+  });
+
   it('exposes signAuthEntry only on adapters whose wallet API supports it', () => {
     const supporting = adapters
       .filter((adapter) => typeof adapter.signAuthEntry === 'function')

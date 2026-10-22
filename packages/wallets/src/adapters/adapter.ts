@@ -35,6 +35,13 @@ export interface WalletAdapter {
   isAvailable(): Promise<boolean>;
   /** Connect to the wallet and return its public key. */
   connect(): Promise<string>;
+  /**
+   * End the extension session, when the wallet's API exposes one.
+   *
+   * Adapters that cannot revoke a session still have their provider state and
+   * persisted keys cleared by `WalletProvider.disconnect`.
+   */
+  disconnect?(): Promise<void>;
   /** Return the connected public key. */
   getPublicKey(): Promise<string>;
   /** Sign a transaction XDR and return the signed envelope XDR. */

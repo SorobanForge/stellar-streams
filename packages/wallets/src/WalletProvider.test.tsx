@@ -40,6 +40,7 @@ function TestComponent() {
     signAuthEntry,
   } = useWallet();
   const [signError, setSignError] = useState('none');
+  const [signErrorName, setSignErrorName] = useState('none');
   const [authResult, setAuthResult] = useState('none');
   const [authError, setAuthError] = useState('none');
 
@@ -52,6 +53,7 @@ function TestComponent() {
       <div data-testid="restoring">{isRestoring ? 'true' : 'false'}</div>
       <div data-testid="error">{error || 'null'}</div>
       <div data-testid="sign-error">{signError}</div>
+      <div data-testid="sign-error-name">{signErrorName}</div>
       <div data-testid="auth-result">{authResult}</div>
       <div data-testid="auth-error">{authError}</div>
       <button onClick={() => connect('freighter').catch(() => {})}>Connect Freighter</button>
@@ -60,7 +62,12 @@ function TestComponent() {
       <button onClick={() => connect('hana').catch(() => {})}>Connect Hana</button>
       <button onClick={disconnect}>Disconnect</button>
       <button
-        onClick={() => signTransaction('mock-xdr').catch((err: Error) => setSignError(err.message))}
+        onClick={() =>
+          signTransaction('mock-xdr').catch((err: Error) => {
+            setSignError(err.message);
+            setSignErrorName(err.name);
+          })
+        }
       >
         Sign
       </button>
@@ -360,6 +367,35 @@ describe('WalletProvider', () => {
     expect(localStorage.getItem('stellar_starter_kit_wallet_address')).toBeNull();
   });
 
+  it('should end the Rabet extension session on disconnect', async () => {
+    const rabetDisconnect = vi.fn().mockResolvedValue(undefined);
+    (window as Window & { rabet?: unknown }).rabet = {
+      connect: vi.fn().mockResolvedValue({ publicKey: 'GB_RABET' }),
+      sign: vi.fn(),
+      disconnect: rabetDisconnect,
+    };
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Rabet').click();
+    });
+
+    expect(screen.getByTestId('address').textContent).toBe('GB_RABET');
+
+    await act(async () => {
+      screen.getByText('Disconnect').click();
+    });
+
+    expect(rabetDisconnect).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('connected').textContent).toBe('false');
+    expect(localStorage.getItem('stellar_starter_kit_wallet_provider')).toBeNull();
+  });
+
   it('should clear both storage keys and the error state on disconnect', async () => {
     vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
     vi.mocked(freighter.requestAccess).mockRejectedValue(new Error('Popup closed'));
@@ -443,6 +479,58 @@ describe('WalletProvider', () => {
       expect.any(Error),
     );
     expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('should surface a Rabet rejection as a typed rejection error', async () => {
+    (window as Window & { rabet?: unknown }).rabet = {
+      connect: vi.fn().mockResolvedValue({ publicKey: 'GB_RABET' }),
+      sign: vi.fn().mockRejectedValue({ error: 'User rejected the request.' }),
+    };
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Rabet').click();
+    });
+
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+
+    expect(screen.getByTestId('sign-error-name').textContent).toBe('WalletRejectedError');
+    expect(screen.getByTestId('sign-error').textContent).toBe('User rejected the request.');
+    expect(warnSpy).toHaveBeenCalledWith(
+      'transaction signing cancelled by user:',
+      expect.any(Error),
+    );
+  });
+
+  it('should surface a Rabet cancellation distinctly from a rejection', async () => {
+    (window as Window & { rabet?: unknown }).rabet = {
+      connect: vi.fn().mockResolvedValue({ publicKey: 'GB_RABET' }),
+      sign: vi.fn().mockRejectedValue(new Error('Request cancelled by the user.')),
+    };
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Rabet').click();
+    });
+
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+
+    expect(screen.getByTestId('sign-error-name').textContent).toBe('WalletCancelledError');
+    expect(screen.getByTestId('sign-error').textContent).toBe('Request cancelled by the user.');
   });
 
   it('should delegate signAuthEntry to Freighter', async () => {
