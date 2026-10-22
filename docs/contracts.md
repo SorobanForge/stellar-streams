@@ -157,14 +157,14 @@ weights. Anyone may pay into a split and funds distribute on the spot.
 
 ### Entry points
 
-| Function        | Arguments                                                      | Returns                                      | Auth      |
-| :-------------- | :------------------------------------------------------------- | :------------------------------------------- | :-------- |
-| `create_split`  | `creator: Address, recipients: Vec<Address>, shares: Vec<u32>` | `Result<u64, SplitError>` — the new split id | `creator` |
-| `distribute`    | `split_id: u64, from: Address, token: Address, amount: i128`   | `Result<(), SplitError>`                     | `from`    |
-| `recipient_share` | `split_id: u64, index: u32, amount: i128`                    | `Result<i128, SplitError>`                    | —         |
-| `get_split`     | `split_id: u64`                                                | `Option<Split>`                              | —         |
-| `next_split_id` | —                                                              | `u64` (`1` on a fresh deploy)                | —         |
-| `version`       | —                                                              | `u32` (the shared `CONTRACT_VERSION`)        | —         |
+| Function          | Arguments                                                      | Returns                                      | Auth      |
+| :---------------- | :------------------------------------------------------------- | :------------------------------------------- | :-------- |
+| `create_split`    | `creator: Address, recipients: Vec<Address>, shares: Vec<u32>` | `Result<u64, SplitError>` — the new split id | `creator` |
+| `distribute`      | `split_id: u64, from: Address, token: Address, amount: i128`   | `Result<(), SplitError>`                     | `from`    |
+| `recipient_share` | `split_id: u64, index: u32, amount: i128`                      | `Result<i128, SplitError>`                   | —         |
+| `get_split`       | `split_id: u64`                                                | `Option<Split>`                              | —         |
+| `next_split_id`   | —                                                              | `u64` (`1` on a fresh deploy)                | —         |
+| `version`         | —                                                              | `u32` (the shared `CONTRACT_VERSION`)        | —         |
 
 ```rust
 struct Split {
@@ -179,17 +179,17 @@ paired and must be the same length. A share is a weight, not a percentage —
 
 ### Errors — `SplitError` (`#[repr(u32)]`)
 
-| Code | Variant              | Produced when                                                                                                                                                                                                                   |
-| :--: | :------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-|  1   | `EmptyRecipients`    | `create_split` with an empty `recipients` vector.                                                                                                                                                                               |
-|  2   | `LengthMismatch`     | `create_split` when `shares.len() != recipients.len()`.                                                                                                                                                                         |
-|  3   | `InvalidShares`      | `create_split` when any share is `0`.                                                                                                                                                                                           |
-|  4   | `InvalidAmount`      | `distribute` or `recipient_share` with `amount <= 0`. For `distribute`, checked **before** `from`'s auth and before the split lookup.                                                                                           |
-|  5   | `DuplicateRecipient` | `create_split` when an address appears twice, in any position.                                                                                                                                                                  |
-|  6   | `SplitNotFound`      | `distribute` or `recipient_share` for an unregistered `split_id` (or an archived entry).                                                                                                                                         |
-|  7   | `Unauthorized`       | **Defined but never returned.** Kept so existing codes keep their values. Authorization failures in this contract surface as a Soroban `Context` error from `require_auth()`, not as this code — a client must not wait for it. |
-|  8   | `ShareOverflow`      | `create_split` when the sum of all shares exceeds `u32::MAX` (4,294,967,295). The maximum supported `total_shares` is `u32::MAX`.                                                                                               |
-|  9   | `RecipientIndexOutOfBounds` | `recipient_share` when `index` is not a recipient position in the split.                                                                                                                                                 |
+| Code | Variant                     | Produced when                                                                                                                                                                                                                   |
+| :--: | :-------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+|  1   | `EmptyRecipients`           | `create_split` with an empty `recipients` vector.                                                                                                                                                                               |
+|  2   | `LengthMismatch`            | `create_split` when `shares.len() != recipients.len()`.                                                                                                                                                                         |
+|  3   | `InvalidShares`             | `create_split` when any share is `0`.                                                                                                                                                                                           |
+|  4   | `InvalidAmount`             | `distribute` or `recipient_share` with `amount <= 0`. For `distribute`, checked **before** `from`'s auth and before the split lookup.                                                                                           |
+|  5   | `DuplicateRecipient`        | `create_split` when an address appears twice, in any position.                                                                                                                                                                  |
+|  6   | `SplitNotFound`             | `distribute` or `recipient_share` for an unregistered `split_id` (or an archived entry).                                                                                                                                        |
+|  7   | `Unauthorized`              | **Defined but never returned.** Kept so existing codes keep their values. Authorization failures in this contract surface as a Soroban `Context` error from `require_auth()`, not as this code — a client must not wait for it. |
+|  8   | `ShareOverflow`             | `create_split` when the sum of all shares exceeds `u32::MAX` (4,294,967,295). The maximum supported `total_shares` is `u32::MAX`.                                                                                               |
+|  9   | `RecipientIndexOutOfBounds` | `recipient_share` when `index` is not a recipient position in the split.                                                                                                                                                        |
 
 Rounding: each non-final recipient receives `amount * shares[i] / total_shares`
 (integer division, truncating) and the **final** recipient receives
