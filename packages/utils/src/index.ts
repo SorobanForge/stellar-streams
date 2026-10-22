@@ -9,6 +9,29 @@ export const XLM_DECIMALS = 7;
 /** Number of stroops in one XLM (1 XLM = 10^7 stroops). */
 export const STROOPS_PER_XLM = 10_000_000n;
 
+/**
+ * Serializes records as RFC 4180 CSV with a header row in the requested order.
+ * Bigints are written as base-10 integers, and string amounts stay strings, so
+ * callers can export on-chain values without passing them through a float.
+ */
+export function toCsv<T extends object>(
+  streams: readonly T[],
+  columns: readonly (keyof T & string)[],
+): string {
+  const escape = (value: unknown): string => {
+    const text = value == null ? '' : typeof value === 'bigint' ? value.toString() : String(value);
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const rows = [
+    columns.map(escape).join(','),
+    ...streams.map((stream) => {
+      const record = stream as Record<string, unknown>;
+      return columns.map((column) => escape(record[column])).join(',');
+    }),
+  ];
+  return rows.join('\r\n');
+}
+
 /** Shortens a public key/address for display purposes (e.g. GABC...XYZ1). */
 export function formatAddress(address: string, chars = 4): string {
   if (!address || address.length < chars * 2 + 2) return address;

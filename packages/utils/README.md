@@ -14,6 +14,17 @@ pnpm add @stellar-starter-kit/utils
 
 Every helper below is exported from the package root.
 
+### `toCsv(streams, columns): string`
+
+Serializes records as RFC 4180 CSV with a header row. The `columns` array sets
+both the header labels and the stable field order. Commas, quotes, and line
+breaks are quoted and embedded quotes are doubled. `bigint` values and decimal
+amount strings are emitted without numeric conversion.
+
+```ts
+toCsv(streams, ['id', 'recipient', 'totalAmount']);
+```
+
 ### Constants
 
 | Export            | Value         | Meaning                                        |

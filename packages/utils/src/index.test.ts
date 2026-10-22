@@ -17,6 +17,72 @@ import {
   type ClaimableStream,
 } from './index';
 
+function parseCsv(csv: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let quoted = false;
+
+  for (let i = 0; i < csv.length; i++) {
+    const char = csv[i];
+    if (quoted) {
+      if (char === '"' && csv[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else if (char === '"') {
+        quoted = false;
+      } else {
+        field += char;
+      }
+    } else if (char === '"' && field === '') {
+      quoted = true;
+    } else if (char === ',') {
+      row.push(field);
+      field = '';
+    } else if (char === '\r' && csv[i + 1] === '\n') {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+      i++;
+    } else {
+      field += char;
+    }
+  }
+
+  if (quoted) throw new Error('Unterminated quoted CSV field');
+  row.push(field);
+  rows.push(row);
+  return rows;
+}
+
+describe('toCsv', () => {
+  it('escapes commas, quotes, and newlines using RFC 4180 quoting', () => {
+    const csv = toCsv([{ label: 'A, B', note: 'Said "hello"\r\nnext line' }], ['label', 'note']);
+
+    expect(csv).toBe('label,note\r\n"A, B","Said ""hello""\r\nnext line"');
+  });
+
+  it('keeps caller column order and round-trips large decimal amounts', () => {
+    const amount = '170141183460469231731687303715884105727';
+    const csv = toCsv(
+      [{ id: 'stream-1', totalAmount: amount, withdrawn: 9_007_199_254_740_993n }],
+      ['totalAmount', 'id', 'withdrawn'],
+    );
+
+    expect(parseCsv(csv)).toEqual([
+      ['totalAmount', 'id', 'withdrawn'],
+      [amount, 'stream-1', '9007199254740993'],
+    ]);
+  });
+
+  it('returns the requested header when there are no streams', () => {
+    expect(toCsv<{ id: string; totalAmount: string }>([], ['id', 'totalAmount'])).toBe(
+      'id,totalAmount',
+    );
+  });
+});
+
 describe('formatAddress', () => {
   it('shortens long public keys', () => {
     expect(formatAddress('GD3W5PQLX6Y6S7WLMCP6UFRT4N4IELKJD3X54V5A7LNLNEQ5Z6L4HJK3')).toBe(
