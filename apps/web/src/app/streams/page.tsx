@@ -44,8 +44,6 @@ const CONTRACT_ID = process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID ?? '';
 const DEFAULT_TOKEN =
   process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ||
   'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
-const EXPERT_URL = process.env.NEXT_PUBLIC_STELLAR_EXPERT_URL ?? 'https://stellar.expert';
-
 const DAY = 86_400;
 
 /** One-line vesting timeline for the inspected stream, expressed in relative time. */
@@ -135,24 +133,6 @@ export default function StreamsDashboard() {
     onSuccess: ({ hash }) => {
       notify('success', `Stream created. Tx ${formatAddress(hash, 6)}`);
       setRecipient('');
-  const runAction = useCallback(
-    async (label: string, action: () => Promise<{ hash: string }>, id: string) => {
-      setBusy(true);
-      setSuccess(null);
-      setError(null);
-      try {
-        const { hash } = await action();
-        const expertLink = `${EXPERT_URL}/tx/${hash}`;
-        notify(
-          'success',
-          `${label} submitted successfully. Tx ${formatAddress(hash, 6)} ${expertLink ? '• <a href="' + expertLink + '" target="_blank" rel="noreferrer">View on explorer</a>' : ''}`,
-        );
-        await loadStream(id);
-      } catch (err) {
-        notify('error', err instanceof Error ? err.message : `${label} failed.`);
-      } finally {
-        setBusy(false);
-      }
     },
     onError: (message) => notify('error', message),
   });
@@ -217,12 +197,6 @@ export default function StreamsDashboard() {
         endTime,
         cliffTime,
       });
-      const expertLink = `${EXPERT_URL}/tx/${hash}`;
-      notify(
-        'success',
-        `Stream created. Tx ${formatAddress(hash, 6)} ${expertLink ? '• <a href="' + expertLink + '" target="_blank" rel="noreferrer">View on explorer</a>' : ''}`,
-      );
-      setRecipient('');
     } catch (err) {
       // Reading the token metadata can fail before the mutation is submitted;
       // the hook reports submission failures through its own `onError`.

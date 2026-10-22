@@ -28,6 +28,8 @@ function makeStream(id: string, totalAmount = '100'): Stream {
     endTime: 1_000,
     cliffTime: 0,
     cancelled: false,
+    label: '',
+    reference: '',
   };
 }
 
