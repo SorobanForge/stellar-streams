@@ -1,6 +1,6 @@
 import type { WalletAdapter, SignTransactionOptions } from './adapter';
 import type { WalletType } from '../WalletProvider';
-import { WalletCancelledError, WalletRejectedError } from '../errors';
+import { WalletCancelledError, WalletRejectedError } from '../errors.js';
 
 interface RabetInterface {
   connect: () => Promise<{ publicKey: string }>;
