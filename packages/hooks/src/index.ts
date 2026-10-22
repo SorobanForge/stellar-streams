@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { StreamsClient } from '@stellar-starter-kit/sdk';
-import type { Stream } from '@stellar-starter-kit/types';
+import type { CreateStreamParams, Stream } from '@stellar-starter-kit/types';
 import { dedupeRequest } from './request-cache.js';
 
 /** Tracks browser connectivity as a lightweight proxy for network status. */
@@ -117,30 +117,49 @@ export function useStream(
       if (!client || id === null) {
         setStream(null);
         setClaimable(0n);
+        setError(null);
+        setIsStale(false);
+        setLoading(false);
         return;
       }
       setLoading(true);
       setError(null);
       try {
-        const readStream = () => client.getStream(id);
-        const readClaimable = () => client.claimable(id).catch(() => 0n);
-        const [nextStream, nextClaimable] = await Promise.all([
-          bypassCache ? readStream() : dedupeRequest(client, `stream:${String(id)}`, readStream),
-          bypassCache
-            ? readClaimable()
-            : dedupeRequest(client, `claimable:${String(id)}`, readClaimable),
-        ]);
-        if (!mounted.current) return;
-        setStream(nextStream);
-        setClaimable(nextClaimable);
-      } catch (err) {
-        if (!mounted.current) return;
-        setError(err instanceof Error ? err.message : 'Failed to load stream');
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            const readStream = () => client.getStream(id);
+            const readClaimable = () => client.claimable(id).catch(() => 0n);
+            const [nextStream, nextClaimable] = await Promise.all([
+              bypassCache
+                ? readStream()
+                : dedupeRequest(client, `stream:${String(id)}`, readStream),
+              bypassCache
+                ? readClaimable()
+                : dedupeRequest(client, `claimable:${String(id)}`, readClaimable),
+            ]);
+            if (!mounted.current) return;
+            setStream(nextStream);
+            setClaimable(nextClaimable);
+            setError(null);
+            setIsStale(false);
+            return;
+          } catch (err) {
+            if (!mounted.current) return;
+            // Keep the last good value visible while a transient read retries.
+            setIsStale(true);
+            if (attempt >= retries) {
+              setError(err instanceof Error ? err.message : 'Failed to load stream');
+              return;
+            }
+            await sleep(Math.min(retryDelayMs * 2 ** attempt, maxRetryDelayMs));
+            if (!mounted.current) return;
+          }
+        }
       } finally {
         if (mounted.current) setLoading(false);
       }
     },
-    [client, id],
+    [client, id, retries, retryDelayMs, maxRetryDelayMs],
   );
 
   /** Manual refresh: always bypasses the in-flight cache. */

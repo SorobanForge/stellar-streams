@@ -16,6 +16,7 @@ import {
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
 import { Button, Footer, Header, Input } from '@stellar-starter-kit/ui';
+import { useCancelStream, useCreateStream, useWithdrawStream } from '@stellar-starter-kit/hooks';
 import { getStreamMetrics, type Stream } from '@stellar-starter-kit/types';
 import {
   formatAddress,
@@ -51,6 +52,20 @@ const CONTRACT_ID = process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID ?? '';
 // Testnet native XLM SAC by default; any SEP-41 token contract id works.
 const DEFAULT_TOKEN = process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID || DEFAULT_TOKEN_CONTRACT_ID;
 const EXPERT_URL = process.env.NEXT_PUBLIC_STELLAR_EXPERT_URL ?? 'https://stellar.expert';
+
+/** One-line vesting timeline for the inspected stream, expressed in relative time. */
+function streamTimeline(stream: Stream, nowSeconds: number): string {
+  if (stream.cancelled) {
+    return 'Cancelled - the unvested balance was refunded to the sender.';
+  }
+  if (nowSeconds < stream.cliffTime) {
+    return `Cliff ends ${formatRelativeTime(stream.cliffTime, nowSeconds)}`;
+  }
+  if (nowSeconds >= stream.endTime) {
+    return `Fully vested ${formatRelativeTime(stream.endTime, nowSeconds)}`;
+  }
+  return `Ends ${formatRelativeTime(stream.endTime, nowSeconds)}`;
+}
 
 export default function StreamsDashboard() {
   const { activeAddress, isConnected, isConnecting, connect, disconnect, signTransaction } =
@@ -191,7 +206,6 @@ export default function StreamsDashboard() {
       return;
     }
 
-    setBusy(true);
     setError(null);
     setSuccess(null);
     try {
@@ -495,9 +509,7 @@ export default function StreamsDashboard() {
 
                   <div className="flex flex-wrap gap-3 border-t border-slate-900 pt-4">
                     <button
-                      onClick={() =>
-                        runAction('Withdraw', () => client.withdraw(stream.id), stream.id)
-                      }
+                      onClick={runWithdraw}
                       disabled={busy || !isConnected || contractClaimable <= 0n || stream.cancelled}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-900 disabled:pointer-events-none disabled:opacity-40"
                     >
@@ -511,7 +523,7 @@ export default function StreamsDashboard() {
                       <Ban className="h-3.5 w-3.5 text-rose-400" /> Cancel
                     </button>
                     <a
-                      href={`https://stellar.expert/explorer/testnet/contract/${CONTRACT_ID}`}
+                      href={`${EXPERT_URL}/explorer/testnet/contract/${CONTRACT_ID}`}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex items-center gap-1.5 px-2 py-2 text-[10px] text-slate-500 transition hover:text-white"

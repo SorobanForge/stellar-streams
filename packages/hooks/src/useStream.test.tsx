@@ -146,7 +146,7 @@ describe('useStream request dedupe', () => {
     getStream.mockRejectedValueOnce(new Error('rpc down'));
 
     function ErrorProbe() {
-      const { error } = useStream(client, STREAM_ID);
+      const { error } = useStream(client, STREAM_ID, { retries: 0 });
       return <div data-testid="error">{error ?? 'none'}</div>;
     }
 
