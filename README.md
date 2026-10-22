@@ -46,6 +46,16 @@ typed TypeScript SDK and an open web dashboard.
 
 ---
 
+## Documentation
+
+The [`docs/`](docs/README.md) directory carries an index of every page — start there. Highlights:
+
+- [Contract reference](docs/contracts.md) — entry points, error codes, and event shapes.
+- [Local development guide](docs/development-guide.md) — toolchain versions, contracts workflow.
+- [Deployments](docs/deployments.md) — contract ids per network.
+
+---
+
 ## Repository layout
 
 ```
@@ -192,7 +202,7 @@ write methods, and typed error handling, see the [SDK guide](docs/sdk.md).
 
 ### Prerequisites
 
-- Node.js ≥ 18 and pnpm ≥ 8
+- Node.js 22 (pinned in [`.nvmrc`](.nvmrc); `engines` requires ≥ 22) and pnpm ≥ 9
 - Rust toolchain with the `wasm32v1-none` target (for contracts)
 - Docker (optional, for a local Stellar node)
 
@@ -343,7 +353,7 @@ Copy `.env.example` to `.env.local` and set:
 
 ## Community
 
-Questions, ideas, and show-and-tell live in [GitHub Discussions](https://github.com/SorobanForge/stellar-streams/discussions).
+Questions, ideas, and show-and-tell live in [GitHub Issues](https://github.com/SorobanForge/stellar-streams/issues).
 Security reports go through [SECURITY.md](SECURITY.md), not public issues.
 
 ## Deployments

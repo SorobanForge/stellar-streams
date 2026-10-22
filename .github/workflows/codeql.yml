@@ -20,18 +20,42 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ['javascript-typescript']
+        include:
+          - language: javascript-typescript
+            build-mode: autobuild
+          - language: rust
+            build-mode: manual
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
 
+      - name: Install Rust toolchain
+        if: matrix.language == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache Cargo
+        if: matrix.language == 'rust'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      # Build the contracts workspace exactly as `pnpm build:contracts` does so the
+      # Rust extractor traces the deployment compilation.
+      - name: Build Contracts
+        if: matrix.language == 'rust'
+        run: cargo build --manifest-path contracts/Cargo.toml --target wasm32v1-none --release
 
       - name: Auto Build
+        if: matrix.language == 'javascript-typescript'
         uses: github/codeql-action/autobuild@v4
 
       - name: Perform CodeQL Analysis
