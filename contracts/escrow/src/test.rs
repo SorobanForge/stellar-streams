@@ -151,6 +151,28 @@ fn test_escrow_cancel_after_deadline() {
 }
 
 #[test]
+fn test_escrow_cancel_at_exactly_deadline_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    token.mint(&payer, 1000);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
+    client.fund_escrow(&1);
+
+    advance_time(&env, 1000);
+
+    client.cancel_escrow(&1, &payer);
+    let escrow = client.get_escrow(&1).unwrap();
+    assert_eq!(escrow.status, EscrowStatus::Cancelled);
+    assert_eq!(token.balance(&payer), 1000);
+}
+
+#[test]
 fn test_escrow_cancel_before_deadline_fails() {
     let env = Env::default();
     env.mock_all_auths();
@@ -170,6 +192,55 @@ fn test_escrow_cancel_before_deadline_fails() {
     // Cancel by payer should fail
     let result = client.try_cancel_escrow(&1, &payer);
     assert_eq!(result, Err(Ok(EscrowError::DeadlineNotReached)));
+}
+
+#[test]
+fn test_escrow_cancel_one_second_before_deadline_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    token.mint(&payer, 1000);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
+    client.fund_escrow(&1);
+
+    advance_time(&env, 999);
+
+    let result = client.try_cancel_escrow(&1, &payer);
+    assert_eq!(result, Err(Ok(EscrowError::DeadlineNotReached)));
+    assert_eq!(client.get_escrow(&1).unwrap().status, EscrowStatus::Funded);
+    assert_eq!(token.balance(&payer), 500);
+}
+
+#[test]
+fn test_escrow_refund_after_deadline_then_finalization_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    token.mint(&payer, 1000);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &500, &1000);
+    client.fund_escrow(&1);
+
+    advance_time(&env, 1001);
+
+    client.refund_escrow(&1, &payee);
+    let escrow = client.get_escrow(&1).unwrap();
+    assert_eq!(escrow.status, EscrowStatus::Refunded);
+    assert_eq!(token.balance(&payer), 1000);
+
+    let result = client.try_refund_escrow(&1, &payee);
+    assert_eq!(result, Err(Ok(EscrowError::AlreadyFinalized)));
+    let result = client.try_cancel_escrow(&1, &payer);
+    assert_eq!(result, Err(Ok(EscrowError::AlreadyFinalized)));
 }
 
 #[test]

@@ -63,8 +63,10 @@ pub enum StreamError {
     StreamCompleted = 18,
     /// Issue #181: `top_up` arithmetic would exceed the supported range.
     AmountOverflow = 19,
-    /// `transfer_recipient` was asked to hand a stream to its current recipient.
-    SameRecipient = 20,
+    /// Issue #80: `reduce_stream` was asked for a total below what has vested.
+    ReductionBelowVested = 20,
+    /// Issue #80: `reduce_stream` was asked for a total that is not a reduction.
+    InvalidReduction = 21,
 }
 
 /// A single linear payment stream. Tokens are locked in the contract and vest
@@ -157,6 +159,19 @@ pub struct StreamCancelled {
     pub id: u64,
     pub sender: Address,
     /// Unvested amount refunded to the sender.
+    pub refunded: i128,
+}
+
+/// Emitted when the sender reduces a stream's total without cancelling it.
+#[contractevent(topics = ["stream", "reduced"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamReduced {
+    #[topic]
+    pub id: u64,
+    pub sender: Address,
+    /// The stream's new total, in the token's smallest unit.
+    pub new_total: i128,
+    /// The difference refunded to the sender.
     pub refunded: i128,
 }
 
@@ -475,6 +490,68 @@ impl StreamContract {
             env.current_contract_address(),
             &amount,
         );
+
+        Ok(())
+    }
+
+    /// Reduce a stream's total without cancelling it.
+    ///
+    /// Only the stream's sender may reduce it, and the new total must be a
+    /// positive amount strictly below the current total but at least the amount
+    /// already vested. The difference is refunded to the sender immediately.
+    ///
+    /// The schedule keeps the stream's current payment rate: `end_time` shrinks
+    /// by `new_total * duration / total_amount`, so already-vested tokens stay
+    /// vested and the recipient keeps earning at the same pace until the
+    /// reduced total runs out. Unlike [`StreamContract::cancel`], the stream is
+    /// not marked cancelled and its vested balance remains withdrawable.
+    pub fn reduce_stream(env: Env, stream_id: u64, new_total: i128) -> Result<(), StreamError> {
+        let key = DataKey::Stream(stream_id);
+        let mut stream: Stream =
+            env.storage().persistent().get(&key).ok_or(StreamError::StreamNotFound)?;
+
+        stream.sender.require_auth();
+
+        if stream.cancelled {
+            return Err(StreamError::AlreadyCancelled);
+        }
+        if new_total <= 0 || new_total >= stream.total_amount {
+            return Err(StreamError::InvalidReduction);
+        }
+
+        let now = env.ledger().timestamp();
+        let vested = vested_amount(&stream, now);
+        if new_total < vested {
+            return Err(StreamError::ReductionBelowVested);
+        }
+
+        // Shrink the schedule at the stream's current rate. Rounding the new
+        // duration down can only raise the rate slightly, never shrink an
+        // amount that has already vested.
+        let duration = i128::from(stream.end_time - stream.start_time);
+        let new_duration = new_total.checked_mul(duration).ok_or(StreamError::AmountOverflow)?
+            / stream.total_amount;
+        let new_duration = u64::try_from(new_duration).map_err(|_| StreamError::AmountOverflow)?;
+        let new_end_time =
+            stream.start_time.checked_add(new_duration).ok_or(StreamError::AmountOverflow)?;
+        let refunded = stream.total_amount - new_total;
+
+        // Persist before refunding, like `withdraw`, so a token callback can
+        // never observe tokens that have not been fully recorded yet.
+        stream.total_amount = new_total;
+        stream.end_time = new_end_time;
+        env.storage().persistent().set(&key, &stream);
+        env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+
+        token::Client::new(&env, &stream.token).transfer(
+            &env.current_contract_address(),
+            &stream.sender,
+            &refunded,
+        );
+
+        StreamReduced { id: stream_id, sender: stream.sender.clone(), new_total, refunded }
+            .publish(&env);
 
         Ok(())
     }
