@@ -8,6 +8,10 @@
 export const CONTRACT_VERSION = 1;
 
 export const SOROBAN_NETWORKS = {
+  LOCAL: {
+    networkPassphrase: 'Standalone Network ; February 2017',
+    rpcUrl: 'http://localhost:8000/soroban/rpc',
+  },
   TESTNET: {
     networkPassphrase: 'Test SDF Network ; September 2015',
     rpcUrl: 'https://soroban-testnet.stellar.org',
@@ -17,6 +21,10 @@ export const SOROBAN_NETWORKS = {
     rpcUrl: 'https://soroban-rpc.stellar.org',
   },
 } as const;
+
+// Export network configuration utilities
+export { getNetworkConfig, isValidNetwork, getHorizonUrl } from './networks.js';
+export type { NetworkName } from './networks.js';
 
 // Generated TypeScript clients, one directory per contract under `./generated`.
 // Regenerate them from the locally built WASM (no deploy required) with:
