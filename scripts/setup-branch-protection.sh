@@ -39,7 +39,8 @@ gh api \
       "Run TypeScript Checks",
       "Run Unit Tests",
       "Test Soroban Contracts",
-      "Verify Production Build"
+      "Verify Production Build",
+      "Review Dependencies"
     ]
   },
   "enforce_admins": false,

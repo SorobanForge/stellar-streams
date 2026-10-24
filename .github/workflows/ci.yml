@@ -86,6 +86,25 @@ jobs:
       - name: Run Tests
         run: pnpm run test
 
+      - name: Run Tests with Coverage
+        run: pnpm run test -- -- --coverage
+
+      - name: Upload Coverage Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-reports
+          path: packages/*/coverage
+          retention-days: 5
+
+      - name: Comment PR with Coverage Summary
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF: ${{ github.ref }}
+        run: node scripts/post-coverage-comment.js
+
   contracts:
     name: Test Soroban Contracts
     runs-on: ubuntu-latest
