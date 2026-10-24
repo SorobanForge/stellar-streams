@@ -20,6 +20,11 @@ ignore = [
     # patched release; upstream suggests `pastey`, which soroban-env-host has
     # not adopted yet. Revisit when upgrading soroban-sdk.
     { id = "RUSTSEC-2024-0436", reason = "transitive soroban test-only dep, no upstream fix; not in shipped WASM" },
+    # crypto-bigint v0.5.5 timing variability (RUSTSEC-2026-0387). Transitive
+    # dependency via soroban-sdk 27 -> soroban-env-host -> k256 -> ecdsa -> elliptic-curve.
+    # This is only used in the test/host environment, not in the shipped contract WASM.
+    # Revisit when upgrading to soroban-sdk 28+ which may have a newer crypto-bigint.
+    { id = "RUSTSEC-2026-0387", reason = "transitive soroban host/test-only dep; not in shipped WASM" },
 ]
 
 [licenses]

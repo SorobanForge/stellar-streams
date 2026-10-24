@@ -138,7 +138,7 @@ export default function StreamsDashboard() {
         const config = await client.getConfig().catch(() => null);
         setFeeBps(config ? config.feeBps : 0);
         if (!found) notify('error', `No stream found with id ${id}.`);
-      } catch (err) {
+      } catch (err: unknown) {
         notify('error', err instanceof Error ? err.message : 'Failed to load stream.');
       } finally {
         setLoadingStream(false);

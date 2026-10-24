@@ -315,6 +315,21 @@ formatStroopsToXlm(123_456_789n); // "12.3456789" — shorthand for 7-decimal XL
 computeVestedAmount(schedule, now); // bigint
 ```
 
+### Runnable example
+
+See [examples/basic-payment](examples/basic-payment) for a complete, runnable example that creates a stream on Testnet and prints the transaction hash and stream id. Clone it to get started:
+
+```bash
+# Setup
+pnpm install
+cd examples/basic-payment
+cp .env.example .env
+# Edit .env with your contract id, sender key, and recipient address
+
+# Run
+pnpm run dev
+```
+
 ---
 
 ## Configuration

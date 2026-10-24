@@ -1,0 +1,24 @@
+{
+  "name": "@stellar-starter-kit/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared network configuration and environment resolution for Stellar Streams.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint src --ext .ts,.tsx",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:run": "vitest --run"
+  },
+  "dependencies": {
+    "@stellar-starter-kit/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@stellar-starter-kit/tsconfig": "workspace:*",
+    "@stellar-starter-kit/eslint-config": "workspace:*",
+    "typescript": "^6.0.3",
+    "vitest": "^2.1.8"
+  }
+}
