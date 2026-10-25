@@ -20,7 +20,7 @@
     "@stellar-starter-kit/types": "workspace:*",
     "@stellar-starter-kit/utils": "workspace:*",
     "@stellar-starter-kit/config": "workspace:*",
-    "next": "16.4.0",
+    "next": "16.4.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "stellar-sdk": "npm:@stellar/stellar-sdk@^14.5.0",
