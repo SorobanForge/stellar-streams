@@ -273,5 +273,5 @@ required.
 
 ## Architecture
 
-This package is linked from [`ARCHITECTURE.md`](../ARCHITECTURE.md) in the
+This package is linked from [`ARCHITECTURE.md`](../../ARCHITECTURE.md) in the
 client layer (`packages/hooks`).

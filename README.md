@@ -28,7 +28,7 @@ typed TypeScript SDK and an open web dashboard.
 
 > **Project status:** pre-1.0. The contracts are implemented, unit-tested, and build clean under
 > `clippy` / `rustfmt`. They have **not** been audited or deployed to Mainnet. Before integrating,
-> read the [security model and trust assumptions](SECURITY.md#security-model) — who can cancel,
+> read the [security model and trust assumptions](SECURITY.md#threat-model) — who can cancel,
 > who holds fees, what the arbiter may do, and the inherent risks (no upgradeability, unaudited
 > contracts, admin key custody, TTL expiry). See the [Roadmap](ROADMAP.md) for what's next.
 
@@ -43,6 +43,16 @@ typed TypeScript SDK and an open web dashboard.
 | **Grants & bounties** | Milestone cliffs release funds as work completes.                |
 | **Revenue sharing**   | Route a payment to many contributors via a single split.         |
 | **OTC / services**    | Optional escrow with an arbiter and deadline refunds.            |
+
+---
+
+## Documentation
+
+The [`docs/`](docs/README.md) directory carries an index of every page — start there. Highlights:
+
+- [Contract reference](docs/contracts.md) — entry points, error codes, and event shapes.
+- [Local development guide](docs/development-guide.md) — toolchain versions, contracts workflow.
+- [Deployments](docs/deployments.md) — contract ids per network.
 
 ---
 
@@ -193,7 +203,7 @@ write methods, and typed error handling, see the [SDK guide](docs/sdk.md).
 
 ### Prerequisites
 
-- Node.js ≥ 18 and pnpm ≥ 8
+- Node.js 22 (pinned in [`.nvmrc`](.nvmrc); `engines` requires ≥ 22) and pnpm ≥ 9
 - Rust toolchain with the `wasm32v1-none` target (for contracts)
 - Docker (optional, for a local Stellar node)
 
@@ -234,7 +244,7 @@ pnpm run node:local     # docker compose up -d (Stellar Quickstart)
 
 Want the complete path — local node → deploy `stream` → fund accounts → create a stream →
 advance time → withdraw — with every command and its expected output? Follow the
-[end-to-end walkthrough](docs/development-guide.md#3-end-to-end-walkthrough-a-stream-from-zero-to-withdraw)
+[end-to-end walkthrough](docs/development-guide.md)
 in the development guide (verified on Linux).
 
 ---
@@ -359,7 +369,7 @@ Copy `.env.example` to `.env.local` and set:
 
 ## Community
 
-Questions, ideas, and show-and-tell live in [GitHub Discussions](https://github.com/SorobanForge/stellar-streams/discussions).
+Questions, ideas, and show-and-tell live in [GitHub Issues](https://github.com/SorobanForge/stellar-streams/issues).
 Security reports go through [SECURITY.md](SECURITY.md), not public issues.
 
 ## Deployments

@@ -2,7 +2,6 @@
 
 TypeScript client SDK for the [Stellar Streams](https://github.com/SorobanForge/stellar-streams) protocol — continuous payment streaming, linear vesting with cliffs, and proportional payment splits on Stellar & Soroban.
 
-[![npm version](https://img.shields.io/badge/npm-@stellar--streams/sdk-blue.svg)](https://www.npmjs.com/package/@stellar-streams/sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ---

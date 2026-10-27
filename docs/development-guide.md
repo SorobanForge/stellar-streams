@@ -4,6 +4,26 @@ Welcome to the Stellar Streams developer documentation! This guide explains how 
 
 ---
 
+## Toolchain versions: Node & pnpm
+
+The repository pins **one** Node version and uses it everywhere:
+
+- [`.nvmrc`](../.nvmrc) is the single source of truth (currently **22**). Every GitHub Actions
+  `setup-node` step (`ci.yml`, `release.yml`) reads it via `node-version-file`, so local, CI, and
+  release can never drift apart.
+- `package.json` `engines.node` requires `>=22.0.0`, and `.npmrc` sets `engine-strict=true`, so
+  `pnpm install` fails fast with a clear engine error on an unsupported Node version instead of
+  letting a locally-passing change fail later in CI.
+- After cloning, run `nvm use` (or your version manager's equivalent) to pick up `.nvmrc`.
+
+**Decision (recorded per #163):** Node 18 and 20 support was intentionally dropped. Both are
+end-of-life (18 in April 2025, 20 in April 2026), and CI had already standardized on 22. There is
+therefore no minimum-version CI matrix — `.nvmrc`, `engines.node`, and the workflows all describe
+Node 22. To move the floor later, update `.nvmrc` and `engines.node` together; the workflows follow
+`.nvmrc` automatically.
+
+---
+
 ## 1. Running Stellar Quickstart
 
 For local development, it is highly recommended to run a local node rather than testing directly on Testnet or Futurenet. We use the official Stellar Quickstart Docker image.

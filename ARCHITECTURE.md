@@ -40,11 +40,11 @@ graph TD
 
 Rust workspaces built with [soroban-sdk](https://crates.io/crates/soroban-sdk) `27.x`.
 
-| Crate    | Responsibility                                                                |
-| :------- | :---------------------------------------------------------------------------- |
-| `stream` | **Flagship.** Linear vesting streams with cliffs, cancellation, and TTL bump. |
-| `splits` | Reusable proportional payment splits with duplicate detection and handling.   |
-| `escrow` | Arbiter-based escrow with deadline-driven refunds. [See lifecycle.](#escrow)  |
+| Crate    | Responsibility                                                                         |
+| :------- | :------------------------------------------------------------------------------------- |
+| `stream` | **Flagship.** Linear vesting streams with cliffs, cancellation, and TTL bump.          |
+| `splits` | Reusable proportional payment splits with duplicate detection and handling.            |
+| `escrow` | Arbiter-based escrow with deadline-driven refunds. [See lifecycle.](#escrow-lifecycle) |
 
 The interfaces behind those crates — entry points with argument and return types, every error
 variant with its numeric code, and every event topic with its payload shape — are written out in
