@@ -212,3 +212,50 @@ Terminal states: `Released`, `Refunded`, `Cancelled` — any further transition 
 | Buyer cancels an unfunded/expired deal   | `escrow.cancel_escrow`                           |
 
 Every public function maps to a step above. No function exists "just in case."
+
+---
+
+## 5.8 Milestone escrow releases (#189)
+
+Escrow supports an optional milestone schedule so freelance work can be paid in
+increments. The schedule is additive: escrows without one keep the existing
+single `release_escrow` behaviour.
+
+### Data
+
+- `DataKey::Milestones(id) -> Vec<i128>` — positive amounts that must sum exactly
+  to `Escrow.amount`.
+- `DataKey::MilestoneReleased(id) -> Vec<u32>` — `0`/`1` flags, one per milestone.
+
+Both keys are persistent and TTL-bumped on write. No existing key or error
+discriminant is renumbered.
+
+### Entry points
+
+- `set_milestones(id, caller, amounts)` — payer only, `Created` only, at least
+  two positive amounts, checked sum equal to the escrow amount.
+- `release_milestone(id, milestone_index, caller)` — payer or arbiter only,
+  `Funded` only, before/at `deadline`; index must be in range and unreleased.
+  Transfers only that milestone to the payee and emits `MilestoneReleased`.
+  Releasing the final milestone moves the escrow to `Released`.
+- `get_milestones(id)` / `is_milestone_released(id, index)` — read-only views.
+
+`release_escrow` rejects milestone escrows (`InvalidStateTransition`) so a full
+release cannot bypass the schedule. `refund_escrow` and the deadline path of
+`cancel_escrow` return `Escrow.amount - sum(released milestones)` to the payer,
+so unreleased milestones are refunded and released milestones are never
+double-paid.
+
+### Errors
+
+New variants appended: `MilestoneScheduleNotFound = 10`,
+`MilestoneIndexOutOfRange = 11`, `MilestoneAlreadyReleased = 12`,
+`MilestoneScheduleInvalid = 13`.
+
+### Boundary rules
+
+- Index `>= len` → `MilestoneIndexOutOfRange`.
+- Duplicate release → `MilestoneAlreadyReleased`.
+- Any release when `now > deadline` → `DeadlineExpired`.
+- Schedule with fewer than two entries, a non-positive entry, or a sum that does
+  not equal `Escrow.amount` → `MilestoneScheduleInvalid`.

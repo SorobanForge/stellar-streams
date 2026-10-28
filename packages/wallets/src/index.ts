@@ -12,15 +12,8 @@ export const WALLET_PROVIDERS = {
   ALBEDO: 'albedo',
   RABE: 'rabe',
   HANA: 'hana',
-} as const satisfies Record<string, WalletType>;
-
-export type WalletProviderType = WalletType;
-
-/** A picker entry: the id passed to `connect()` and the name shown to the user. */
-export interface WalletProviderOption {
-  id: WalletProviderType;
-  label: string;
-}
+  LEDGER: 'ledger',
+} as const;
 
 /**
  * Every supported provider, in the order the wallet picker lists them. UIs must
@@ -35,5 +28,14 @@ export const WALLET_PROVIDER_OPTIONS: readonly WalletProviderOption[] = [
   { id: WALLET_PROVIDERS.HANA, label: 'Hana' },
 ];
 
-export * from './WalletProvider';
-export * from './adapters';
+// Explicit extensions: the emitted dist keeps specifiers as written, and
+// Node's ESM resolver rejects extensionless relative imports.
+export * from './WalletProvider.js';
+export * from './adapters/index.js';
+export {
+  NotSupportedError,
+  WalletCancelledError,
+  WalletRejectedError,
+  isUserRejection,
+  toSigningError,
+} from './errors.js';

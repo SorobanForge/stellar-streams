@@ -9,6 +9,29 @@ export const XLM_DECIMALS = 7;
 /** Number of stroops in one XLM (1 XLM = 10^7 stroops). */
 export const STROOPS_PER_XLM = 10_000_000n;
 
+/**
+ * Serializes records as RFC 4180 CSV with a header row in the requested order.
+ * Bigints are written as base-10 integers, and string amounts stay strings, so
+ * callers can export on-chain values without passing them through a float.
+ */
+export function toCsv<T extends object>(
+  streams: readonly T[],
+  columns: readonly (keyof T & string)[],
+): string {
+  const escape = (value: unknown): string => {
+    const text = value == null ? '' : typeof value === 'bigint' ? value.toString() : String(value);
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const rows = [
+    columns.map(escape).join(','),
+    ...streams.map((stream) => {
+      const record = stream as Record<string, unknown>;
+      return columns.map((column) => escape(record[column])).join(',');
+    }),
+  ];
+  return rows.join('\r\n');
+}
+
 /** Shortens a public key/address for display purposes (e.g. GABC...XYZ1). */
 export function formatAddress(address: string, chars = 4): string {
   if (!address || address.length < chars * 2 + 2) return address;
@@ -113,14 +136,59 @@ export function formatStroopsToXlm(stroops: bigint | number | string): string {
 }
 
 /**
+ * Expands a number's exponential notation into a plain decimal string so number
+ * inputs parse exactly like the equivalent string input. `Number#toString`
+ * switches to exponent form for very small/large magnitudes (e.g. `1e-8`);
+ * passing that text to `parseTokenAmount` would otherwise reject a valid value.
+ */
+function numberToDecimalString(value: number): string {
+  const text = value.toString();
+  const match = /^(-?)(\d+)(?:\.(\d+))?e([+-]?\d+)$/.exec(text);
+  if (!match) return text;
+
+  const [, sign, whole, fraction = '', exponentText] = match;
+  const exponent = Number(exponentText);
+  const digits = whole + fraction;
+  const point = whole.length + exponent;
+
+  if (point <= 0) return `${sign}0.${'0'.repeat(-point)}${digits}`;
+  if (point >= digits.length) return `${sign}${digits}${'0'.repeat(point - digits.length)}`;
+  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
+}
+
+/**
  * Parses a human-readable XLM amount into stroops. Equivalent to
  * `parseTokenAmount(xlm, XLM_DECIMALS)`; use that for non-XLM tokens.
+ *
+ * Accepted input is a plain decimal number (an optional `-`, digits, and at
+ * most one `.`) with optional surrounding whitespace: `'1'`, `' 1.2 '`, `'.5'`
+ * and `'1.'` all parse. Number inputs are first expanded from any exponential
+ * notation, so `0.0000001` behaves exactly like `'0.0000001'`.
+ *
+ * Fractional digits beyond seven places are truncated toward zero, so any
+ * amount smaller than one stroop — including `0.00000001` and
+ * `-0.00000001` — parses to `0n` instead of throwing. Callers that require a
+ * positive amount should check the result themselves.
+ *
+ * Scientific notation (`'1e7'`), `NaN`, `Infinity`, and other non-decimal
+ * shapes throw an `Invalid XLM amount` error that names the offending input.
  */
 export function parseXlmToStroops(xlm: string | number): bigint {
+  // Reject non-finite numbers up front so the message explains the real
+  // problem rather than complaining about their string form.
+  if (typeof xlm === 'number' && !Number.isFinite(xlm)) {
+    throw new Error(
+      `Invalid XLM amount: ${String(xlm)}. Expected a finite decimal number (e.g. "1.5").`,
+    );
+  }
+
+  const decimal = typeof xlm === 'number' ? numberToDecimalString(xlm) : xlm;
   try {
-    return parseTokenAmount(xlm, XLM_DECIMALS);
+    return parseTokenAmount(decimal, XLM_DECIMALS);
   } catch {
-    throw new Error(`Invalid XLM amount: ${String(xlm)}`);
+    throw new Error(
+      `Invalid XLM amount: ${JSON.stringify(xlm)}. Expected a plain decimal number such as "1.5" (scientific notation, NaN and Infinity are not supported).`,
+    );
   }
 }
 
@@ -187,6 +255,45 @@ export function formatDuration(seconds: number): string {
   return parts.join(' ');
 }
 
+const MINUTE_SECONDS = 60;
+const HOUR_SECONDS = 3_600;
+const DAY_SECONDS = 86_400;
+
+/**
+ * Formats the gap between two unix timestamps (seconds) as a short relative
+ * string: `in 3d`, `2h ago`, or `just now` for anything under a minute (and for
+ * a zero delta). Deltas larger than a day are kept in days so the output stays
+ * unambiguous for long vesting schedules.
+ *
+ * `now` is always passed in — the helper never reads the clock itself, so the
+ * output is deterministic and cheap to test. Negative deltas describe the past
+ * (`ago`), positive ones the future (`in`). Non-finite inputs fall back to
+ * `just now` instead of rendering `NaN` into the UI.
+ *
+ *      formatRelativeTime(cliffTime, now) // "in 3d"
+ *      formatRelativeTime(startTime, now) // "2h ago"
+ */
+export function formatRelativeTime(from: number, now: number): string {
+  const delta = Math.trunc(from) - Math.trunc(now);
+  if (!Number.isFinite(delta)) return 'just now';
+
+  const magnitude = Math.abs(delta);
+  if (magnitude < MINUTE_SECONDS) return 'just now';
+
+  let unit = 'd';
+  let secondsPerUnit = DAY_SECONDS;
+  if (magnitude < HOUR_SECONDS) {
+    unit = 'm';
+    secondsPerUnit = MINUTE_SECONDS;
+  } else if (magnitude < DAY_SECONDS) {
+    unit = 'h';
+    secondsPerUnit = HOUR_SECONDS;
+  }
+  const value = Math.floor(magnitude / secondsPerUnit);
+
+  return delta > 0 ? `in ${value}${unit}` : `${value}${unit} ago`;
+}
+
 /** A linear vesting schedule, mirroring the on-chain `Stream` time fields. */
 export interface VestingSchedule {
   totalAmount: bigint;
@@ -209,6 +316,52 @@ export function computeVestedAmount(schedule: VestingSchedule, now: number): big
   return (totalAmount * elapsed) / duration;
 }
 
+/**
+ * Computes the amount claimable by the recipient at `now`, mirroring the
+ * `claimable` view and the claimable calculation inside `withdraw` in the
+ * `stream` Soroban contract (contracts/stream/src/lib.rs):
+ *
+ * claimable = max(vested - withdrawn, 0)
+ *
+ * The vested amount uses the same integer arithmetic as `computeVestedAmount`.
+ *
+ * The parameter is structural rather than an import of `Stream` from
+ * `@stellar-starter-kit/types` so this package stays dependency-free and the
+ * types -> utils dependency never becomes a cycle.
+ */
+export interface ClaimableStream {
+  totalAmount: string | bigint | number;
+  startTime: number;
+  endTime: number;
+  cliffTime: number;
+  withdrawn: string | bigint | number;
+}
+
+export function computeClaimable(stream: ClaimableStream, now: number): bigint {
+  const vested = computeVestedAmount(
+    {
+      totalAmount: BigInt(stream.totalAmount),
+      startTime: stream.startTime,
+      endTime: stream.endTime,
+      cliffTime: stream.cliffTime,
+    },
+    now,
+  );
+  const withdrawn = BigInt(stream.withdrawn);
+  const claimable = vested - withdrawn;
+  return claimable > 0n ? claimable : 0n;
+}
+
+/**
+ * Computes the protocol fee on a claimable amount, mirroring the `withdraw`
+ * logic in the `stream` Soroban contract (contracts/stream/src/lib.rs):
+ *
+ * fee = claimable * feeBps / 10_000   (integer division, truncated toward zero)
+ */
+export function computeProtocolFee(claimable: bigint, feeBps: number): bigint {
+  return (claimable * BigInt(feeBps)) / 10_000n;
+}
+
 /** How much of the stream has vested, expressed in basis points (0–10000). */
 export function computeProgressBps(schedule: VestingSchedule, now: number): number {
   const { totalAmount, endTime, startTime } = schedule;
@@ -225,4 +378,93 @@ export function computeProgressBps(schedule: VestingSchedule, now: number): numb
 export function formatBps(bps: number): string {
   const clamped = Math.max(0, Math.min(10_000, bps));
   return `${(clamped / 100).toFixed(clamped % 100 === 0 ? 0 : 1)}%`;
+}
+
+/**
+ * Returns floor(a * b / c) for bigint inputs.
+ *
+ * Matches the contract's integer math: multiplication happens in bigint (no
+ * i128 overflow risk at the call site), then floor division. Throws if c === 0n.
+ */
+export function mulDiv(a: bigint, b: bigint, c: bigint): bigint {
+  if (c === 0n) throw new Error('mulDiv: division by zero');
+  return (a * b) / c;
+}
+
+/** A single point on a vesting curve suitable for plotting on a chart. */
+export interface VestingPoint {
+  t: number;
+  vested: bigint;
+}
+
+/** Accepted stream input for vesting curve generation. Supports both shorthand and formal types. */
+export interface VestingStreamInput {
+  start?: number;
+  startTime?: number;
+  cliff?: number;
+  cliffTime?: number;
+  end?: number;
+  endTime?: number;
+  deposit?: bigint | number | string;
+  totalAmount?: bigint | number | string;
+  amount?: bigint | number | string;
+}
+
+/**
+ * Generates N sample points along a stream's vesting schedule suitable for charting.
+ *
+ * Guarantees:
+ * - Always includes both endpoints (`t = start` and `t = end`).
+ * - Always includes the exact cliff timestamp (`t = cliff`).
+ * - Vested amounts are monotonically non-decreasing and never exceed the total deposit.
+ * - Pure and deterministic: identical inputs always produce the exact same points.
+ */
+export function vestingCurve(stream: VestingStreamInput, samples: number = 20): VestingPoint[] {
+  const start = stream.start ?? stream.startTime ?? 0;
+  const rawEnd = stream.end ?? stream.endTime ?? start;
+  const end = Math.max(start, rawEnd);
+  const rawCliff = stream.cliff ?? stream.cliffTime ?? start;
+  const cliff = Math.min(Math.max(start, rawCliff), end);
+
+  const rawDeposit = stream.deposit ?? stream.totalAmount ?? stream.amount ?? 0n;
+  let deposit: bigint;
+  if (typeof rawDeposit === 'bigint') {
+    deposit = rawDeposit;
+  } else if (typeof rawDeposit === 'number') {
+    deposit = BigInt(Math.floor(rawDeposit));
+  } else {
+    deposit = BigInt(String(rawDeposit));
+  }
+  if (deposit < 0n) {
+    deposit = 0n;
+  }
+
+  const schedule: VestingSchedule = {
+    startTime: start,
+    endTime: end,
+    cliffTime: cliff,
+    totalAmount: deposit,
+  };
+
+  if (end === start) {
+    return [{ t: start, vested: deposit }];
+  }
+
+  const times = new Set<number>();
+  times.add(start);
+  times.add(end);
+  times.add(cliff);
+
+  const n = Math.max(2, Math.floor(samples));
+  for (let i = 0; i < n; i++) {
+    const t = Math.round(start + (i * (end - start)) / (n - 1));
+    times.add(t);
+  }
+
+  const sortedTimes = Array.from(times).sort((a, b) => a - b);
+
+  return sortedTimes.map((t) => ({
+    t,
+    vested: computeVestedAmount(schedule, t),
+  }));
 }

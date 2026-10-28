@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   TESTNET_PASSPHRASE,
   PUBLIC_NETWORK_PASSPHRASE,
@@ -10,6 +10,7 @@ import { FreighterAdapter } from './freighter';
 import { AlbedoAdapter } from './albedo';
 import { RabetAdapter } from './rabe';
 import { HanaAdapter } from './hana';
+import { LedgerAdapter } from './ledger';
 
 describe('WalletAdapter interface', () => {
   const adapters: WalletAdapter[] = [
@@ -17,6 +18,7 @@ describe('WalletAdapter interface', () => {
     new AlbedoAdapter(),
     new RabetAdapter(),
     new HanaAdapter(),
+    new LedgerAdapter(),
   ];
 
   it('exposes passphrase constants', () => {
@@ -42,12 +44,18 @@ describe('WalletAdapter interface', () => {
     }
   });
 
-  it('only some adapters expose optional signAuthEntry', () => {
-    for (const adapter of adapters) {
-      if (adapter.signAuthEntry) {
-        expect(typeof adapter.signAuthEntry).toBe('function');
-      }
-    }
+  it('exposes disconnect only on adapters that hold a session or device to release', () => {
+    const supporting = adapters
+      .filter((adapter) => typeof adapter.disconnect === 'function')
+      .map((adapter) => adapter.id);
+    expect(supporting).toEqual(['rabe', 'ledger']);
+  });
+
+  it('exposes signAuthEntry only on adapters whose wallet API supports it', () => {
+    const supporting = adapters
+      .filter((adapter) => typeof adapter.signAuthEntry === 'function')
+      .map((adapter) => adapter.id);
+    expect(supporting).toEqual(['freighter']);
   });
 });
 

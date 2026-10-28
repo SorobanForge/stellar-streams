@@ -44,8 +44,8 @@ are blocked.
 
 ### Fix
 
-1. Install the wallet from its official source (for Freighter, the [Stellar
-   Development Foundation's Freighter page](https://stellar.org/freighter)).
+1. Install the wallet from its official source (for Freighter, the
+   [Freighter site](https://freighter.app)).
 2. Enable the extension in your browser's extension settings.
 3. Reload the dashboard tab and connect again.
 4. If you are in a private/incognito window, allow the extension in that window or use a normal

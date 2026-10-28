@@ -1,0 +1,90 @@
+# cargo-deny configuration for the contracts workspace.
+# Run locally with: cargo deny --manifest-path contracts/Cargo.toml check
+# CI runs the same check via .github/workflows/ci.yml (job: "cargo-deny").
+
+[graph]
+# No target filter: check the full graph (wasm32v1-none contract builds plus
+# host testutils/dev-dependencies) so transitive advisories are not missed.
+all-features = false
+no-default-features = false
+
+[output]
+feature-depth = 1
+
+[advisories]
+yanked = "deny"
+ignore = [
+    # paste is unmaintained (RUSTSEC-2024-0436). It is a transitive dependency
+    # of ark-ff -> soroban-env-host (host/test-side crypto only) and is not
+    # compiled into the shipped wasm32v1-none contract artifacts. There is no
+    # patched release; upstream suggests `pastey`, which soroban-env-host has
+    # not adopted yet. Revisit when upgrading soroban-sdk.
+    { id = "RUSTSEC-2024-0436", reason = "transitive soroban test-only dep, no upstream fix; not in shipped WASM" },
+    # crypto-bigint v0.5.5 timing variability (RUSTSEC-2026-0387). Transitive
+    # dependency via soroban-sdk 27 -> soroban-env-host -> k256 -> ecdsa -> elliptic-curve.
+    # This is only used in the test/host environment, not in the shipped contract WASM.
+    # Revisit when upgrading to soroban-sdk 28+ which may have a newer crypto-bigint.
+    { id = "RUSTSEC-2026-0387", reason = "transitive soroban host/test-only dep; not in shipped WASM" },
+]
+
+[licenses]
+# Permissive licenses compatible with this repo's MIT license. The tree
+# (soroban-sdk 27 and its transitive deps) currently uses exactly these.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception", # wasmparser
+    "BSD-1-Clause",                   # fiat-crypto
+    "BSD-2-Clause",                   # zerocopy
+    "BSD-3-Clause",                   # curve25519-dalek, ed25519-dalek, subtle
+    "Unicode-3.0",                    # unicode-ident: (MIT OR Apache-2.0) AND Unicode-3.0
+    "Unlicense",                      # byteorder, jiff, memchr
+    "Zlib",                           # tinyvec, cfg_eval, visibility
+]
+confidence-threshold = 0.8
+exceptions = []
+
+[licenses.private]
+ignore = false
+registries = []
+
+[bans]
+# Fail on new duplicate versions. The existing duplicates below are all
+# transitive through soroban-sdk 27 / soroban-env-host 27 and cannot be
+# deduplicated until upstream unifies its dependency tree, so they are
+# explicitly skipped rather than ignored globally.
+multiple-versions = "deny"
+wildcards = "deny"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow = []
+deny = []
+skip = [
+    # Transitive duplicates via soroban-sdk 27 / soroban-env-host 27:
+    { crate = "block-buffer" },
+    { crate = "cpufeatures" },
+    { crate = "crate-git-revision" },
+    { crate = "crypto-common" },
+    { crate = "curve25519-dalek" },
+    { crate = "darling" },
+    { crate = "darling_core" },
+    { crate = "darling_macro" },
+    { crate = "digest" },
+    { crate = "fiat-crypto" },
+    { crate = "hashbrown" },
+    { crate = "stellar-strkey" },
+    { crate = "syn" },
+]
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
+
+[sources.allow-org]
+github = []
+gitlab = []
+bitbucket = []

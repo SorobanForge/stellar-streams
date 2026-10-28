@@ -3,8 +3,8 @@
 import React from 'react';
 import Link from 'next/link';
 import { Droplets, Split, Clock, ShieldCheck, ArrowRight, Github } from 'lucide-react';
-import Header from '../components/Header';
-import Footer from '../components/Footer';
+import { Footer, Header } from '@stellar-starter-kit/ui';
+import { REPO_URL } from '../lib/constants';
 
 const FEATURES = [
   {
@@ -59,7 +59,7 @@ export default function Home() {
               Launch the app <ArrowRight className="h-4 w-4" />
             </Link>
             <a
-              href="https://github.com/SorobanForge/stellar-streams"
+              href={REPO_URL}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/50 px-6 py-3 text-sm font-semibold text-slate-200 transition hover:bg-slate-900"

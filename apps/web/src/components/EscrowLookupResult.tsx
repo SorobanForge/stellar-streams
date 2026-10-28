@@ -2,20 +2,10 @@
 
 import React from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-
-export interface EscrowDetails {
-  id: string;
-  payer: string;
-  payee: string;
-  arbiter: string;
-  token: string;
-  amount: string;
-  deadline: string;
-  status: string;
-}
+import type { Escrow } from '@stellar-starter-kit/types';
 
 interface EscrowLookupResultProps {
-  result: EscrowDetails | null;
+  result: Escrow | null;
   onOpenManage: (id: string) => void;
 }
 
@@ -38,16 +28,16 @@ export default function EscrowLookupResult({ result, onOpenManage }: EscrowLooku
             <span className="text-sm font-bold text-white">Escrow Agreement #{result.id}</span>
             <span
               className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
-                result.status === 'Funded'
+                result.status === 'funded'
                   ? 'border border-yellow-500/20 bg-yellow-500/10 text-yellow-400'
-                  : result.status === 'Released'
+                  : result.status === 'released'
                     ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
-                    : result.status === 'Created'
+                    : result.status === 'created'
                       ? 'border border-purple-500/20 bg-purple-500/10 text-purple-400'
                       : 'border border-rose-500/20 bg-rose-500/10 text-rose-400'
               }`}
             >
-              {result.status}
+              {result.status[0].toUpperCase() + result.status.slice(1)}
             </span>
           </div>
 
@@ -70,11 +60,15 @@ export default function EscrowLookupResult({ result, onOpenManage }: EscrowLooku
             </div>
             <div>
               <div className="text-[10px] text-slate-500 uppercase">Amount</div>
-              <div className="mt-1 text-sm font-bold text-white">{result.amount} XLM</div>
+              <div className="mt-1 text-sm font-bold text-white">
+                {(Number(result.amount) / 10_000_000).toFixed(7)} XLM
+              </div>
             </div>
             <div>
               <div className="text-[10px] text-slate-500 uppercase">Deadline (Refund unlock)</div>
-              <div className="text-slate-350 mt-1">{result.deadline}</div>
+              <div className="text-slate-350 mt-1">
+                {new Date(Number(result.deadline) * 1000).toLocaleString()}
+              </div>
             </div>
           </div>
 

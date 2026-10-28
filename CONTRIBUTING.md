@@ -10,13 +10,24 @@ This project is a monorepo containing multiple packages and applications, manage
 
 By participating in this project, you agree to abide by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Issue Triage & Labels
+
+Before opening a new issue or working on existing ones, please review our [Triage & Labeling Guide](docs/triage.md). It explains:
+
+- **Label taxonomy:** How we classify issues by type, area, priority, difficulty, and status
+- **Issue lifecycle:** The workflow from triage → assignment → in-progress → review → closed
+- **Response expectations:** Expected timelines for triage and review feedback
+- **Setting up labels:** How to synchronize labels using `scripts/create-labels.sh`
+
+This guide helps us organize work consistently and ensures smooth collaboration.
+
 ## Getting Started
 
 ### Prerequisites
 
 To contribute to this project, you will need:
 
-- **Node.js** >= 18.0.0
+- **Node.js** >= 22.0.0 (pinned in `.nvmrc`; `engines` enforces it — see [docs/development-guide.md](docs/development-guide.md))
 - **pnpm** >= 9.0.0
 - **Git**
 
@@ -25,7 +36,7 @@ To contribute to this project, you will need:
 > `engine-strict=true` and a `preinstall` guard rejects both with a clear message
 > instead of writing a conflicting `package-lock.json` or `yarn.lock`.
 >
-> Enable pnpm with [Corepack](https://pnpm.io/installation#using-corepack) if you
+> Enable pnpm with [Corepack](https://pnpm.io/installation) if you
 > do not have it: `corepack enable`.
 
 ### Installation
@@ -136,3 +147,16 @@ git commit -m "feat(sdk): add Stellar wallet connection hook"
 3. Fill out the PR template completely.
 4. Ensure all CI checks (linting, testing, and building) pass successfully.
 5. Address any review feedback. Once approved, your PR will be merged!
+
+---
+
+## Releasing & Changesets
+
+If your PR **changes a published package** (anything in `packages/*`), you must create a changeset. See [docs/releasing.md](docs/releasing.md) for:
+
+- When to create a changeset
+- How to use `pnpm changeset`
+- What happens during the release process
+- How maintainers cut releases
+
+This ensures all changes are tracked and automatically included in the CHANGELOG and version bumps.

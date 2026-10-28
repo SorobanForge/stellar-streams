@@ -4,10 +4,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { EscrowClient } from '@stellar-starter-kit/contracts';
-import deployments from '../../generated/deployments.json';
-import Header from '../../components/Header';
-import Footer from '../../components/Footer';
-import type { EscrowDetails } from '../../components/EscrowLookupResult';
+import { Footer, Header } from '@stellar-starter-kit/ui';
+import {
+  DEFAULT_NETWORK_PASSPHRASE,
+  DEFAULT_SOROBAN_RPC_URL,
+  DEFAULT_STELLAR_EXPERT_URL,
+  DEFAULT_STELLAR_NETWORK,
+  DEFAULT_TOKEN_CONTRACT_ID,
+} from '../../lib/constants';
+import { normalizeEscrow, type RawEscrow, type Escrow } from '@stellar-starter-kit/types';
 import {
   ArrowLeft,
   Loader2,
@@ -42,6 +47,29 @@ interface LogEntry {
   details: string;
 }
 
+// Network settings are build-time values, shared with the streams page. An
+// unset escrow id leaves the page in a read-only "not configured" state rather
+// than falling back to a contract id from another network.
+const RPC_URL = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? DEFAULT_SOROBAN_RPC_URL;
+const NETWORK_PASSPHRASE =
+  process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ?? DEFAULT_NETWORK_PASSPHRASE;
+const CONTRACT_ID = process.env.NEXT_PUBLIC_ESCROW_CONTRACT_ID ?? '';
+// Testnet native XLM SAC by default; any SEP-41 token contract id works.
+const DEFAULT_TOKEN = process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID || DEFAULT_TOKEN_CONTRACT_ID;
+const NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? DEFAULT_STELLAR_NETWORK;
+const EXPERT_URL = process.env.NEXT_PUBLIC_STELLAR_EXPERT_URL ?? DEFAULT_STELLAR_EXPERT_URL;
+const NETWORK_LABEL = NETWORK.charAt(0).toUpperCase() + NETWORK.slice(1);
+const CONTRACT_CONFIGURED = CONTRACT_ID.length > 0;
+
+// Parse and validate environment configuration
+const rpcUrl = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
+const passphrase =
+  process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE || 'Test SDF Network ; September 2015';
+const escrowContractId = process.env.NEXT_PUBLIC_ESCROW_CONTRACT_ID || '';
+const tokenContractId =
+  process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ||
+  'CDLZFC3SYJYDZT7K67VZ75HPJGWGN6XXU250DEX2ZJ26C6EU5R144Z7X';
+
 export default function EscrowDemo() {
   const {
     activeAddress,
@@ -61,12 +89,9 @@ export default function EscrowDemo() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
   // Create Escrow Form State
-  const [createId, setCreateId] = useState<string>('');
   const [createPayee, setCreatePayee] = useState<string>('');
   const [createArbiter, setCreateArbiter] = useState<string>('');
-  const [createToken, setCreateToken] = useState<string>(
-    'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
-  ); // Native XLM
+  const [createToken, setCreateToken] = useState<string>(DEFAULT_TOKEN); // Native XLM
   const [createAmount, setCreateAmount] = useState<string>('10'); // in XLM
   const [createDeadline, setCreateDeadline] = useState<string>('3600'); // seconds from now
 
@@ -76,12 +101,8 @@ export default function EscrowDemo() {
 
   // Lookup Escrow State
   const [lookupId, setLookupId] = useState<string>('');
-  const [lookupResult, setLookupResult] = useState<EscrowDetails | null>(null);
+  const [lookupResult, setLookupResult] = useState<Escrow | null>(null);
   const [lookupLoading, setLookupLoading] = useState<boolean>(false);
-
-  const contractId = deployments.escrow;
-  const rpcUrl = 'https://soroban-testnet.stellar.org';
-  const passphrase = 'Test SDF Network ; September 2015';
 
   const addLog = useCallback(
     (type: LogEntry['type'], status: LogEntry['status'], details: string, hash?: string) => {
@@ -98,19 +119,24 @@ export default function EscrowDemo() {
     [],
   );
 
-  // Helper to instantiate client
+  // Helper to instantiate client. The guard keeps every write path from
+  // constructing a client with an empty contract id when the page is deployed
+  // without NEXT_PUBLIC_ESCROW_CONTRACT_ID.
   const getClient = useCallback(() => {
+    if (!CONTRACT_ID) {
+      throw new Error('No escrow contract configured. Set NEXT_PUBLIC_ESCROW_CONTRACT_ID.');
+    }
     return new EscrowClient.Client({
-      contractId,
-      rpcUrl,
-      networkPassphrase: passphrase,
+      contractId: CONTRACT_ID,
+      rpcUrl: RPC_URL,
+      networkPassphrase: NETWORK_PASSPHRASE,
       publicKey: activeAddress || undefined,
       signTransaction: async (txXdr) => {
         const signedTxXdr = await signTransaction(txXdr);
         return { signedTxXdr };
       },
     });
-  }, [activeAddress, signTransaction, contractId]);
+  }, [activeAddress, signTransaction]);
 
   // Set default caller to active address when it changes
   useEffect(() => {
@@ -126,8 +152,11 @@ export default function EscrowDemo() {
       setError('Please connect your wallet first.');
       return;
     }
+    if (!CONTRACT_ID) {
+      setError('No escrow contract configured. Set NEXT_PUBLIC_ESCROW_CONTRACT_ID.');
+      return;
+    }
 
-    const escrowId = BigInt(createId || Date.now());
     // Convert XLM to Stroops (7 decimals)
     const amountInStroops = BigInt(parseFloat(createAmount) * 10000000);
     const deadlineTimestamp = BigInt(Math.floor(Date.now() / 1000) + parseInt(createDeadline));
@@ -135,12 +164,11 @@ export default function EscrowDemo() {
     setError(null);
     setSuccessMessage(null);
     setActionLoading(true);
-    addLog('create', 'pending', `Initiating creation of escrow ID ${escrowId.toString()}...`);
+    addLog('create', 'pending', 'Initiating escrow creation...');
 
     try {
       const client = getClient();
       const tx = await client.create_escrow({
-        id: escrowId,
         payer: activeAddress!,
         payee: createPayee,
         arbiter: createArbiter,
@@ -151,6 +179,8 @@ export default function EscrowDemo() {
 
       const result = await tx.signAndSend();
       const txHash = result.sendTransactionResponse?.hash;
+      // The contract assigns the id and returns it.
+      const escrowId = result.result.unwrap();
 
       setSuccessMessage(`Escrow ID ${escrowId.toString()} created successfully!`);
       addLog(
@@ -266,26 +296,18 @@ export default function EscrowDemo() {
 
       if (result.result) {
         const data = result.result;
-        // Convert status enum to string
-        const statusMap = ['Created', 'Funded', 'Released', 'Refunded', 'Cancelled'];
-        const statusStr = statusMap[data.status] || 'Unknown';
-
-        // Convert amount from Stroops
-        const amountXlm = (Number(data.amount) / 10000000).toFixed(7);
-
-        // Format deadline
-        const deadlineDate = new Date(Number(data.deadline) * 1000).toLocaleString();
-
-        setLookupResult({
-          id: data.id.toString(),
-          payer: data.payer,
-          payee: data.payee,
-          arbiter: data.arbiter,
-          token: data.token,
-          amount: amountXlm,
-          deadline: deadlineDate,
-          status: statusStr,
-        });
+        setLookupResult(
+          normalizeEscrow({
+            id: BigInt(data.id),
+            payer: data.payer,
+            payee: data.payee,
+            arbiter: data.arbiter,
+            token: data.token,
+            amount: BigInt(data.amount),
+            deadline: BigInt(data.deadline),
+            status: Number(data.status),
+          } satisfies RawEscrow),
+        );
 
         if (!silent) {
           addLog('fetch', 'success', `Fetched details for escrow ID ${escrowId.toString()}`);
@@ -329,6 +351,20 @@ export default function EscrowDemo() {
           </Link>
         </div>
 
+        {!CONTRACT_CONFIGURED && (
+          <div className="mb-8 flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-200">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
+            <div>
+              <p className="font-semibold">Escrow contract not configured</p>
+              <p className="mt-1 font-light text-amber-200/80">
+                Deploy the <code className="font-mono">escrow</code> contract and set{' '}
+                <code className="font-mono">NEXT_PUBLIC_ESCROW_CONTRACT_ID</code> to enable this
+                page.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Hero Section */}
         <div className="mb-12 text-left">
           <span className="inline-flex items-center gap-1.5 rounded-full border border-purple-500/20 bg-purple-500/5 px-3 py-1 text-xs font-semibold tracking-wide text-purple-300">
@@ -339,7 +375,7 @@ export default function EscrowDemo() {
           </h1>
           <p className="mt-3 text-lg font-light text-slate-400">
             Establish trustless token holdbacks, deposit funds, and manage releases/refunds via
-            arbiters on Stellar Testnet.
+            arbiters on Stellar.
           </p>
         </div>
 
@@ -387,7 +423,7 @@ export default function EscrowDemo() {
                         setError(null);
                         try {
                           await connect('freighter');
-                        } catch (err) {
+                        } catch (err: unknown) {
                           console.error(err);
                           setError(
                             err instanceof Error
@@ -461,25 +497,11 @@ export default function EscrowDemo() {
                 {activeTab === 'create' && (
                   <form onSubmit={handleCreateEscrow} className="space-y-6">
                     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                      <div>
-                        <label className="block text-xs font-semibold tracking-wider text-slate-400 uppercase">
-                          Escrow Contract ID (u64 / numeric)
-                        </label>
-                        <input
-                          type="number"
-                          placeholder="e.g. 176540"
-                          value={createId}
-                          onChange={(e) => setCreateId(e.target.value)}
-                          className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
-                          required
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setCreateId(Date.now().toString().slice(-8))}
-                          className="mt-1.5 text-[10px] text-cyan-400 hover:underline"
-                        >
-                          Generate random ID
-                        </button>
+                      <div className="flex items-end">
+                        <p className="text-xs leading-relaxed text-slate-400">
+                          The escrow id is assigned on-chain: the contract returns the new id once
+                          the transaction succeeds.
+                        </p>
                       </div>
 
                       <div>
@@ -562,7 +584,7 @@ export default function EscrowDemo() {
                     <div className="flex justify-end gap-4 border-t border-slate-900 pt-6">
                       <button
                         type="submit"
-                        disabled={!isConnected || actionLoading}
+                        disabled={!isConnected || actionLoading || !CONTRACT_CONFIGURED}
                         className="flex items-center gap-1.5 rounded-xl bg-gradient-to-tr from-purple-600 to-cyan-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg transition-all hover:brightness-110 disabled:pointer-events-none disabled:opacity-40"
                       >
                         {actionLoading ? (
@@ -612,7 +634,9 @@ export default function EscrowDemo() {
                       {/* Fund */}
                       <button
                         onClick={() => handleFundEscrow(manageId)}
-                        disabled={!isConnected || actionLoading || !manageId}
+                        disabled={
+                          !isConnected || actionLoading || !manageId || !CONTRACT_CONFIGURED
+                        }
                         className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/20 py-4 font-semibold text-slate-200 shadow-inner transition-all hover:bg-slate-900/50 disabled:pointer-events-none disabled:opacity-40"
                       >
                         <Coins className="h-5 w-5 text-yellow-400" />
@@ -622,7 +646,9 @@ export default function EscrowDemo() {
                       {/* Release */}
                       <button
                         onClick={() => handleLifecycleAction('release')}
-                        disabled={!isConnected || actionLoading || !manageId}
+                        disabled={
+                          !isConnected || actionLoading || !manageId || !CONTRACT_CONFIGURED
+                        }
                         className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/20 py-4 font-semibold text-slate-200 shadow-inner transition-all hover:bg-slate-900/50 disabled:pointer-events-none disabled:opacity-40"
                       >
                         <Play className="h-5 w-5 text-emerald-400" />
@@ -632,7 +658,9 @@ export default function EscrowDemo() {
                       {/* Refund */}
                       <button
                         onClick={() => handleLifecycleAction('refund')}
-                        disabled={!isConnected || actionLoading || !manageId}
+                        disabled={
+                          !isConnected || actionLoading || !manageId || !CONTRACT_CONFIGURED
+                        }
                         className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/20 py-4 font-semibold text-slate-200 shadow-inner transition-all hover:bg-slate-900/50 disabled:pointer-events-none disabled:opacity-40"
                       >
                         <Undo2 className="h-5 w-5 text-cyan-400" />
@@ -642,7 +670,9 @@ export default function EscrowDemo() {
                       {/* Cancel */}
                       <button
                         onClick={() => handleLifecycleAction('cancel')}
-                        disabled={!isConnected || actionLoading || !manageId}
+                        disabled={
+                          !isConnected || actionLoading || !manageId || !CONTRACT_CONFIGURED
+                        }
                         className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/20 py-4 font-semibold text-slate-200 shadow-inner transition-all hover:bg-slate-900/50 disabled:pointer-events-none disabled:opacity-40"
                       >
                         <Ban className="h-5 w-5 text-rose-400" />
@@ -665,7 +695,7 @@ export default function EscrowDemo() {
                       />
                       <button
                         onClick={() => handleLookupEscrow(lookupId)}
-                        disabled={lookupLoading || !lookupId}
+                        disabled={lookupLoading || !lookupId || !CONTRACT_CONFIGURED}
                         className="flex items-center gap-1.5 rounded-xl bg-purple-600 px-6 py-2.5 text-sm font-semibold text-white transition-all hover:bg-purple-500 disabled:pointer-events-none disabled:opacity-45"
                       >
                         {lookupLoading ? (
@@ -710,24 +740,28 @@ export default function EscrowDemo() {
                 <div>
                   <div className="text-[10px] text-slate-500 uppercase">Contract ID</div>
                   <div className="mt-1 break-all text-slate-300 transition-colors select-all hover:text-cyan-400">
-                    {contractId}
+                    {CONTRACT_ID || 'Not configured'}
                   </div>
                 </div>
                 <div>
                   <div className="text-[10px] text-slate-500 uppercase">Network</div>
-                  <div className="mt-1 text-slate-300">Stellar Testnet</div>
+                  <div className="mt-1 text-slate-300">Stellar {NETWORK_LABEL}</div>
                 </div>
                 <div>
                   <div className="text-[10px] text-slate-500 uppercase">Explorer</div>
                   <div className="mt-1">
-                    <a
-                      href={`https://stellar.expert/explorer/testnet/contract/${contractId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-cyan-400 hover:underline"
-                    >
-                      View on Stellar.expert <ExternalLink className="h-3 w-3" />
-                    </a>
+                    {CONTRACT_ID ? (
+                      <a
+                        href={`${EXPERT_URL}/contract/${CONTRACT_ID}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-cyan-400 hover:underline"
+                      >
+                        View on Stellar.expert <ExternalLink className="h-3 w-3" />
+                      </a>
+                    ) : (
+                      <span className="text-slate-500">Not configured</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -769,7 +803,7 @@ export default function EscrowDemo() {
                           </span>
                           {log.hash && (
                             <a
-                              href={`https://stellar.expert/explorer/testnet/tx/${log.hash}`}
+                              href={`${EXPERT_URL}/tx/${log.hash}`}
                               target="_blank"
                               rel="noreferrer"
                               className="flex items-center gap-0.5 text-[10px] text-slate-500 hover:text-white"

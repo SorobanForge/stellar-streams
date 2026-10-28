@@ -1,0 +1,25 @@
+# lychee configuration for the Markdown link checker run by
+# .github/workflows/docs.yml (issue #145). Run the same check locally with:
+#
+#   lychee --config .lychee.toml './**/*.md'
+
+# Follow `#fragment` anchors on relative files and external pages, so a renamed
+# heading fails the check just like a renamed file does.
+include_fragments = "full"
+
+# 206 = partial content; 429 = rate limited. GitHub rate-limits anonymous CI
+# runners, and a 429 is transient, not a dead link.
+accept = ["200", "204", "206", "429"]
+
+max_redirects = 5
+timeout = 30
+
+# Flaky-host allowlist: badge and image services that rate-limit or bot-block CI
+# runners. Excluded from the check rather than allowed to fail an unrelated PR.
+exclude = [
+  '^https://img\.shields\.io/',
+  '^https://contrib\.rocks/',
+]
+
+# Never check vendored trees (lychee skips hidden dirs like .git by default).
+exclude_path = ['(^|/)node_modules/']

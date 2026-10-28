@@ -12,7 +12,13 @@ pnpm-lock.yaml
 **/generated/**
 **/test_snapshots/**
 
+# Generated API reference (typedoc output)
+docs/api
+
 # Third-party patches
 contracts/patches/
+
+# Markdown — including docs/ — is intentionally NOT ignored: CI's
+# format:check ("Lint Codebase" job) covers every *.md. See issue #145.
 
 

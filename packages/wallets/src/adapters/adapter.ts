@@ -35,10 +35,30 @@ export interface WalletAdapter {
   isAvailable(): Promise<boolean>;
   /** Connect to the wallet and return its public key. */
   connect(): Promise<string>;
+  /**
+   * End the extension session, when the wallet's API exposes one.
+   *
+   * Adapters that cannot revoke a session still have their provider state and
+   * persisted keys cleared by `WalletProvider.disconnect`.
+   */
+  disconnect?(): Promise<void>;
   /** Return the connected public key. */
   getPublicKey(): Promise<string>;
   /** Sign a transaction XDR and return the signed envelope XDR. */
   signTransaction(xdr: string, opts?: SignTransactionOptions): Promise<string>;
-  /** Optional: sign an auth entry. */
-  signAuthEntry?(xdr: string, opts?: SignTransactionOptions): Promise<string>;
+  /**
+   * Sign a Soroban authorization entry, returning the signed entry XDR.
+   *
+   * Only implement this when the wallet's SDK exposes auth-entry signing;
+   * `WalletProvider.signAuthEntry` throws `NotSupportedError` otherwise.
+   */
+  signAuthEntry?(entryXdr: string, opts?: SignTransactionOptions): Promise<string>;
+  /**
+   * Release any wallet session or device connection.
+   *
+   * Optional because extension wallets hold no session of their own; hardware
+   * wallets such as Ledger implement it to close the transport. `WalletProvider`
+   * calls it on `disconnect()` when present.
+   */
+  disconnect?(): Promise<void>;
 }

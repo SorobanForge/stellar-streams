@@ -1,0 +1,28 @@
+{
+  "name": "basic-payment-example",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Basic example: create a stream on Stellar Testnet",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@stellar-starter-kit/sdk": "workspace:*",
+    "@stellar-starter-kit/types": "workspace:*",
+    "@stellar-starter-kit/utils": "workspace:*",
+    "@stellar/stellar-sdk": "^14.5.0"
+  },
+  "devDependencies": {
+    "@stellar-starter-kit/tsconfig": "workspace:*",
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^6.0.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
