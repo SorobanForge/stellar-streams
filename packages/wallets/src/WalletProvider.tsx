@@ -20,6 +20,8 @@ export interface WalletContextType {
   isConnecting: boolean;
   isRestoring: boolean;
   network: string;
+  /** Network passphrase reported by the connected wallet, or `null` if unreadable. */
+  walletNetworkPassphrase: string | null;
   error: string | null;
   connect: (provider: WalletType) => Promise<void>;
   disconnect: () => void;
@@ -57,7 +59,8 @@ const ADAPTERS: Record<WalletType, WalletAdapter> = {
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [activeAddress, setActiveAddress] = useState<string | null>(null);
   const [activeProvider, setActiveProvider] = useState<WalletType | null>(null);
-  const [network, setNetwork] = useState<string>('TESTNET');
+  const [network, setNetworkState] = useState<string>('TESTNET');
+  const [walletNetworkPassphrase, setWalletNetworkPassphrase] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   /** True while a persisted session is being verified against the extension. */
@@ -104,6 +107,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     const provider = activeProvider;
     setActiveAddress(null);
     setActiveProvider(null);
+    setWalletNetworkPassphrase(null);
     setError(null);
     localStorage.removeItem(LOCAL_STORAGE_KEY_PROVIDER);
     localStorage.removeItem(LOCAL_STORAGE_KEY_ADDRESS);
@@ -206,7 +210,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         throw error;
       }
     },
-    [activeProvider, activeAddress, network],
+    [activeProvider, activeAddress, network, walletNetworkPassphrase],
   );
 
   const signTransaction = useCallback(
@@ -230,6 +234,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         isConnecting,
         isRestoring,
         network,
+        walletNetworkPassphrase,
         error,
         connect,
         disconnect,

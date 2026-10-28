@@ -61,6 +61,20 @@ function TestComponent() {
   const [authResult, setAuthResult] = useState('none');
   const [authError, setAuthError] = useState('none');
 
+  const [signError, setSignError] = React.useState('none');
+
+  // `connect` and `signTransaction` re-throw after recording their error; the
+  // handlers swallow the rejection so tests assert on the rendered state.
+  const attempt = (provider: WalletType) => {
+    void connect(provider).catch(() => undefined);
+  };
+  const sign = () => {
+    setSignError('none');
+    void signTransaction('mock-xdr').catch((err) => {
+      setSignError(err instanceof Error ? err.message : String(err));
+    });
+  };
+
   return (
     <div>
       <div data-testid="address">{activeAddress || 'null'}</div>
@@ -408,6 +422,7 @@ describe('WalletProvider', () => {
     expect(screen.getByTestId('address').textContent).toBe('null');
     expect(screen.getByTestId('provider').textContent).toBe('null');
     expect(screen.getByTestId('connected').textContent).toBe('false');
+    expect(screen.getByTestId('wallet-network').textContent).toBe('unknown');
     expect(localStorage.getItem('stellar_starter_kit_wallet_provider')).toBeNull();
     expect(localStorage.getItem('stellar_starter_kit_wallet_address')).toBeNull();
   });
@@ -494,7 +509,173 @@ describe('WalletProvider', () => {
     });
 
     expect(freighter.signTransaction).toHaveBeenCalledWith('mock-xdr', {
-      networkPassphrase: 'Test SDF Network ; September 2015',
+      networkPassphrase: TESTNET_PASSPHRASE,
+      address: 'GB_FREIGHTER',
+    });
+  });
+
+  it('should sign when the wallet network matches the configured network', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER' });
+    vi.mocked(freighter.getNetworkDetails).mockResolvedValue({
+      network: 'TESTNET',
+      networkUrl: 'https://horizon-testnet.stellar.org',
+      networkPassphrase: TESTNET_PASSPHRASE,
+      sorobanRpcUrl: 'https://soroban-testnet.stellar.org',
+    });
+    vi.mocked(freighter.signTransaction).mockResolvedValue({
+      signedTxXdr: 'signed-freighter-xdr',
+      signerAddress: 'GB_FREIGHTER',
+    });
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Freighter').click();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('wallet-network').textContent).toBe(TESTNET_PASSPHRASE),
+    );
+
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+
+    expect(screen.getByTestId('sign-error').textContent).toBe('none');
+    expect(freighter.signTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('should read the wallet network from the xBull SDK when available', async () => {
+    installXBull({
+      getNetwork: vi.fn().mockResolvedValue({
+        network: 'PUBLIC',
+        networkPassphrase: MAINNET_PASSPHRASE,
+      }),
+    });
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect xBull').click();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('wallet-network').textContent).toBe(MAINNET_PASSPHRASE),
+    );
+  });
+
+  it('should block signing and name both networks on a mismatch', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER' });
+    vi.mocked(freighter.getNetworkDetails).mockResolvedValue({
+      network: 'PUBLIC',
+      networkUrl: 'https://horizon.stellar.org',
+      networkPassphrase: MAINNET_PASSPHRASE,
+    });
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Freighter').click();
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('wallet-network').textContent).toBe(MAINNET_PASSPHRASE),
+    );
+
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+
+    const message = screen.getByTestId('sign-error').textContent ?? '';
+    expect(message).toContain('Wallet network mismatch');
+    expect(message).toContain(TESTNET_PASSPHRASE);
+    expect(message).toContain(MAINNET_PASSPHRASE);
+    expect(message).toContain("setNetwork('MAINNET')");
+    expect(freighter.signTransaction).not.toHaveBeenCalled();
+  });
+
+  it('should fall back to getNetwork when Freighter has no getNetworkDetails', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER' });
+    vi.mocked(freighter.getNetworkDetails).mockRejectedValue(new Error('not supported'));
+    vi.mocked(freighter.getNetwork).mockResolvedValue({
+      network: 'PUBLIC',
+      networkPassphrase: MAINNET_PASSPHRASE,
+    });
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Freighter').click();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('wallet-network').textContent).toBe(MAINNET_PASSPHRASE),
+    );
+  });
+
+  it('should re-read the wallet network after setNetwork', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER' });
+    vi.mocked(freighter.getNetworkDetails).mockResolvedValue({
+      network: 'PUBLIC',
+      networkUrl: 'https://horizon.stellar.org',
+      networkPassphrase: MAINNET_PASSPHRASE,
+    });
+    vi.mocked(freighter.signTransaction).mockResolvedValue({
+      signedTxXdr: 'signed-freighter-xdr',
+      signerAddress: 'GB_FREIGHTER',
+    });
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Freighter').click();
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('wallet-network').textContent).toBe(MAINNET_PASSPHRASE),
+    );
+
+    // App on Testnet, wallet on Mainnet: signing is blocked.
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+    expect(screen.getByTestId('sign-error').textContent).toContain('Wallet network mismatch');
+
+    await act(async () => {
+      screen.getByText('Set Mainnet').click();
+    });
+
+    expect(screen.getByTestId('network').textContent).toBe('MAINNET');
+
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+
+    expect(screen.getByTestId('sign-error').textContent).toBe('none');
+    expect(freighter.signTransaction).toHaveBeenCalledWith('mock-xdr', {
+      networkPassphrase: MAINNET_PASSPHRASE,
       address: 'GB_FREIGHTER',
     });
   });

@@ -12,8 +12,9 @@ import {
   Ban,
   Search,
   Wallet,
+  ChevronDown,
 } from 'lucide-react';
-import { useWallet } from '@stellar-starter-kit/wallets';
+import { useWallet, WALLET_PROVIDER_OPTIONS, type WalletType } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
 import { Button, Footer, Header, Input } from '@stellar-starter-kit/ui';
 import { useCancelStream, useCreateStream, useWithdrawStream } from '@stellar-starter-kit/hooks';
@@ -309,20 +310,55 @@ export default function StreamsDashboard() {
               Disconnect
             </button>
           ) : (
-            <button
-              onClick={() =>
-                connect('freighter').catch(() => notify('error', 'Connection failed.'))
-              }
-              disabled={isConnecting}
-              className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-600 to-cyan-500 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:brightness-110"
-            >
-              {isConnecting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Wallet className="h-3.5 w-3.5" />
+            <div className="relative">
+              <button
+                onClick={() => setPickerOpen((open) => !open)}
+                disabled={isConnecting}
+                aria-haspopup="menu"
+                aria-expanded={pickerOpen}
+                className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-600 to-cyan-500 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:brightness-110 disabled:pointer-events-none disabled:opacity-50"
+              >
+                {isConnecting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Wallet className="h-3.5 w-3.5" />
+                )}
+                Connect wallet
+                <ChevronDown
+                  className={`h-3.5 w-3.5 transition-transform ${pickerOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+
+              {pickerOpen && (
+                <>
+                  {/* Invisible backdrop: a click anywhere else closes the picker. */}
+                  <button
+                    type="button"
+                    aria-hidden
+                    tabIndex={-1}
+                    onClick={() => setPickerOpen(false)}
+                    className="fixed inset-0 z-10 cursor-default"
+                  />
+                  <div
+                    role="menu"
+                    aria-label="Choose a wallet"
+                    className="absolute right-0 z-20 mt-2 w-48 overflow-hidden rounded-xl border border-slate-800 bg-[#0b0b16] py-1 shadow-2xl shadow-black/50"
+                  >
+                    {WALLET_PROVIDER_OPTIONS.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => handleConnect(option.id)}
+                        className="flex w-full items-center px-4 py-2.5 text-left text-xs font-semibold text-slate-300 transition hover:bg-slate-900 hover:text-white"
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
               )}
-              Connect Freighter
-            </button>
+            </div>
           )}
         </div>
 
