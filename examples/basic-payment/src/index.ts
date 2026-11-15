@@ -1,6 +1,6 @@
 import { StreamsClient } from '@stellar-starter-kit/sdk';
 import { formatStroopsToXlm } from '@stellar-starter-kit/utils';
-import { Keypair } from '@stellar/stellar-sdk';
+import { Keypair, TransactionBuilder } from '@stellar/stellar-sdk';
 
 /**
  * Basic Payment Example: Create a stream on Stellar Testnet
@@ -45,8 +45,8 @@ async function main() {
   }
 
   // XLM token contract on Testnet (SAC - Stellar Asset Contract)
-  const xlmTokenContract = process.env.TOKEN_CONTRACT_ID || 
-    'CDLZFC3SYJYDZT7K67VZ75HPJGWGN6XXU250DEX2ZJ26C6EU5R144Z7X';
+  const xlmTokenContract =
+    process.env.TOKEN_CONTRACT_ID || 'CDLZFC3SYJYDZT7K67VZ75HPJGWGN6XXU250DEX2ZJ26C6EU5R144Z7X';
 
   console.log('🚀 Stellar Streams Basic Payment Example\n');
   console.log(`Sender:    ${senderAddress}`);
@@ -62,7 +62,7 @@ async function main() {
     signTransaction: async (xdr, opts) => {
       // In this example, we sign locally with the keypair.
       // In a browser, you would use wallet.signTransaction(xdr).
-      const tx = require('@stellar/stellar-sdk').TransactionBuilder.fromXDR(xdr, opts.networkPassphrase);
+      const tx = TransactionBuilder.fromXDR(xdr, opts.networkPassphrase);
       tx.sign(senderKeypair);
       return tx.toXDR();
     },
@@ -110,9 +110,7 @@ async function main() {
       console.log(`   Cliff:         None (vests immediately)`);
     }
 
-    console.log(
-      '\n📌 Explorer link: https://stellar.expert/explorer/testnet/tx/' + result.hash,
-    );
+    console.log('\n📌 Explorer link: https://stellar.expert/explorer/testnet/tx/' + result.hash);
   } catch (error) {
     console.error('❌ Error creating stream:');
     if (error instanceof Error) {

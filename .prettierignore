@@ -12,6 +12,9 @@ pnpm-lock.yaml
 **/generated/**
 **/test_snapshots/**
 
+# Rewritten by `next build` / `next dev` on every run
+apps/web/next-env.d.ts
+
 # Generated API reference (typedoc output)
 docs/api
 

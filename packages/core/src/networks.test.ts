@@ -13,9 +13,7 @@ describe('NETWORKS registry', () => {
     expect(NETWORKS.mainnet).toBeDefined();
     expect(NETWORKS.mainnet.rpcUrl).toBe('https://soroban-rpc.stellar.org');
     expect(NETWORKS.mainnet.horizonUrl).toBe('https://horizon.stellar.org');
-    expect(NETWORKS.mainnet.passphrase).toBe(
-      'Public Global Stellar Network ; September 2015',
-    );
+    expect(NETWORKS.mainnet.passphrase).toBe('Public Global Stellar Network ; September 2015');
   });
 
   it('should define local configuration', () => {

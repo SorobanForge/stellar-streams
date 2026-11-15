@@ -110,7 +110,7 @@ git push origin feat/add-new-hook
 
 ```markdown
 ---
-"@stellar-starter-kit/hooks": minor
+'@stellar-starter-kit/hooks': minor
 ---
 
 usePaymentStream hook for React applications
