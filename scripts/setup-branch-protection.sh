@@ -2,8 +2,9 @@
 # Configure branch protection for `main` to match the repo's actual CI job names.
 #
 # Required status check contexts are the *job names* in .github/workflows/ci.yml,
-# .github/workflows/pr-check.yml, .github/workflows/docs.yml, and
-# .github/workflows/malware-scan.yml — keep them in sync if those change.
+# .github/workflows/pr-check.yml, .github/workflows/docs.yml,
+# .github/workflows/malware-scan.yml and .github/workflows/secret-scan.yml —
+# keep them in sync if those change.
 #
 # Usage:
 #   ./scripts/setup-branch-protection.sh
@@ -43,7 +44,8 @@ gh api \
       "Verify Production Build",
       "Check Documentation Links",
       "Scan PR for Malware",
-      "Check Supply-Chain Changes"
+      "Check Supply-Chain Changes",
+      "Scan PR for Secrets"
     ]
   },
   "enforce_admins": false,
