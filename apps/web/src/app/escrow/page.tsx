@@ -61,15 +61,6 @@ const EXPERT_URL = process.env.NEXT_PUBLIC_STELLAR_EXPERT_URL ?? DEFAULT_STELLAR
 const NETWORK_LABEL = NETWORK.charAt(0).toUpperCase() + NETWORK.slice(1);
 const CONTRACT_CONFIGURED = CONTRACT_ID.length > 0;
 
-// Parse and validate environment configuration
-const rpcUrl = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
-const passphrase =
-  process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE || 'Test SDF Network ; September 2015';
-const escrowContractId = process.env.NEXT_PUBLIC_ESCROW_CONTRACT_ID || '';
-const tokenContractId =
-  process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID ||
-  'CDLZFC3SYJYDZT7K67VZ75HPJGWGN6XXU250DEX2ZJ26C6EU5R144Z7X';
-
 export default function EscrowDemo() {
   const {
     activeAddress,

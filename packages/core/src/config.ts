@@ -1,5 +1,5 @@
 import type { StellarNetwork, StellarConfig } from '@stellar-starter-kit/types';
-import { NETWORKS, getNetworkConfig } from './networks';
+import { getNetworkConfig } from './networks';
 
 /**
  * Configuration resolution error thrown when environment variables are invalid or mismatched.
@@ -28,7 +28,9 @@ export class ConfigResolutionError extends Error {
  * @returns Resolved StellarConfig with validated network settings
  * @throws ConfigResolutionError if validation fails
  */
-export function resolveConfig(env: Record<string, string | undefined> = process.env): StellarConfig {
+export function resolveConfig(
+  env: Record<string, string | undefined> = process.env,
+): StellarConfig {
   // Read the network from environment or default to testnet
   const networkInput = env.NEXT_PUBLIC_STELLAR_NETWORK || 'testnet';
 
