@@ -186,6 +186,12 @@ The web app also supports a default token override:
 NEXT_PUBLIC_TOKEN_CONTRACT_ID=
 ```
 
+## Testing with Injected Transports
+
+The SDK allows testing applications without making live RPC network calls by injecting a mock or fake transport via `transportFactory`.
+
+For a complete guide with copy-pasteable fake transport examples and RPC failover testing patterns, see [Testing with Injected Transports](testing-with-transports.md).
+
 ## Source notes
 
 - This guide is based on the actual SDK in `packages/sdk/src/index.ts`.

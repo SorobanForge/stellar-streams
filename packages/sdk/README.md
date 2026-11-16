@@ -203,3 +203,4 @@ try {
 - [Contract Reference](../../docs/contracts.md)
 - [Deployments](../../docs/deployments.md)
 - [Development Guide](../../docs/development-guide.md)
+- [Testing with Injected Transports](../../docs/testing-with-transports.md)
