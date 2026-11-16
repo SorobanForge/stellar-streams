@@ -17,7 +17,7 @@ Please delete options that are not relevant.
 
 ## How Has This Been Tested?
 
-Please describe the tests that you ran to verify your changes. Provide instructions so we can reproduce. Please also list any relevant details for your test configuration.
+Please describe the tests that you ran to verify your changes. Provide instructions so we can reproduce. Please also list any relevant details for your test configuration. See [docs/ci-checks.md](../docs/ci-checks.md) for local reproduction commands for all CI checks.
 
 - [ ] Test A: Unit tests run via `pnpm test`
 - [ ] Test B: Lint check run via `pnpm lint`

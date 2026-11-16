@@ -145,7 +145,7 @@ git commit -m "feat(sdk): add Stellar wallet connection hook"
    ```
 2. Open a Pull Request on GitHub against the `main` branch.
 3. Fill out the PR template completely.
-4. Ensure all CI checks (linting, testing, and building) pass successfully.
+4. Ensure all CI checks (linting, testing, and building) pass successfully. See the [CI Check Reference](docs/ci-checks.md) for reproduction commands, details on security scanners, and failure troubleshooting.
 5. Address any review feedback. Once approved, your PR will be merged!
 
 ---
