@@ -3,6 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 WORKSPACE_ROOT="$SCRIPT_DIR/.."
+if [ -d "$WORKSPACE_ROOT/bin" ]; then
+    PATH="$WORKSPACE_ROOT/bin:$PATH"
+fi
 CONTRACTS_DIR="$WORKSPACE_ROOT/contracts"
 TARGET_WASM="wasm32v1-none"
 RELEASE_DIR="$CONTRACTS_DIR/target/$TARGET_WASM/release"

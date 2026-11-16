@@ -152,3 +152,74 @@ jobs:
 
       - name: Check Package Entry Points
         run: pnpm run test:exports
+
+  bindings:
+    name: Verify Contract Bindings
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check for Contract Changes
+        id: check-changes
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch origin ${{ github.base_ref }} --depth=1
+            changed=$(git diff --name-only origin/${{ github.base_ref }}...HEAD -- contracts/ packages/contracts/src/generated/ || true)
+            if [ -z "$changed" ]; then
+              echo "No contract source files changed in this PR. Skipping regeneration."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust toolchain
+        if: steps.check-changes.outputs.skip != 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache Cargo
+        if: steps.check-changes.outputs.skip != 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts
+
+      - name: Install pnpm
+        if: steps.check-changes.outputs.skip != 'true'
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9.4.0
+
+      - name: Setup Node.js
+        if: steps.check-changes.outputs.skip != 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: pnpm
+
+      - name: Install Dependencies
+        if: steps.check-changes.outputs.skip != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Stellar CLI
+        if: steps.check-changes.outputs.skip != 'true'
+        run: node scripts/run.js download-stellar-cli
+
+      - name: Regenerate Contract Bindings
+        if: steps.check-changes.outputs.skip != 'true'
+        run: pnpm run generate:bindings
+
+      - name: Verify Working Tree Is Clean
+        if: steps.check-changes.outputs.skip != 'true'
+        run: |
+          if [ -n "$(git status --porcelain packages/contracts/src/generated)" ]; then
+            echo "::error::Generated contract bindings in packages/contracts/src/generated are stale or disagree with contracts/!"
+            echo "::error::Please run 'pnpm generate:bindings' locally and commit the resulting changes under packages/contracts/src/generated/."
+            git diff packages/contracts/src/generated
+            exit 1
+          fi
+          echo "Generated contract bindings are up to date."
