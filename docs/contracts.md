@@ -211,6 +211,49 @@ Rounding: each non-final recipient receives `amount * shares[i] / total_shares`
 `amount - distributed`, so the portions always sum to exactly `amount` and no
 stroop is stranded. Only the last recipient absorbs the remainder, so a caller
 can use `recipient_share` to query an individual portion with the same rounding.
+See [Worked Example: Splits Rounding](#worked-example-splits-rounding) below for a step-by-step trace.
+
+### Worked Example: Splits Rounding
+
+When an amount cannot be divided evenly by the total shares, integer division produces rounding dust. The splits contract assigns all residual dust to the final recipient so that no tokens remain locked in the contract balance.
+
+Consider a split with three recipients and equal weights:
+
+- **Recipients:** `[Alice (index 0), Bob (index 1), Charlie (index 2)]`
+- **Shares:** `[1, 1, 1]` (`total_shares = 3`)
+- **Distribution Amount:** `100` stroops
+
+#### Integer Math by Recipient
+
+1. **Alice (index 0):**
+   - Formula: `amount * shares[0] / total_shares`
+   - Calculation: `100 * 1 / 3 = 33` stroops (integer division truncates remainder)
+   - Running distributed total: `33`
+   - Alice receives: **33 stroops**
+
+2. **Bob (index 1):**
+   - Formula: `amount * shares[1] / total_shares`
+   - Calculation: `100 * 1 / 3 = 33` stroops
+   - Running distributed total: `33 + 33 = 66`
+   - Bob receives: **33 stroops**
+
+3. **Charlie (index 2, final recipient):**
+   - Formula: `amount - distributed`
+   - Calculation: `100 - 66 = 34` stroops (absorbs the 1 stroop remainder)
+   - Running distributed total: `66 + 34 = 100`
+   - Charlie receives: **34 stroops**
+
+**Total Distributed:** `33 + 33 + 34 = 100` stroops. The payout accounts for 100% of the input amount.
+
+#### Agreement Between `recipient_share` and `distribute`
+
+The read-only query `recipient_share` replicates this exact prefix-sum algorithm:
+
+- `recipient_share(split_id, index=0, amount=100)` -> `33`
+- `recipient_share(split_id, index=1, amount=100)` -> `33`
+- `recipient_share(split_id, index=2, amount=100)` -> `34`
+
+Both entry points evaluate identically: pre-flight checks and user balance quotes always match the final on-chain distribution.
 
 ### Events
 
