@@ -1,4 +1,13 @@
 version: 2
+
+# Grouping rules:
+# - `stellar`: `@stellar/*` packages (and the `stellar-sdk` alias in apps/web)
+#   share XDR and RPC definitions and must be bumped together in one PR.
+# - `dev-tooling`: `eslint`, `prettier`, `typescript`, `vitest`, and their
+#   companions are grouped separately to keep routine lint/test/type bumps out
+#   of runtime review.
+# - Both groups set `applies-to: version-updates` so Dependabot security updates
+#   stay ungrouped and can land individually without waiting on routine bumps.
 updates:
   - package-ecosystem: 'npm'
     directory: '/'
@@ -8,6 +17,24 @@ updates:
     labels:
       - 'dependencies'
       - 'javascript'
+    groups:
+      stellar:
+        applies-to: 'version-updates'
+        patterns:
+          - '@stellar/*'
+          - 'stellar-sdk'
+      dev-tooling:
+        applies-to: 'version-updates'
+        patterns:
+          - 'eslint'
+          - 'eslint-*'
+          - '@eslint/*'
+          - '@typescript-eslint/*'
+          - 'prettier'
+          - 'prettier-*'
+          - 'typescript'
+          - 'vitest'
+          - '@vitest/*'
 
   - package-ecosystem: 'github-actions'
     directory: '/'
