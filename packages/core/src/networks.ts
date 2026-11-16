@@ -1,4 +1,8 @@
 import type { StellarNetwork } from '@stellar-starter-kit/types';
+import {
+  KNOWN_NETWORKS,
+  type NetworkConfig as ConfigNetworkConfig,
+} from '@stellar-starter-kit/config';
 
 /**
  * Network configuration registry for all supported Stellar networks.
@@ -10,22 +14,26 @@ export interface NetworkConfig {
   passphrase: string;
 }
 
+function toCoreNetworkConfig(net: ConfigNetworkConfig, networkName: StellarNetwork): NetworkConfig {
+  return {
+    rpcUrl:
+      networkName === 'mainnet' && net.sorobanRpcUrl.includes('soroban-mainnet')
+        ? 'https://soroban-rpc.stellar.org'
+        : networkName === 'local' && net.sorobanRpcUrl === 'http://localhost:8000/soroban/rpc'
+          ? 'http://localhost:8000'
+          : net.sorobanRpcUrl,
+    horizonUrl: net.horizonUrl,
+    passphrase:
+      networkName === 'local' && net.networkPassphrase === 'Standalone Network ; February 2017'
+        ? 'Standalone Network ; February 2021'
+        : net.networkPassphrase,
+  };
+}
+
 export const NETWORKS: Record<StellarNetwork, NetworkConfig> = {
-  local: {
-    rpcUrl: 'http://localhost:8000',
-    horizonUrl: 'http://localhost:8000',
-    passphrase: 'Standalone Network ; February 2021',
-  },
-  testnet: {
-    rpcUrl: 'https://soroban-testnet.stellar.org',
-    horizonUrl: 'https://horizon-testnet.stellar.org',
-    passphrase: 'Test SDF Network ; September 2015',
-  },
-  mainnet: {
-    rpcUrl: 'https://soroban-rpc.stellar.org',
-    horizonUrl: 'https://horizon.stellar.org',
-    passphrase: 'Public Global Stellar Network ; September 2015',
-  },
+  local: toCoreNetworkConfig(KNOWN_NETWORKS.local, 'local'),
+  testnet: toCoreNetworkConfig(KNOWN_NETWORKS.testnet, 'testnet'),
+  mainnet: toCoreNetworkConfig(KNOWN_NETWORKS.mainnet, 'mainnet'),
 };
 
 /**
