@@ -23,6 +23,10 @@ Soroban RPC: `https://soroban-testnet.stellar.org`
 
 Not deployed. The contracts are unaudited; see [SECURITY.md](../SECURITY.md).
 
+## Privileged operations
+
+For step-by-step procedures to update fees (`set_fee`) and treasury addresses (`set_treasury`) safely, including pre-checks, verification, and rollback, see the [Admin Runbook](admin-runbook.md).
+
 ## How to regenerate this page
 
 1. Deploy: `pnpm build:contracts && pnpm optimize && pnpm deploy:testnet`.

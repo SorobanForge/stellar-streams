@@ -53,6 +53,7 @@ The [`docs/`](docs/README.md) directory carries an index of every page — start
 - [Contract reference](docs/contracts.md) — entry points, error codes, and event shapes.
 - [Local development guide](docs/development-guide.md) — toolchain versions, contracts workflow.
 - [Deployments](docs/deployments.md) — contract ids per network.
+- [Admin runbook](docs/admin-runbook.md) - safe procedure for fee and treasury updates.
 
 ---
 
