@@ -1,22 +1,36 @@
 # gitleaks configuration for .github/workflows/secret-scan.yml.
 #
-# The default ruleset is kept in full. The allowlist only covers findings that
-# cannot be credentials, so a new rule or a real leak still fails the check.
+# The default ruleset is kept in full and extended with an explicit rule for
+# Stellar/Soroban secret seeds (`S...`). The allowlist only covers public
+# on-chain identifiers, documented test fixtures (such as the native XLM SAC id),
+# and vendored third-party patches, so a leaked RPC key or deployer secret always
+# fails the check.
 #
 # Run the same scan locally with:
 #
 #   docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:v8.30.1 \
-#     detect --config /repo/.gitleaks.toml --source /repo --redact --verbose
+#     detect --config /repo/.gitleaks.toml --source /repo --redact=100 --no-banner
 [extend]
 useDefault = true
 
+[[rules]]
+id = 'stellar-secret-seed'
+description = 'Stellar / Soroban Ed25519 deployer or account secret seed (S...)'
+regex = '''\bS[A-Z2-7]{55}\b'''
+tags = ['stellar', 'soroban', 'secret']
+
 [allowlist]
-description = 'Public on-chain identifiers and vendored third-party code.'
+description = 'Public on-chain identifiers, known SAC test fixtures, and vendored third-party code.'
 
 regexes = [
+  # Known native XLM Stellar Asset Contract (SAC) ids used across `.env.example`,
+  # SDK docs, and unit-test fixtures (Testnet and Mainnet).
+  '''\bCDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC\b''',
+  '''\bCDLZFC3SYJYDZT7K67VZ75HPJGWGN6XXU250DEX2ZJ26C6EU5R144Z7X\b''',
+  '''\bCAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA\b''',
   # Stellar contract ids (C...) and account public keys (G...) are public by
   # design. Their bodies are high-entropy enough to trip generic-api-key, but
-  # they cannot authorize anything on their own.
+  # they cannot authorize anything on their own (secret seeds start with S...).
   #
   # Single-quoted TOML strings are literal: a double-quoted "\\b" would be a
   # backspace character rather than a regex word boundary.
