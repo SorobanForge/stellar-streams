@@ -171,6 +171,10 @@ gone away.
 - **No active session** – signing before connecting throws
   `No active wallet session to sign transaction.` (or `... sign auth entry.`).
 
+### Sequence diagram
+
+For the complete end-to-end signing and submission sequence diagram across the UI, SDK, wallet adapter, fee-bump sponsorship, and Soroban RPC, see [Transaction Signing and Submission Lifecycle in ARCHITECTURE.md](../../ARCHITECTURE.md#transaction-signing-and-submission-lifecycle).
+
 ## Troubleshooting
 
 ### "Extension not detected"
