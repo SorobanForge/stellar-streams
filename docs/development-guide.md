@@ -260,3 +260,32 @@ exported members in `packages/sdk/src/index.ts` and re-run the command above to
 refresh the reference. The build reports `Found 0 errors and 0 warnings` when
 every `{@link}` resolves; a broken intra-package link surfaces there as a
 warning, not a silent gap.
+
+---
+
+## 4. GitHub Actions Pinning Policy
+
+To guard against supply-chain compromise, all workflows pin third-party actions to full commit SHAs.
+
+### Policy
+
+1. **Third-party actions:** Every `uses:` statement outside the `actions/*` namespace must reference a full 40-character commit SHA, with the human-readable version tag documented in a trailing comment:
+   ```yaml
+   uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+   ```
+2. **Official actions:** Actions within the `actions/*` namespace (`actions/checkout`, `actions/setup-node`, `actions/cache`) remain on vetted major release tags (`@v7`, `@v6`). These are maintained directly by GitHub infrastructure and reviewed under their security lifecycle.
+3. **Auditability:** Pinned SHAs prevent tag-mutation attacks where a compromised tag points to malicious code without altering repository diffs.
+
+### How to Bump a Pinned Action
+
+To bump a pinned action to a new release:
+
+1. Lookup the target release tag and resolve its full commit SHA via the GitHub API or CLI:
+   ```bash
+   gh api repos/<owner>/<repo>/commits/<tag> --jq '.sha'
+   ```
+2. Update the workflow file with the returned commit SHA and update the trailing comment:
+   ```yaml
+   uses: <owner>/<repo>@<new-commit-sha> # <tag>
+   ```
+3. Run the workflow on a feature branch to verify that inputs and outputs remain compatible before merging to main.
