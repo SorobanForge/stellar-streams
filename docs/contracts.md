@@ -37,6 +37,8 @@ between `start_time` and `end_time`, with an optional cliff.
 | `create_streams`     | `sender: Address, token: Address, entries: Vec<(Address, i128, u64, u64, u64)>`                                                                        | `Result<Vec<u64>, StreamError>` — the new ids, in input order           | `sender`                                       |
 | `withdraw`           | `stream_id: u64`                                                                                                                                       | `Result<i128, StreamError>` — net amount paid after fee                 | `recipient`                                    |
 | `cancel`             | `stream_id: u64`                                                                                                                                       | `Result<(), StreamError>`                                               | `sender`                                       |
+| `pause`              | `stream_id: u64`                                                                                                                                       | `Result<(), StreamError>`                                               | `sender`                                       |
+| `resume`             | `stream_id: u64`                                                                                                                                       | `Result<(), StreamError>`                                               | `sender`                                       |
 | `transfer_recipient` | `stream_id: u64, caller: Address, new_recipient: Address`                                                                                              | `Result<(), StreamError>`                                               | `caller`, which must be the stored `recipient` |
 | `claimable`          | `stream_id: u64`                                                                                                                                       | `Result<i128, StreamError>` — vested minus already withdrawn, floor `0` | —                                              |
 | `vested`             | `stream_id: u64`                                                                                                                                       | `Result<i128, StreamError>` — total vested so far                       | —                                              |
@@ -54,6 +56,8 @@ struct Stream {
     start_time: u64, end_time: u64, cliff_time: u64,
     label: String, reference: String,
     cancelled: bool,
+    paused_at: Option<u64>,
+    total_paused: u64,
 }
 struct Config { admin: Address, treasury: Address, fee_bps: u32 }
 ```
@@ -80,6 +84,60 @@ by comparing an explicit `caller` (which must sign) against the stored address
 rather than by calling `recipient.require_auth()`, so that any other signer
 gets a typed `Unauthorized` instead of a host auth trap. It works on cancelled
 streams too, which lets a recipient move a still-unclaimed vested remainder.
+
+### Pause and resume semantics
+
+A stream sender may pause accrual when work is suspended and resume it later. The contract freezes vesting by tracking two fields on `Stream`:
+
+- **`paused_at: Option<u64>`**: The ledger timestamp when the stream was placed on pause (`None` when active/running).
+- **`total_paused: u64`**: The cumulative seconds the stream has spent in a paused state across all previous pause/resume cycles.
+
+#### Authorization and Error Codes
+
+- **Who may invoke:** Only the stream's `sender` (`sender.require_auth()`). Attempts by any other caller are rejected with Soroban host context authorization errors.
+- **`StreamNotFound` (code 1):** The provided `stream_id` does not exist on the ledger.
+- **`AlreadyCancelled` (code 7):** Cannot pause or resume a cancelled stream.
+- **Idempotency:** Calling `pause` on an already paused stream or `resume` on a running stream succeeds immediately with `Ok(())` without mutating timestamps.
+
+#### Cliff Behavior and Effective End Date
+
+- **Cliff Protection:** If `now < cliff_time`, `vested_amount` returns `0`, whether paused or active. Pausing does not alter the absolute `cliff_time` timestamp.
+- **Effective Completion:** Vesting is driven by `effective_elapsed = elapsed_secs - total_paused - active_pause`. Because `elapsed_secs` is capped at `end_time - start_time`, pausing reduces the total amount that will vest before `end_time` is reached. If a stream is paused for 10 days out of a 30-day term, only 20 days worth of tokens vest by `end_time`; unvested funds remain in the stream and can be reclaimed by the sender via `cancel`.
+
+#### Worked Example with Numbers
+
+Consider a linear stream without a cliff:
+
+- `total_amount = 3,000` stroops
+- `start_time = 1,000`
+- `end_time = 4,000` (duration = 3,000 seconds; vesting rate: 1 stroop / sec)
+- `cliff_time = 1,000`
+
+1. **At `t = 2,000` (Active):**
+   - Elapsed = `1,000` seconds. `total_paused = 0`.
+   - Vested = `3,000 * 1,000 / 3,000 = 1,000` stroops.
+   - Sender calls `pause(stream_id)`. `paused_at` is set to `2,000`.
+
+2. **At `t = 2,500` (While Paused):**
+   - Elapsed = `1,500` seconds. Active pause duration = `2,500 - 2,000 = 500` seconds.
+   - `effective_elapsed = 1,500 - 0 - 500 = 1,000` seconds.
+   - Vested remains frozen at `1,000` stroops. Recipient cannot claim additional tokens.
+
+3. **At `t = 3,000` (Resumed):**
+   - Sender calls `resume(stream_id)`.
+   - Paused duration = `3,000 - 2,000 = 1,000` seconds.
+   - `total_paused` becomes `1,000`. `paused_at` is reset to `None`.
+
+4. **At `t = 3,500` (Running Again):**
+   - Elapsed = `3,500 - 1,000 = 2,500` seconds.
+   - `effective_elapsed = 2,500 - 1,000 = 1,500` seconds.
+   - Vested = `3,000 * 1,500 / 3,000 = 1,500` stroops.
+
+5. **At `t = 4,000` (`end_time`):**
+   - Capped elapsed = `3,000` seconds.
+   - `effective_elapsed = 3,000 - 1,000 = 2,000` seconds.
+   - Final vested amount = `3,000 * 2,000 / 3,000 = 2,000` stroops.
+   - The remaining `1,000` stroops are unvested and can be returned to the sender by calling `cancel(stream_id)`.
 
 ### Batched creation
 
