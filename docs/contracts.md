@@ -26,6 +26,39 @@ once for a release that changes an interface, and every contract reports it.
 Linear payment streams: tokens are locked in the contract and vest continuously
 between `start_time` and `end_time`, with an optional cliff.
 
+### Stream Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active: create_stream / create_streams\n[Errors: InvalidAmount, InvalidTimeRange, InvalidStartTime, InvalidCliff]
+
+    state Active {
+        [*] --> CliffPeriod: now < cliff_time
+        CliffPeriod --> VestingPeriod: now >= cliff_time
+        VestingPeriod --> VestingPeriod: withdraw\n[Errors: NothingToWithdraw, TreasuryNotSet]
+    }
+
+    Active --> Paused: pause\n[Errors: AlreadyCancelled, StreamNotFound]
+    Paused --> Active: resume\n[Errors: AlreadyCancelled, StreamNotFound]
+
+    Active --> Cancelled: cancel\n[Errors: AlreadyCancelled, StreamNotFound]
+    Paused --> Cancelled: cancel\n[Errors: AlreadyCancelled, StreamNotFound]
+
+    Active --> Completed: now >= end_time and withdrawn == total_amount
+    Cancelled --> [*]
+    Completed --> [*]
+```
+
+| Current State           | Transition Action                  | Target State    | Authorized Caller | Blocking Error Codes                                                                    |
+| :---------------------- | :--------------------------------- | :-------------- | :---------------- | :-------------------------------------------------------------------------------------- |
+| Initial                 | `create_stream` / `create_streams` | **Active**      | `sender`          | `InvalidAmount` (3), `InvalidTimeRange` (5), `InvalidCliff` (6), `InvalidStartTime` (8) |
+| **Active**              | `withdraw`                         | **Active**      | `recipient`       | `NothingToWithdraw` (10), `TreasuryNotSet` (11), `StreamNotFound` (1)                   |
+| **Active**              | `pause`                            | **Paused**      | `sender`          | `AlreadyCancelled` (7), `StreamNotFound` (1)                                            |
+| **Paused**              | `resume`                           | **Active**      | `sender`          | `AlreadyCancelled` (7), `StreamNotFound` (1)                                            |
+| **Active** / **Paused** | `cancel`                           | **Cancelled**   | `sender`          | `AlreadyCancelled` (7), `StreamNotFound` (1)                                            |
+| **Active**              | Full withdrawal after `end_time`   | **Completed**   | Automatic         | —                                                                                       |
+| Any                     | `transfer_recipient`               | Preserves State | `recipient`       | `Unauthorized` (2), `StreamNotFound` (1)                                                |
+
 ### Entry points
 
 | Function             | Arguments                                                                                                                                              | Returns                                                                 | Auth                                           |
