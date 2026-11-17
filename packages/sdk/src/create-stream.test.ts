@@ -86,6 +86,15 @@ describe('createStream input validation', () => {
     expect(rpc.calls()).toBe(0);
   });
 
+  it('rejects a bigint outside the i128 range', async () => {
+    const client = makeClient();
+    const tooLarge = 1n << 127n;
+    await expect(client.createStream(validParams({ amount: tooLarge }))).rejects.toThrow(
+      'Invalid amount',
+    );
+    expect(rpc.calls()).toBe(0);
+  });
+
   it('rejects an endTime that is not after the startTime', async () => {
     const client = makeClient();
     await expect(
@@ -173,6 +182,13 @@ describe('createStream metadata', () => {
     const args = createStreamArgs(rpc);
     expect(scValToNative(args[7]!)).toBe('');
     expect(scValToNative(args[8]!)).toBe('');
+  });
+
+  it('accepts a bigint amount', async () => {
+    await makeClient().createStream(validParams({ amount: 1_000n }));
+
+    const args = createStreamArgs(rpc);
+    expect(scValToNative(args[3]!)).toBe(1_000n);
   });
 
   it('accepts metadata at exactly the byte limits', async () => {

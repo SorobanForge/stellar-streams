@@ -177,7 +177,7 @@ export interface CreateStreamParams {
   recipient: string;
   /** Token contract id (C...): the XLM SAC, an issued asset's SAC, or a custom token. */
   token: string;
-  amount: string;
+  amount: string | bigint;
   startTime: number;
   endTime: number;
   cliffTime: number;

@@ -1848,16 +1848,22 @@ function assertStreamAddress(address: string): void {
   }
 }
 
-/** Parses `params.amount` and enforces the contract's `amount > 0`. */
-function parseAmount(amount: string): bigint {
+const I128_MAX = (1n << 127n) - 1n;
+
+/** Parses `params.amount` and enforces the contract's `amount > 0` and i128 range. */
+function parseAmount(amount: string | bigint): bigint {
+  const str = amount.toString();
   let value: bigint;
   try {
-    value = BigInt(amount);
+    value = BigInt(str);
   } catch {
-    throw new Error(`Invalid amount: ${amount}. Expected a decimal integer string.`);
+    throw new Error(`Invalid amount: ${str}. Expected a decimal integer string.`);
   }
   if (value <= 0n) {
-    throw new Error(`Invalid amount: ${amount}. Must be greater than 0.`);
+    throw new Error(`Invalid amount: ${str}. Must be greater than 0.`);
+  }
+  if (value > I128_MAX) {
+    throw new Error(`Invalid amount: ${str}. Must fit in an i128.`);
   }
   return value;
 }
