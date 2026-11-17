@@ -217,6 +217,81 @@ export function formatDuration(seconds: number): string {
   return parts.join(' ');
 }
 
+const UNIT_MULTIPLIERS: Record<string, number> = {
+  y: YEAR,
+  mo: MONTH,
+  w: WEEK,
+  d: DAY,
+  h: HOUR,
+  m: MINUTE,
+  s: SECOND,
+};
+
+/**
+ * Parses a human-readable duration string into seconds (e.g. "30d", "12h", "1d 2h").
+ * Supports compound units and is case-insensitive.
+ *
+ * @param input - Duration string with units: y, mo, w, d, h, m, s.
+ * @returns Total duration in seconds.
+ * @throws Error when input is empty, negative, or contains invalid units/syntax.
+ *
+ * @example
+ * ```typescript
+ * parseDuration('30d'); // 2592000
+ * parseDuration('12h'); // 43200
+ * parseDuration('1d 2h'); // 93600
+ * ```
+ */
+export function parseDuration(input: string): number {
+  if (typeof input !== 'string') {
+    throw new Error('Invalid duration: input must be a string.');
+  }
+  const trimmed = input.trim();
+  if (trimmed === '' || trimmed.startsWith('-')) {
+    throw new Error(
+      `Invalid duration: "${input}". Expected non-negative duration with units: y, mo, w, d, h, m, s (e.g. "30d", "1d 2h").`,
+    );
+  }
+
+  const tokenRegex = /(\d+)\s*(y|mo|w|d|h|m|s)/gi;
+  let match: RegExpExecArray | null;
+  let totalSeconds = 0;
+  let lastIndex = 0;
+
+  while ((match = tokenRegex.exec(trimmed)) !== null) {
+    const rawVal = match[1]!;
+    const unit = match[2]!.toLowerCase();
+    const multiplier = UNIT_MULTIPLIERS[unit];
+    if (multiplier === undefined) {
+      throw new Error(
+        `Invalid duration unit: "${unit}". Accepted units are: y, mo, w, d, h, m, s.`,
+      );
+    }
+    const val = parseInt(rawVal, 10);
+    if (!Number.isFinite(val) || val < 0) {
+      throw new Error(`Invalid duration value: "${rawVal}". Must be non-negative integer.`);
+    }
+    totalSeconds += val * multiplier;
+
+    const textBetween = trimmed.slice(lastIndex, match.index).trim();
+    if (textBetween !== '') {
+      throw new Error(
+        `Invalid duration: "${input}". Expected non-negative duration with units: y, mo, w, d, h, m, s (e.g. "30d", "1d 2h").`,
+      );
+    }
+    lastIndex = match.index + match[0].length;
+  }
+
+  const trailing = trimmed.slice(lastIndex).trim();
+  if (trailing !== '' || lastIndex === 0) {
+    throw new Error(
+      `Invalid duration: "${input}". Expected non-negative duration with units: y, mo, w, d, h, m, s (e.g. "30d", "1d 2h").`,
+    );
+  }
+
+  return totalSeconds;
+}
+
 const MINUTE_SECONDS = 60;
 const HOUR_SECONDS = 3_600;
 const DAY_SECONDS = 86_400;

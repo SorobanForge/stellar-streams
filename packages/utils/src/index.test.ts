@@ -5,6 +5,7 @@ import {
   parseXlmToStroops,
   mulDiv,
   formatDuration,
+  parseDuration,
   formatRelativeTime,
   computeVestedAmount,
   computeClaimable,
@@ -274,6 +275,43 @@ describe('formatDuration', () => {
     expect(formatDuration(400 * 86_400)).toBe('1y 1mo');
     expect(formatDuration(382 * 86_400)).toBe('1y 2w');
     expect(formatDuration(8 * 86_400 + 5 * 3_600)).toBe('1w 1d');
+  });
+});
+
+describe('parseDuration', () => {
+  it('parses single unit strings: 30d, 12h, 90m, 45s', () => {
+    expect(parseDuration('30d')).toBe(30 * 86_400);
+    expect(parseDuration('12h')).toBe(12 * 3_600);
+    expect(parseDuration('90m')).toBe(90 * 60);
+    expect(parseDuration('45s')).toBe(45);
+  });
+
+  it('handles whitespace and uppercase', () => {
+    expect(parseDuration('  30D  ')).toBe(30 * 86_400);
+    expect(parseDuration('12H')).toBe(12 * 3_600);
+    expect(parseDuration(' 90M ')).toBe(90 * 60);
+    expect(parseDuration(' 45S ')).toBe(45);
+  });
+
+  it('parses compound durations like "1d 2h"', () => {
+    expect(parseDuration('1d 2h')).toBe(86_400 + 2 * 3_600);
+    expect(parseDuration('1y 2w')).toBe(365 * 86_400 + 2 * 7 * 86_400);
+    expect(parseDuration('1w 1d 3h 15m 30s')).toBe(7 * 86_400 + 86_400 + 3 * 3_600 + 15 * 60 + 30);
+  });
+
+  it('round-trips with formatDuration for a table of values', () => {
+    const table = ['45s', '12h', '1y', '1y 2w', '1w 1d'];
+    for (const str of table) {
+      const seconds = parseDuration(str);
+      expect(formatDuration(seconds)).toBe(str);
+    }
+  });
+
+  it('throws on unparseable or negative input naming accepted units', () => {
+    expect(() => parseDuration('-5d')).toThrow(/y, mo, w, d, h, m, s/);
+    expect(() => parseDuration('invalid')).toThrow(/y, mo, w, d, h, m, s/);
+    expect(() => parseDuration('')).toThrow(/y, mo, w, d, h, m, s/);
+    expect(() => parseDuration('10x')).toThrow(/y, mo, w, d, h, m, s/);
   });
 });
 
