@@ -212,8 +212,41 @@ export interface RawSplit {
   total_shares: number;
 }
 
+/** Check the runtime shape returned by the splits contract. */
+export function isSplit(value: unknown): value is RawSplit {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'bigint' &&
+    typeof value.creator === 'string' &&
+    Array.isArray(value.recipients) &&
+    value.recipients.every((r) => typeof r === 'string') &&
+    Array.isArray(value.shares) &&
+    value.shares.every(isInteger) &&
+    isInteger(value.total_shares)
+  );
+}
+
+function assertSplit(value: unknown): asserts value is RawSplit {
+  if (!isRecord(value)) throw new ContractResponseError('split', '<response>', 'an object');
+  const fields: Array<[string, (v: unknown) => boolean, string]> = [
+    ['id', (v) => typeof v === 'bigint', 'a bigint'],
+    ['creator', (v) => typeof v === 'string', 'a string'],
+    [
+      'recipients',
+      (v) => Array.isArray(v) && v.every((r) => typeof r === 'string'),
+      'an array of strings',
+    ],
+    ['shares', (v) => Array.isArray(v) && v.every(isInteger), 'an array of integers'],
+    ['total_shares', isInteger, 'an integer'],
+  ];
+  for (const [field, check, expected] of fields) {
+    if (!check(value[field])) throw new ContractResponseError('split', field, expected);
+  }
+}
+
 /** Convert a generated snake_case split result into the domain shape. */
-export function normalizeSplit(raw: RawSplit): Split {
+export function normalizeSplit(raw: unknown): Split {
+  assertSplit(raw);
   return {
     id: raw.id.toString(),
     creator: raw.creator,
