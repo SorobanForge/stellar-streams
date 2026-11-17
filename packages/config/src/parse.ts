@@ -80,9 +80,26 @@ export function parseEnvironment(env?: Record<string, string | undefined>): Pars
   const network: Network = isValidNetwork(rawNetwork) ? rawNetwork : DEFAULTS.NETWORK;
   const knownNetworkConfig = KNOWN_NETWORKS[network];
 
+  // Validate URLs if provided
+  let validHorizonUrl = rawHorizonUrl;
+  if (rawHorizonUrl && !validateHttpUrl(rawHorizonUrl, ENV_VARS.HORIZON_URL, errors)) {
+    validHorizonUrl = undefined;
+  }
+
+  let validSorobanRpcUrl = rawSorobanRpcUrl;
+  if (rawSorobanRpcUrl && !validateHttpUrl(rawSorobanRpcUrl, ENV_VARS.SOROBAN_RPC_URL, errors)) {
+    validSorobanRpcUrl = undefined;
+  }
+
   // Determine primary network configuration source and validate consistency
   determineNetworkSource(
-    { network, rawHorizonUrl, rawSorobanRpcUrl, rawNetworkPassphrase, rawExpertUrl },
+    {
+      network,
+      rawHorizonUrl: validHorizonUrl,
+      rawSorobanRpcUrl: validSorobanRpcUrl,
+      rawNetworkPassphrase,
+      rawExpertUrl,
+    },
     knownNetworkConfig,
     errors,
   );
@@ -269,6 +286,31 @@ function isValidContractId(value: string): boolean {
   // Stellar contract IDs are 56-char base32 strings starting with 'C'
   const contractIdRegex = /^C[A-Z2-7]{55}$/;
   return contractIdRegex.test(value);
+}
+
+/**
+ * Validate that a URL string is an absolute http: or https: URL
+ */
+function validateHttpUrl(urlStr: string, field: string, errors: ValidationError[]): boolean {
+  try {
+    const parsed = new URL(urlStr);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      errors.push({
+        field,
+        message: `Invalid URL protocol "${parsed.protocol}" for ${field}: "${urlStr}". Must use http: or https:.`,
+        severity: 'error',
+      });
+      return false;
+    }
+    return true;
+  } catch {
+    errors.push({
+      field,
+      message: `Invalid URL format for ${field}: "${urlStr}". Must be an absolute http: or https: URL.`,
+      severity: 'error',
+    });
+    return false;
+  }
 }
 
 export { ENV_VARS, DEFAULTS };
