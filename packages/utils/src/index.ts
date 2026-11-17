@@ -262,6 +262,8 @@ export interface VestingSchedule {
   startTime: number;
   endTime: number;
   cliffTime: number;
+  totalPaused?: number;
+  pausedAt?: number | null;
 }
 
 /**
@@ -269,13 +271,24 @@ export interface VestingSchedule {
  * `stream` Soroban contract. Keep this in sync with `vested_amount` in Rust.
  */
 export function computeVestedAmount(schedule: VestingSchedule, now: number): bigint {
-  const { totalAmount, startTime, endTime, cliffTime } = schedule;
+  const { totalAmount, startTime, endTime, cliffTime, totalPaused = 0, pausedAt } = schedule;
   if (now < startTime || now < cliffTime) return 0n;
-  if (now >= endTime) return totalAmount;
 
-  const elapsed = BigInt(now - startTime);
-  const duration = BigInt(endTime - startTime);
-  return (totalAmount * elapsed) / duration;
+  const duration = endTime - startTime;
+  if (duration <= 0) return totalAmount;
+
+  const cappedNow = now > endTime ? endTime : now;
+  const elapsedSecs = Math.max(0, cappedNow - startTime);
+
+  let activePauseSecs = 0;
+  if (pausedAt != null && now > pausedAt) {
+    const pauseEnd = Math.min(now, endTime);
+    activePauseSecs = Math.max(0, pauseEnd - pausedAt);
+  }
+
+  const effectiveElapsed = Math.max(0, elapsedSecs - totalPaused - activePauseSecs);
+  const vested = (totalAmount * BigInt(effectiveElapsed)) / BigInt(duration);
+  return vested > totalAmount ? totalAmount : vested;
 }
 
 /**
@@ -297,6 +310,8 @@ export interface ClaimableStream {
   endTime: number;
   cliffTime: number;
   withdrawn: string | bigint | number;
+  totalPaused?: number;
+  pausedAt?: number | null;
 }
 
 export function computeClaimable(stream: ClaimableStream, now: number): bigint {
@@ -306,6 +321,8 @@ export function computeClaimable(stream: ClaimableStream, now: number): bigint {
       startTime: stream.startTime,
       endTime: stream.endTime,
       cliffTime: stream.cliffTime,
+      totalPaused: stream.totalPaused,
+      pausedAt: stream.pausedAt,
     },
     now,
   );

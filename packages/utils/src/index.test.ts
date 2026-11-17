@@ -341,6 +341,44 @@ describe('vesting math', () => {
     expect(computeVestedAmount(schedule, 5_000)).toBe(1_000n);
   });
 
+  it('accounts for an active pause in vesting math', () => {
+    // Stream paused at 250
+    const pausedSchedule = { ...schedule, pausedAt: 250 };
+    expect(computeVestedAmount(pausedSchedule, 250)).toBe(250n);
+    expect(computeVestedAmount(pausedSchedule, 500)).toBe(250n);
+    expect(computeVestedAmount(pausedSchedule, 750)).toBe(250n);
+    expect(computeVestedAmount(pausedSchedule, 1_000)).toBe(250n);
+    expect(computeVestedAmount(pausedSchedule, 2_000)).toBe(250n);
+  });
+
+  it('accounts for past paused time in vesting math after resuming', () => {
+    // Stream was paused for 500 seconds in the past and resumed
+    const resumedSchedule = { ...schedule, totalPaused: 500, pausedAt: null };
+    expect(computeVestedAmount(resumedSchedule, 250)).toBe(0n);
+    expect(computeVestedAmount(resumedSchedule, 500)).toBe(0n);
+    expect(computeVestedAmount(resumedSchedule, 750)).toBe(250n);
+    expect(computeVestedAmount(resumedSchedule, 1_000)).toBe(500n);
+    expect(computeVestedAmount(resumedSchedule, 2_000)).toBe(500n);
+  });
+
+  it('matches the Rust contract test values during pause and after resumption', () => {
+    // Rust test test_pause_freezes_accrual_until_resumed:
+    // id: 1000 amount, 0 start, 1000 end, 0 cliff
+    // At t=250: claimable 250.
+    expect(computeVestedAmount(schedule, 250)).toBe(250n);
+
+    // Pause at t=250, advance to t=750 (500s pause):
+    const activePause = { ...schedule, pausedAt: 250, totalPaused: 0 };
+    expect(computeVestedAmount(activePause, 750)).toBe(250n);
+
+    // Resume at t=750: totalPaused = 500, pausedAt = null
+    const resumed = { ...schedule, totalPaused: 500, pausedAt: null };
+    expect(computeVestedAmount(resumed, 750)).toBe(250n);
+
+    // Advance 250s to t=1000:
+    expect(computeVestedAmount(resumed, 1_000)).toBe(500n);
+  });
+
   it('computes progress in basis points', () => {
     expect(computeProgressBps(schedule, 0)).toBe(0);
     expect(computeProgressBps(schedule, 500)).toBe(5_000);
