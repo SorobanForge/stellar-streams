@@ -357,6 +357,80 @@ const ESCROW_STATUSES: readonly EscrowStatus[] = [
   'cancelled',
 ];
 
+/** A single milestone in an escrow milestone schedule. */
+export interface EscrowMilestone {
+  index: number;
+  amount: string;
+  released: boolean;
+}
+
+/** The milestone schedule for an escrow agreement. */
+export interface EscrowSchedule {
+  milestones: EscrowMilestone[];
+  totalAmount: string;
+  releasedAmount: string;
+}
+
+/** Check the runtime shape of milestone schedule arrays. */
+export function isEscrowSchedule(amounts: unknown, released: unknown): boolean {
+  return (
+    Array.isArray(amounts) &&
+    Array.isArray(released) &&
+    amounts.length === released.length &&
+    amounts.every((a) => typeof a === 'bigint') &&
+    released.every((r) => typeof r === 'boolean')
+  );
+}
+
+/** Assert that milestone schedule arrays are valid and match in length. */
+export function assertEscrowSchedule(
+  amounts: unknown,
+  released: unknown,
+): asserts amounts is readonly bigint[] {
+  if (!Array.isArray(amounts)) {
+    throw new ContractResponseError('escrow', 'amounts', 'an array');
+  }
+  if (!Array.isArray(released)) {
+    throw new ContractResponseError('escrow', 'released', 'an array');
+  }
+  if (amounts.length !== released.length) {
+    throw new ContractResponseError(
+      'escrow',
+      'released',
+      'an array matching the length of amounts',
+    );
+  }
+}
+
+/** Convert raw milestone amounts and released flags into an EscrowSchedule. */
+export function normalizeEscrowSchedule(
+  amounts: readonly bigint[],
+  released: readonly boolean[],
+): EscrowSchedule {
+  assertEscrowSchedule(amounts, released);
+  let total = 0n;
+  let totalReleased = 0n;
+  const milestones: EscrowMilestone[] = amounts.map((amount, index) => {
+    const isRel = Boolean(released[index]);
+    total += amount;
+    if (isRel) {
+      totalReleased += amount;
+    }
+    return {
+      index,
+      amount: amount.toString(),
+      released: isRel,
+    };
+  });
+  return {
+    milestones,
+    totalAmount: total.toString(),
+    releasedAmount: totalReleased.toString(),
+  };
+}
+
+export const normalizeMilestones = normalizeEscrowSchedule;
+
 /**
  * Inputs for `create_escrow`. `id` is chosen by the caller (the escrow
  * contract does not allocate ids), and `amount` is a decimal string in the

@@ -5,9 +5,11 @@ import {
   getStreamStatus,
   isConfig,
   isEscrow,
+  isEscrowSchedule,
   isStream,
   normalizeConfig,
   normalizeEscrow,
+  normalizeEscrowSchedule,
   normalizeSplit,
   normalizeStream,
   type Stream,
@@ -218,6 +220,62 @@ describe('domain normalizers', () => {
       amount: '170141183460469231731687303715884105727',
       deadline: '9007199254740993',
       status: 'funded',
+    });
+  });
+
+  describe('normalizeEscrowSchedule', () => {
+    it('normalizes a fully released schedule', () => {
+      const amounts = [100n, 200n];
+      const released = [true, true];
+      const schedule = normalizeEscrowSchedule(amounts, released);
+
+      expect(schedule).toEqual({
+        milestones: [
+          { index: 0, amount: '100', released: true },
+          { index: 1, amount: '200', released: true },
+        ],
+        totalAmount: '300',
+        releasedAmount: '300',
+      });
+    });
+
+    it('normalizes a partially released schedule', () => {
+      const amounts = [100n, 200n, 300n];
+      const released = [true, false, false];
+      const schedule = normalizeEscrowSchedule(amounts, released);
+
+      expect(schedule).toEqual({
+        milestones: [
+          { index: 0, amount: '100', released: true },
+          { index: 1, amount: '200', released: false },
+          { index: 2, amount: '300', released: false },
+        ],
+        totalAmount: '600',
+        releasedAmount: '100',
+      });
+    });
+
+    it('normalizes an empty schedule', () => {
+      const schedule = normalizeEscrowSchedule([], []);
+
+      expect(schedule).toEqual({
+        milestones: [],
+        totalAmount: '0',
+        releasedAmount: '0',
+      });
+    });
+
+    it('rejects mismatched array lengths with ContractResponseError', () => {
+      expect(() => normalizeEscrowSchedule([100n, 200n], [true])).toThrow(ContractResponseError);
+      expect(() => normalizeEscrowSchedule([100n], [true, false])).toThrow(ContractResponseError);
+    });
+
+    it('validates schedule arrays with isEscrowSchedule', () => {
+      expect(isEscrowSchedule([100n, 200n], [true, false])).toBe(true);
+      expect(isEscrowSchedule([], [])).toBe(true);
+      expect(isEscrowSchedule([100n], [true, false])).toBe(false);
+      expect(isEscrowSchedule(['100'], [true])).toBe(false);
+      expect(isEscrowSchedule([100n], ['true'])).toBe(false);
     });
   });
 });
