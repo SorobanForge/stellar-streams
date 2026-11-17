@@ -353,6 +353,54 @@ export function mulDiv(a: bigint, b: bigint, c: bigint): bigint {
   return (a * b) / c;
 }
 
+/**
+ * Safely converts a bigint to a JavaScript number, throwing an error if the
+ * value falls outside [Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER].
+ *
+ * @param value - BigInt value to convert.
+ * @returns Number representation.
+ * @throws RangeError when value is outside the safe integer range.
+ *
+ * @example
+ * ```typescript
+ * toSafeNumber(123n); // 123
+ * toSafeNumber(9007199254740992n); // throws RangeError
+ * ```
+ */
+export function toSafeNumber(value: bigint): number {
+  const min = BigInt(Number.MIN_SAFE_INTEGER);
+  const max = BigInt(Number.MAX_SAFE_INTEGER);
+  if (value < min || value > max) {
+    throw new RangeError(
+      `BigInt value ${value.toString()} is outside safe integer range [${Number.MIN_SAFE_INTEGER}, ${Number.MAX_SAFE_INTEGER}].`,
+    );
+  }
+  return Number(value);
+}
+
+/**
+ * Computes the ratio of a part to a whole as a floating-point number in [0, 1]
+ * using integer-safe scaling to prevent precision loss and Infinity on large bigints.
+ *
+ * @param part - Numerator bigint.
+ * @param whole - Denominator bigint.
+ * @returns Floating point ratio between 0 and 1.
+ *
+ * @example
+ * ```typescript
+ * bigintRatio(5000000n, 10000000n); // 0.5
+ * bigintRatio(0n, 100n); // 0
+ * bigintRatio(100n, 100n); // 1
+ * ```
+ */
+export function bigintRatio(part: bigint, whole: bigint): number {
+  if (whole <= 0n || part <= 0n) return 0;
+  if (part >= whole) return 1;
+  const SCALE = 10_000_000n;
+  const scaled = (part * SCALE) / whole;
+  return Number(scaled) / Number(SCALE);
+}
+
 /** A single point on a vesting curve suitable for plotting on a chart. */
 export interface VestingPoint {
   t: number;

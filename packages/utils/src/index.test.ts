@@ -4,6 +4,8 @@ import {
   formatStroopsToXlm,
   parseXlmToStroops,
   mulDiv,
+  toSafeNumber,
+  bigintRatio,
   formatDuration,
   formatRelativeTime,
   computeVestedAmount,
@@ -502,6 +504,44 @@ describe('mulDiv', () => {
   it('handles remainder division with floor semantics', () => {
     expect(mulDiv(7n, 1n, 2n)).toBe(3n);
     expect(mulDiv(100n, 33n, 7n)).toBe(471n);
+  });
+});
+
+describe('toSafeNumber', () => {
+  it('converts numbers within the safe integer range', () => {
+    expect(toSafeNumber(0n)).toBe(0);
+    expect(toSafeNumber(123n)).toBe(123);
+    expect(toSafeNumber(-456n)).toBe(-456);
+    expect(toSafeNumber(BigInt(Number.MAX_SAFE_INTEGER))).toBe(Number.MAX_SAFE_INTEGER);
+    expect(toSafeNumber(BigInt(Number.MIN_SAFE_INTEGER))).toBe(Number.MIN_SAFE_INTEGER);
+  });
+
+  it('throws RangeError on boundary overflow and underflow', () => {
+    expect(() => toSafeNumber(BigInt(Number.MAX_SAFE_INTEGER) + 1n)).toThrow(RangeError);
+    expect(() => toSafeNumber(BigInt(Number.MIN_SAFE_INTEGER) - 1n)).toThrow(RangeError);
+    expect(() => toSafeNumber(2n ** 128n)).toThrow(RangeError);
+  });
+});
+
+describe('bigintRatio', () => {
+  it('returns 0-1 ratio for 7-decimal token amounts', () => {
+    expect(bigintRatio(2_500_000n, 10_000_000n)).toBe(0.25);
+    expect(bigintRatio(1_234_567n, 10_000_000n)).toBe(0.1234567);
+    expect(bigintRatio(10_000_000n, 10_000_000n)).toBe(1);
+    expect(bigintRatio(0n, 10_000_000n)).toBe(0);
+  });
+
+  it('handles huge bigint values without precision loss or Infinity', () => {
+    const huge = 10n ** 30n;
+    expect(bigintRatio(huge, huge * 2n)).toBe(0.5);
+    expect(bigintRatio(huge * 3n, huge * 4n)).toBe(0.75);
+  });
+
+  it('clamps non-positive or overflow values', () => {
+    expect(bigintRatio(-5n, 100n)).toBe(0);
+    expect(bigintRatio(5n, 0n)).toBe(0);
+    expect(bigintRatio(5n, -100n)).toBe(0);
+    expect(bigintRatio(150n, 100n)).toBe(1);
   });
 });
 
