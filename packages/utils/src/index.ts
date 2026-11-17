@@ -353,6 +353,57 @@ export function mulDiv(a: bigint, b: bigint, c: bigint): bigint {
   return (a * b) / c;
 }
 
+/**
+ * Splits an integer amount across proportional shares, matching the integer
+ * arithmetic of the splits Soroban contract. The final recipient absorbs any
+ * rounding remainder (dust) so the portions sum exactly to the original amount.
+ *
+ * @param amount - Total token amount as a non-negative bigint, number, or string.
+ * @param shares - Array of positive integer share weights.
+ * @returns Array of bigint portions of length matching shares.
+ * @throws Error if shares is empty, total shares is 0 or negative, any share is negative, or amount is negative.
+ */
+export function splitAmounts(
+  amount: bigint | number | string,
+  shares: readonly (bigint | number)[],
+): bigint[] {
+  const total = typeof amount === 'bigint' ? amount : BigInt(amount);
+  if (total < 0n) {
+    throw new Error(`Invalid amount: ${total.toString()}. Must be non-negative.`);
+  }
+  if (!shares || shares.length === 0) {
+    throw new Error('Invalid shares: cannot be empty.');
+  }
+
+  const bigShares = shares.map((s) => BigInt(s));
+  for (const s of bigShares) {
+    if (s < 0n) {
+      throw new Error(`Invalid share: ${s.toString()}. Must be non-negative.`);
+    }
+  }
+
+  const totalShares = bigShares.reduce((acc, s) => acc + s, 0n);
+  if (totalShares <= 0n) {
+    throw new Error(`Invalid total shares: ${totalShares.toString()}. Must be greater than 0.`);
+  }
+
+  const portions: bigint[] = [];
+  let distributed = 0n;
+  const n = bigShares.length;
+
+  for (let i = 0; i < n; i++) {
+    if (i === n - 1) {
+      portions.push(total - distributed);
+    } else {
+      const portion = (total * bigShares[i]!) / totalShares;
+      portions.push(portion);
+      distributed += portion;
+    }
+  }
+
+  return portions;
+}
+
 /** A single point on a vesting curve suitable for plotting on a chart. */
 export interface VestingPoint {
   t: number;

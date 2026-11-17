@@ -4,6 +4,7 @@ import {
   formatStroopsToXlm,
   parseXlmToStroops,
   mulDiv,
+  splitAmounts,
   formatDuration,
   formatRelativeTime,
   computeVestedAmount,
@@ -426,6 +427,56 @@ describe('claimable and protocol-fee math', () => {
     const fee = computeProtocolFee(claimable, 250); // 500 * 250 / 10_000 = 12
     expect(fee).toBe(12n);
     expect(claimable - fee).toBe(488n);
+  });
+});
+
+describe('splitAmounts', () => {
+  it('splits evenly when divisible', () => {
+    const portions = splitAmounts(100n, [1, 1]);
+    expect(portions).toEqual([50n, 50n]);
+    expect(portions.reduce((a, b) => a + b, 0n)).toBe(100n);
+  });
+
+  it('assigns rounding dust to the final recipient', () => {
+    // 100 split across 3 equal shares: 33, 33, 34
+    const portions = splitAmounts(100n, [1, 1, 1]);
+    expect(portions).toEqual([33n, 33n, 34n]);
+    expect(portions.reduce((a, b) => a + b, 0n)).toBe(100n);
+  });
+
+  it('matches recipient_portion from the contracts/splits', () => {
+    // 1000 amount with shares [10, 20, 30]: total_shares = 60
+    // share 0: 1000 * 10 / 60 = 166
+    // share 1: 1000 * 20 / 60 = 333
+    // share 2 (final): 1000 - 166 - 333 = 501
+    const portions = splitAmounts(1_000n, [10, 20, 30]);
+    expect(portions).toEqual([166n, 333n, 501n]);
+    expect(portions.reduce((a, b) => a + b, 0n)).toBe(1_000n);
+  });
+
+  it('cross-checks 100 shares against a prime amount', () => {
+    const primeAmount = 1_000_000_007n; // large prime
+    const shares = Array.from({ length: 100 }, (_, i) => i + 1); // 1..100 shares
+    const portions = splitAmounts(primeAmount, shares);
+
+    expect(portions).toHaveLength(100);
+    expect(portions.reduce((a, b) => a + b, 0n)).toBe(primeAmount);
+  });
+
+  it('throws on empty shares', () => {
+    expect(() => splitAmounts(100n, [])).toThrow('Invalid shares');
+  });
+
+  it('throws on zero total shares', () => {
+    expect(() => splitAmounts(100n, [0, 0])).toThrow('Invalid total shares');
+  });
+
+  it('throws on negative amount', () => {
+    expect(() => splitAmounts(-10n, [1, 2])).toThrow('Invalid amount');
+  });
+
+  it('throws on negative shares', () => {
+    expect(() => splitAmounts(100n, [10, -5])).toThrow('Invalid share');
   });
 });
 
