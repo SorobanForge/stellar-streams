@@ -2,7 +2,9 @@
   "extends": "@stellar-starter-kit/tsconfig/base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": "./src"
+    "rootDir": "./src",
+    "declaration": true,
+    "noEmit": false
   },
   "include": ["src"],
   "exclude": ["dist", "**/*.test.ts"]

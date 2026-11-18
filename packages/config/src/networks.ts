@@ -31,9 +31,7 @@ export const KNOWN_NETWORKS: Record<Network, NetworkConfig> = {
  * Get the known network configuration for a given passphrase
  * Returns undefined if no matching network is found
  */
-export function getNetworkByPassphrase(
-  passphrase: string
-): Network | undefined {
+export function getNetworkByPassphrase(passphrase: string): Network | undefined {
   for (const [network, config] of Object.entries(KNOWN_NETWORKS)) {
     if (config.networkPassphrase === passphrase) {
       return network as Network;
@@ -71,10 +69,7 @@ export function getNetworkByHorizonUrl(horizonUrl: string): Network | undefined 
 /**
  * Check if a passphrase matches the expected network
  */
-export function isPassphraseForNetwork(
-  passphrase: string,
-  network: Network
-): boolean {
+export function isPassphraseForNetwork(passphrase: string, network: Network): boolean {
   return KNOWN_NETWORKS[network].networkPassphrase === passphrase;
 }
 
@@ -88,9 +83,6 @@ export function isRpcUrlForNetwork(rpcUrl: string, network: Network): boolean {
 /**
  * Check if a Horizon URL matches the expected network
  */
-export function isHorizonUrlForNetwork(
-  horizonUrl: string,
-  network: Network
-): boolean {
+export function isHorizonUrlForNetwork(horizonUrl: string, network: Network): boolean {
   return KNOWN_NETWORKS[network].horizonUrl === horizonUrl;
 }

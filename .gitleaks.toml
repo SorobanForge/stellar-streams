@@ -1,0 +1,30 @@
+# gitleaks configuration for .github/workflows/secret-scan.yml.
+#
+# The default ruleset is kept in full. The allowlist only covers findings that
+# cannot be credentials, so a new rule or a real leak still fails the check.
+#
+# Run the same scan locally with:
+#
+#   docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:v8.30.1 \
+#     detect --config /repo/.gitleaks.toml --source /repo --redact --verbose
+[extend]
+useDefault = true
+
+[allowlist]
+description = 'Public on-chain identifiers and vendored third-party code.'
+
+regexes = [
+  # Stellar contract ids (C...) and account public keys (G...) are public by
+  # design. Their bodies are high-entropy enough to trip generic-api-key, but
+  # they cannot authorize anything on their own.
+  #
+  # Single-quoted TOML strings are literal: a double-quoted "\\b" would be a
+  # backspace character rather than a regex word boundary.
+  '''\b[CG][A-Z0-9]{55}\b''',
+]
+
+paths = [
+  # Vendored patches of upstream crates. The flagged private-key hit is a
+  # constant that ships with the crate, not a maintainer secret.
+  """contracts/patches/.*""",
+]

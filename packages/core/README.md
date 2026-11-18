@@ -30,10 +30,10 @@ Resolve the current network configuration from environment variables:
 import { resolveConfig } from '@stellar-starter-kit/core';
 
 const config = resolveConfig();
-console.log(config.network);      // 'testnet', 'mainnet', or 'local'
-console.log(config.rpcUrl);       // Soroban RPC endpoint
-console.log(config.horizonUrl);   // Horizon API endpoint
-console.log(config.passphrase);   // Network passphrase
+console.log(config.network); // 'testnet', 'mainnet', or 'local'
+console.log(config.rpcUrl); // Soroban RPC endpoint
+console.log(config.horizonUrl); // Horizon API endpoint
+console.log(config.passphrase); // Network passphrase
 ```
 
 ### Using Network Registry
@@ -130,11 +130,13 @@ try {
 ### Common Errors
 
 **Invalid Network**:
+
 ```
 Config Resolution Error: Invalid network: "staging". Must be one of: local, testnet, mainnet.
 ```
 
 **Passphrase Mismatch**:
+
 ```
 Config Resolution Error: Network passphrase mismatch: provided "..." but network "testnet" expects "Test SDF Network ; September 2015".
 ```
@@ -149,6 +151,7 @@ npm run test:run  # Single run (CI mode)
 ```
 
 Tests cover:
+
 - Default network selection and configuration
 - Environment variable overrides
 - Passphrase validation and mismatch detection
@@ -162,6 +165,7 @@ Tests cover:
 Resolves network configuration from environment variables.
 
 **Parameters:**
+
 - `env` (optional): Environment variables object. Defaults to `process.env`.
 
 **Returns:** `StellarConfig` object with network, rpcUrl, horizonUrl, and passphrase.
@@ -173,6 +177,7 @@ Resolves network configuration from environment variables.
 Gets the default configuration for a specific network.
 
 **Parameters:**
+
 - `network`: One of `'local'`, `'testnet'`, or `'mainnet'`
 
 **Returns:** `StellarConfig` with default values.
@@ -184,6 +189,7 @@ Gets the default configuration for a specific network.
 Gets the network configuration (RPC URL, Horizon URL, passphrase) for a specific network.
 
 **Parameters:**
+
 - `network`: One of `'local'`, `'testnet'`, or `'mainnet'`
 
 **Returns:** `NetworkConfig` object.
