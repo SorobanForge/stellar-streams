@@ -31,6 +31,7 @@
     "optimize": "node scripts/run.js optimize-contracts",
     "generate:bindings": "node scripts/run.js generate-bindings",
     "create:issues": "./scripts/create-issues.sh",
+    "create:contributor-issues": "node scripts/create-contributor-issues.mjs",
     "repo:protect": "./scripts/setup-branch-protection.sh",
     "repo:topics": "./scripts/set-topics.sh",
     "deploy:testnet": "node scripts/run.js deploy-contracts",

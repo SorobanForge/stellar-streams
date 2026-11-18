@@ -19,6 +19,15 @@ timeout = 30
 exclude = [
   '^https://img\.shields\.io/',
   '^https://contrib\.rocks/',
+  # npm serves 403 to automated clients, so a package or org page cannot be
+  # verified from CI. Check these by hand after a release.
+  '^https://www\.npmjs\.com/',
+  # Soroban RPC endpoints answer POST only and reject the GET/HEAD a link
+  # checker sends. The URL is documented configuration, not a browsable page.
+  '^https://soroban-testnet\.stellar\.org/?$',
+  # Laboratory is a client-side app: the `#account-creator?network=testnet`
+  # route only resolves in a browser, so the anchor check always fails.
+  '^https://laboratory\.stellar\.org/#',
 ]
 
 # Never check vendored trees (lychee skips hidden dirs like .git by default).

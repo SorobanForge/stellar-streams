@@ -2,6 +2,20 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { StreamsClient } from '@stellar-starter-kit/sdk';
 import type { CreateStreamParams, Stream } from '@stellar-starter-kit/types';
 import { dedupeRequest } from './request-cache.js';
+import { useContractMutation, type MutationOptions, type MutationResult } from './mutation.js';
+import {
+  applyOptimistic,
+  clearSettledOptimistic,
+  notifyOptimisticRefresh,
+  pushOptimistic,
+  registerOptimisticRefresh,
+  rollbackOptimistic,
+  settleOptimistic,
+  subscribeOptimistic,
+} from './optimistic.js';
+
+export * from './splits.js';
+export type { MutationOptions, MutationResult, MutationStatus } from './mutation.js';
 
 /** Tracks browser connectivity as a lightweight proxy for network status. */
 export function useStellarNetworkStatus(): boolean {
@@ -99,6 +113,9 @@ export function useStream(
   const [isStale, setIsStale] = useState(false);
   const mounted = useRef(true);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  // Last value read from the chain; pending mutations are overlaid on it.
+  const baseRef = useRef<Stream | null>(null);
+  const key = id === null ? null : String(id);
 
   useEffect(() => {
     mounted.current = true;
@@ -115,6 +132,7 @@ export function useStream(
   const load = useCallback(
     async (bypassCache: boolean) => {
       if (!client || id === null) {
+        baseRef.current = null;
         setStream(null);
         setClaimable(0n);
         setError(null);
@@ -138,7 +156,10 @@ export function useStream(
                 : dedupeRequest(client, `claimable:${String(id)}`, readClaimable),
             ]);
             if (!mounted.current) return;
-            setStream(nextStream);
+            baseRef.current = nextStream;
+            // A fresh read supersedes the optimistic values of settled writes.
+            if (key !== null) clearSettledOptimistic(client, key);
+            setStream(key === null ? nextStream : applyOptimistic(client, key, nextStream));
             setClaimable(nextClaimable);
             setError(null);
             setIsStale(false);
@@ -159,7 +180,7 @@ export function useStream(
         if (mounted.current) setLoading(false);
       }
     },
-    [client, id, retries, retryDelayMs, maxRetryDelayMs],
+    [client, id, key, retries, retryDelayMs, maxRetryDelayMs],
   );
 
   /** Manual refresh: always bypasses the in-flight cache. */
@@ -168,6 +189,22 @@ export function useStream(
   useEffect(() => {
     void load(false);
   }, [load]);
+
+  // Re-render whenever a pending mutation changes this stream's overlay.
+  useEffect(() => {
+    if (!client || key === null) return;
+    return subscribeOptimistic(client, key, () => {
+      if (!mounted.current) return;
+      setStream(applyOptimistic(client, key, baseRef.current));
+    });
+  }, [client, key]);
+
+  // Let mutations reconcile through this hook's refresh, which bypasses the
+  // shared read cache and always sees post-transaction state.
+  useEffect(() => {
+    if (!client || key === null) return;
+    return registerOptimisticRefresh(client, key, refresh);
+  }, [client, key, refresh]);
 
   // Handle polling with visibility awareness
   useEffect(() => {
@@ -229,105 +266,8 @@ export function useStream(
   return { stream, claimable, loading, error, isStale, refresh };
 }
 
-/** Lifecycle of a single mutation. */
-export type MutationStatus = 'idle' | 'pending' | 'success' | 'error';
-
-export interface StreamMutationOptions {
-  /** Called once the transaction confirms, with its hash. */
-  onSuccess?: (result: { hash: string }) => void;
-  /** Called on failure, with the same message exposed as `error`. */
-  onError?: (message: string) => void;
-}
-
-export interface StreamMutationResult<TArgs extends unknown[]> {
-  /**
-   * Submits the mutation. Resolves to the confirmed `{ hash }`, or to `null`
-   * when the call was skipped (no client, or another mutation is already in
-   * flight) or when it failed — failures surface through `error` and `status`.
-   */
-  mutate: (...args: TArgs) => Promise<{ hash: string } | null>;
-  status: MutationStatus;
-  error: string | null;
-  /** Hash of the last confirmed transaction; cleared by `reset`. */
-  hash: string | null;
-  /** Returns the hook to `idle` and clears `error` and `hash`. */
-  reset: () => void;
-}
-
-type MutationRunner<TArgs extends unknown[]> = (
-  client: StreamsClient,
-  ...args: TArgs
-) => Promise<{ hash: string }>;
-
-/**
- * Shared state machine behind every mutation hook: one call in flight per hook
- * instance, a single `status`, and the confirmed hash. A second call while a
- * mutation is pending is a documented no-op resolving to `null`.
- */
-function useStreamMutation<TArgs extends unknown[]>(
-  client: StreamsClient | null,
-  run: MutationRunner<TArgs> | null,
-  options: StreamMutationOptions,
-): StreamMutationResult<TArgs> {
-  const [status, setStatus] = useState<MutationStatus>('idle');
-  const [error, setError] = useState<string | null>(null);
-  const [hash, setHash] = useState<string | null>(null);
-  const inFlight = useRef(false);
-  const mounted = useRef(true);
-  // Read through a ref so `mutate` keeps a stable identity even when a caller
-  // passes inline arrow functions.
-  const callbacks = useRef(options);
-
-  useEffect(() => {
-    callbacks.current = options;
-  }, [options]);
-
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-
-  const mutate = useCallback(
-    async (...args: TArgs): Promise<{ hash: string } | null> => {
-      if (!client || !run || inFlight.current) return null;
-
-      inFlight.current = true;
-      setStatus('pending');
-      setError(null);
-      setHash(null);
-      try {
-        const result = await run(client, ...args);
-        if (mounted.current) {
-          setHash(result.hash);
-          setStatus('success');
-        }
-        callbacks.current.onSuccess?.(result);
-        return result;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Transaction failed';
-        if (mounted.current) {
-          setError(message);
-          setStatus('error');
-        }
-        callbacks.current.onError?.(message);
-        return null;
-      } finally {
-        inFlight.current = false;
-      }
-    },
-    [client, run],
-  );
-
-  const reset = useCallback(() => {
-    setStatus('idle');
-    setError(null);
-    setHash(null);
-  }, []);
-
-  return { mutate, status, error, hash, reset };
-}
+export type StreamMutationOptions = MutationOptions;
+export type StreamMutationResult<TArgs extends unknown[]> = MutationResult<TArgs>;
 
 /** Creates a stream, exposing the pending/success/error state to the caller. */
 export function useCreateStream(
@@ -338,25 +278,87 @@ export function useCreateStream(
     (streams: StreamsClient, params: CreateStreamParams) => streams.createStream(params),
     [],
   );
-  return useStreamMutation<[CreateStreamParams]>(client, run, options);
+  return useContractMutation<StreamsClient, [CreateStreamParams]>(client, run, options);
 }
 
-/** Withdraws the vested balance of a stream to its recipient. */
+/** Amount being withdrawn, in the token's smallest unit. */
+export type WithdrawAmount = bigint | number | string;
+
+export type WithdrawStreamResult = StreamMutationResult<[StreamId, amount?: WithdrawAmount]>;
+
+/**
+ * Withdraws the vested balance of a stream to its recipient.
+ *
+ * When the withdrawn `amount` is supplied, the change is applied optimistically:
+ * every mounted `useStream` for the id shows the new `withdrawn` value
+ * immediately. A confirmed transaction triggers a refetch before the optimistic
+ * value is dropped; a failed one rolls the display back. Concurrent mutations
+ * keep independent overlays, so a failing withdraw cannot undo a cancel (or
+ * vice versa).
+ */
 export function useWithdrawStream(
   client: StreamsClient | null,
   options: StreamMutationOptions = {},
-): StreamMutationResult<[StreamId]> {
-  const run = useCallback((streams: StreamsClient, id: StreamId) => streams.withdraw(id), []);
-  return useStreamMutation<[StreamId]>(client, run, options);
+): WithdrawStreamResult {
+  const run = useCallback(async (streams: StreamsClient, id: StreamId, amount?: WithdrawAmount) => {
+    const key = String(id);
+    let opId: number | null = null;
+    if (amount !== undefined) {
+      try {
+        const delta = BigInt(amount);
+        opId = pushOptimistic(streams, key, (stream) => ({
+          withdrawn: (BigInt(stream.withdrawn) + delta).toString(),
+        }));
+      } catch {
+        // An unparseable amount only skips the optimistic update, not the write.
+        opId = null;
+      }
+    }
+
+    try {
+      const result = await streams.withdraw(id);
+      if (opId !== null) {
+        settleOptimistic(streams, key, opId);
+        void notifyOptimisticRefresh(streams, key);
+      }
+      return result;
+    } catch (err) {
+      if (opId !== null) rollbackOptimistic(streams, key, opId);
+      throw err;
+    }
+  }, []);
+  return useContractMutation<StreamsClient, [StreamId, amount?: WithdrawAmount]>(
+    client,
+    run,
+    options,
+  );
 }
 
-/** Cancels a stream, refunding the unvested balance to its sender. */
+/**
+ * Cancels a stream, refunding the unvested balance to its sender.
+ *
+ * The stream is marked `cancelled` optimistically in every mounted
+ * `useStream` for the id, then reconciled by a refetch on success or rolled
+ * back on failure.
+ */
 export function useCancelStream(
   client: StreamsClient | null,
   options: StreamMutationOptions = {},
 ): StreamMutationResult<[StreamId]> {
-  const run = useCallback((streams: StreamsClient, id: StreamId) => streams.cancel(id), []);
-  return useStreamMutation<[StreamId]>(client, run, options);
+  const run = useCallback(async (streams: StreamsClient, id: StreamId) => {
+    const key = String(id);
+    const opId = pushOptimistic(streams, key, () => ({ cancelled: true }));
+    try {
+      const result = await streams.cancel(id);
+      settleOptimistic(streams, key, opId);
+      void notifyOptimisticRefresh(streams, key);
+      return result;
+    } catch (err) {
+      rollbackOptimistic(streams, key, opId);
+      throw err;
+    }
+  }, []);
+  return useContractMutation<StreamsClient, [StreamId]>(client, run, options);
 }
 
 export interface UseStreamsResult {

@@ -44,16 +44,12 @@ describe('networks', () => {
 
   describe('getNetworkByPassphrase', () => {
     it('should return testnet for testnet passphrase', () => {
-      const network = getNetworkByPassphrase(
-        'Test SDF Network ; September 2015'
-      );
+      const network = getNetworkByPassphrase('Test SDF Network ; September 2015');
       expect(network).toBe('testnet');
     });
 
     it('should return mainnet for mainnet passphrase', () => {
-      const network = getNetworkByPassphrase(
-        'Public Global Stellar Network ; September 2015'
-      );
+      const network = getNetworkByPassphrase('Public Global Stellar Network ; September 2015');
       expect(network).toBe('mainnet');
     });
 
@@ -75,9 +71,7 @@ describe('networks', () => {
     });
 
     it('should return mainnet for mainnet RPC URL', () => {
-      const network = getNetworkByRpcUrl(
-        'https://soroban-mainnet.stellar.org'
-      );
+      const network = getNetworkByRpcUrl('https://soroban-mainnet.stellar.org');
       expect(network).toBe('mainnet');
     });
 
@@ -94,9 +88,7 @@ describe('networks', () => {
 
   describe('getNetworkByHorizonUrl', () => {
     it('should return testnet for testnet Horizon URL', () => {
-      const network = getNetworkByHorizonUrl(
-        'https://horizon-testnet.stellar.org'
-      );
+      const network = getNetworkByHorizonUrl('https://horizon-testnet.stellar.org');
       expect(network).toBe('testnet');
     });
 
@@ -118,17 +110,14 @@ describe('networks', () => {
 
   describe('isPassphraseForNetwork', () => {
     it('should return true for matching passphrase and network', () => {
-      const isMatch = isPassphraseForNetwork(
-        'Test SDF Network ; September 2015',
-        'testnet'
-      );
+      const isMatch = isPassphraseForNetwork('Test SDF Network ; September 2015', 'testnet');
       expect(isMatch).toBe(true);
     });
 
     it('should return false for mismatched passphrase and network', () => {
       const isMatch = isPassphraseForNetwork(
         'Public Global Stellar Network ; September 2015',
-        'testnet'
+        'testnet',
       );
       expect(isMatch).toBe(false);
     });
@@ -136,36 +125,24 @@ describe('networks', () => {
 
   describe('isRpcUrlForNetwork', () => {
     it('should return true for matching RPC URL and network', () => {
-      const isMatch = isRpcUrlForNetwork(
-        'https://soroban-testnet.stellar.org',
-        'testnet'
-      );
+      const isMatch = isRpcUrlForNetwork('https://soroban-testnet.stellar.org', 'testnet');
       expect(isMatch).toBe(true);
     });
 
     it('should return false for mismatched RPC URL and network', () => {
-      const isMatch = isRpcUrlForNetwork(
-        'https://soroban-mainnet.stellar.org',
-        'testnet'
-      );
+      const isMatch = isRpcUrlForNetwork('https://soroban-mainnet.stellar.org', 'testnet');
       expect(isMatch).toBe(false);
     });
   });
 
   describe('isHorizonUrlForNetwork', () => {
     it('should return true for matching Horizon URL and network', () => {
-      const isMatch = isHorizonUrlForNetwork(
-        'https://horizon-testnet.stellar.org',
-        'testnet'
-      );
+      const isMatch = isHorizonUrlForNetwork('https://horizon-testnet.stellar.org', 'testnet');
       expect(isMatch).toBe(true);
     });
 
     it('should return false for mismatched Horizon URL and network', () => {
-      const isMatch = isHorizonUrlForNetwork(
-        'https://horizon.stellar.org',
-        'testnet'
-      );
+      const isMatch = isHorizonUrlForNetwork('https://horizon.stellar.org', 'testnet');
       expect(isMatch).toBe(false);
     });
   });
