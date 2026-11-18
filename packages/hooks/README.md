@@ -30,8 +30,10 @@ The hooks are exported from the package root:
 import { useStream, useStreams, useStellarNetworkStatus } from '@stellar-starter-kit/hooks';
 ```
 
-The hooks are not yet imported anywhere in `apps/web`; they are available for
-the dashboard and other workspace packages to consume.
+The stream hooks are not yet imported anywhere in `apps/web`; they are
+available for the dashboard and other workspace packages to consume. The split
+hooks (`useSplit`, `useSplits`, `useCreateSplit`, `useDistributeSplit`) are
+documented in [Splits](#splits) below.
 
 ---
 
@@ -197,6 +199,62 @@ function MyStreams({ client }: { client: StreamsClient | null }) {
 
 ---
 
+## Optimistic stream mutations
+
+`useWithdrawStream` and `useCancelStream` update every mounted `useStream` for
+the same stream before the transaction settles, so a withdraw does not look
+like a failed write while the next read is pending.
+
+- `useWithdrawStream(...).mutate(id, amount)` increases the displayed
+  `withdrawn` by `amount` (in the token's smallest unit) immediately. Omitting
+  `amount` skips the optimistic update but still submits the transaction.
+- `useCancelStream(...).mutate(id)` marks the displayed stream `cancelled`.
+- A confirmed transaction keeps the optimistic value visible and triggers a
+  refetch (which bypasses the read cache); the value is reconciled with the
+  read result.
+- A failed transaction removes only its own change, restoring the previous
+  value. Concurrent mutations on the same stream keep independent overlays, so
+  one rollback never undoes another mutation's change.
+
+```tsx
+const { stream } = useStream(client, id);
+const withdraw = useWithdrawStream(client);
+const cancel = useCancelStream(client);
+
+// `claimable` was read from the same `useStream` call.
+await withdraw.mutate(id, claimable);
+```
+
+---
+
+## Splits
+
+`packages/hooks` mirrors the stream data layer for the `splits` contract. The
+SDK does not export a `SplitsClient` yet, so the hooks accept a structural
+`SplitsClientLike` (`getSplit`, optional `listSplits`, `createSplit`,
+`distribute`); a future `SplitsClient` with those methods works unchanged.
+
+| Hook                 | Arguments                    | Returns                                  |
+| :------------------- | :--------------------------- | :--------------------------------------- |
+| `useSplit`           | `client`, `id`               | `{ data, loading, error, refetch }`      |
+| `useSplits`          | `client`, optional `creator` | `{ data, loading, error, refetch }`      |
+| `useCreateSplit`     | `client`, optional callbacks | `{ mutate, status, error, hash, reset }` |
+| `useDistributeSplit` | `client`, optional callbacks | `{ mutate, status, error, hash, reset }` |
+
+`useSplits` degrades to an empty list with no error when the client has no
+`listSplits` method, mirroring `useStreams`. Mutations expose
+`idle`/`pending`/`success`/`error` and refetch every split view for the client
+once a transaction confirms.
+
+```tsx
+const { data: splits, loading } = useSplits(client, address);
+const { mutate, status } = useCreateSplit(client);
+
+await mutate({ creator: address, recipients: ['GA…', 'GB…'], shares: [60, 40] });
+```
+
+---
+
 ## `useStellarNetworkStatus`
 
 ### Purpose
@@ -254,9 +312,11 @@ the package root:
 import { useStream, useStreams, useStellarNetworkStatus } from '@stellar-starter-kit/hooks';
 ```
 
-The package's public API is exactly the three named exports above; there are no
-default exports or additional entry points. The dashboard does not currently
-import these hooks.
+The package has no default exports or additional entry points. Its named
+exports are the stream hooks (`useStream`, `useStreams`, `useCreateStream`,
+`useWithdrawStream`, `useCancelStream`), the split hooks (`useSplit`,
+`useSplits`, `useCreateSplit`, `useDistributeSplit`), and
+`useStellarNetworkStatus`. The dashboard does not currently import these hooks.
 
 ---
 
