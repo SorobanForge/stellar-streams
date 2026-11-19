@@ -47,6 +47,7 @@ function TestComponent() {
   const {
     activeAddress,
     activeProvider,
+    capabilities,
     isConnected,
     isConnecting,
     isRestoring,
@@ -65,6 +66,9 @@ function TestComponent() {
     <div>
       <div data-testid="address">{activeAddress || 'null'}</div>
       <div data-testid="provider">{activeProvider || 'null'}</div>
+      <div data-testid="capabilities">
+        {capabilities ? `${capabilities.wallet}:${capabilities.signAuthEntry}` : 'null'}
+      </div>
       <div data-testid="connected">{isConnected ? 'true' : 'false'}</div>
       <div data-testid="connecting">{isConnecting ? 'true' : 'false'}</div>
       <div data-testid="restoring">{isRestoring ? 'true' : 'false'}</div>
@@ -131,6 +135,7 @@ describe('WalletProvider', () => {
 
     expect(screen.getByTestId('address').textContent).toBe('null');
     expect(screen.getByTestId('provider').textContent).toBe('null');
+    expect(screen.getByTestId('capabilities').textContent).toBe('null');
     expect(screen.getByTestId('connected').textContent).toBe('false');
     expect(screen.getByTestId('restoring').textContent).toBe('false');
   });
@@ -252,6 +257,7 @@ describe('WalletProvider', () => {
     expect(screen.getByTestId('address').textContent).toBe('GB_FREIGHTER');
     expect(screen.getByTestId('provider').textContent).toBe('freighter');
     expect(screen.getByTestId('connected').textContent).toBe('true');
+    expect(screen.getByTestId('capabilities').textContent).toBe('freighter:true');
     expect(localStorage.getItem('stellar_starter_kit_wallet_provider')).toBe('freighter');
     expect(localStorage.getItem('stellar_starter_kit_wallet_address')).toBe('GB_FREIGHTER');
   });

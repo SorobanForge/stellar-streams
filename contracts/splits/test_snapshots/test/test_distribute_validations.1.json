@@ -143,6 +143,14 @@
                   },
                   {
                     "key": {
+                      "symbol": "distributed"
+                    },
+                    "val": {
+                      "bool": false
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "id"
                     },
                     "val": {
