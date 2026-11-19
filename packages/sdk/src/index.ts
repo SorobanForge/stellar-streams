@@ -22,6 +22,7 @@ import type {
   CreateEscrowParams,
   CreateStreamParams,
   Escrow,
+  SetMilestonesParams,
   Stream,
   StreamConfig,
 } from '@stellar-starter-kit/types';
@@ -646,7 +647,12 @@ export type EscrowErrorCode =
   | 'INVALID_STATE_TRANSITION'
   | 'DEADLINE_NOT_REACHED'
   | 'DEADLINE_EXPIRED'
-  | 'ALREADY_FINALIZED';
+  | 'ALREADY_FINALIZED'
+  | 'INVALID_DEADLINE'
+  | 'MILESTONE_SCHEDULE_NOT_FOUND'
+  | 'MILESTONE_INDEX_OUT_OF_RANGE'
+  | 'MILESTONE_ALREADY_RELEASED'
+  | 'MILESTONE_SCHEDULE_INVALID';
 
 /** Events requested per `getEvents` call when {@link StreamsClient.listStreams} pages. */
 export const DEFAULT_EVENT_PAGE_SIZE = 100;
@@ -740,6 +746,11 @@ const ESCROW_ERROR_CODES: Record<number, EscrowErrorCode> = {
   6: 'DEADLINE_NOT_REACHED',
   7: 'DEADLINE_EXPIRED',
   8: 'ALREADY_FINALIZED',
+  9: 'INVALID_DEADLINE',
+  10: 'MILESTONE_SCHEDULE_NOT_FOUND',
+  11: 'MILESTONE_INDEX_OUT_OF_RANGE',
+  12: 'MILESTONE_ALREADY_RELEASED',
+  13: 'MILESTONE_SCHEDULE_INVALID',
 };
 
 /** The escrow counterpart of `StreamsError`; raised for `EscrowClient` failures. */
@@ -1175,6 +1186,10 @@ abstract class SorobanClient {
       contractCode,
     );
   }
+}
+
+function isBigintArray(value: unknown): value is bigint[] {
+  return Array.isArray(value) && value.every((amount: unknown) => typeof amount === 'bigint');
 }
 
 /**
@@ -1685,6 +1700,16 @@ export class EscrowClient extends SorobanClient {
     return raw === null ? null : normalizeEscrow(raw);
   }
 
+  /** Fetch an escrow's milestone schedule, or `null` when it has none. */
+  async getMilestones(id: bigint | number | string): Promise<bigint[] | null> {
+    const raw = await this.simulate('get_milestones', nativeToScVal(BigInt(id), { type: 'u64' }));
+    if (raw === null) return null;
+    if (!isBigintArray(raw)) {
+      throw new TypeError('Invalid escrow milestones response: expected an array of bigints.');
+    }
+    return raw;
+  }
+
   /**
    * Create an escrow in the `created` (unfunded) state. `payer` must sign for
    * it; `id` is chosen by the caller and must not exist yet.
@@ -1704,6 +1729,25 @@ export class EscrowClient extends SorobanClient {
         addressToScVal(params.token),
         nativeToScVal(BigInt(params.amount), { type: 'i128' }),
         nativeToScVal(BigInt(params.deadline), { type: 'u64' }),
+      ],
+      opts,
+    );
+  }
+
+  /** Configure the escrow's ordered milestone amounts before it is funded. */
+  async setMilestones<O extends WriteOptions = WriteOptions>(
+    params: SetMilestonesParams,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    return this.invoke(
+      'set_milestones',
+      [
+        nativeToScVal(BigInt(params.id), { type: 'u64' }),
+        addressToScVal(params.caller),
+        nativeToScVal(
+          params.amounts.map((amount) => BigInt(amount)),
+          { type: 'i128' },
+        ),
       ],
       opts,
     );

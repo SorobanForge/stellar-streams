@@ -473,3 +473,10 @@ export interface CreateEscrowParams {
   amount: string;
   deadline: string;
 }
+
+/** Inputs for `set_milestones`. Amounts are in the token's smallest unit. */
+export interface SetMilestonesParams {
+  id: bigint | number | string;
+  caller: string;
+  amounts: readonly (bigint | string)[];
+}

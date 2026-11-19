@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Address, Keypair, scValToNative, xdr } from '@stellar/stellar-sdk';
+import { Address, Keypair, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
 import type { EscrowStatus } from '@stellar-starter-kit/types';
 import { EscrowError } from './index';
@@ -107,6 +107,27 @@ describe('EscrowClient reads', () => {
       method: 'get_escrow',
     });
   });
+
+  it('decodes an ordered milestone schedule to bigints', async () => {
+    rpc.simulateTransaction.mockResolvedValue(
+      simulationSuccess(nativeToScVal([400n, 600n], { type: 'i128' })),
+    );
+
+    await expect(makeEscrowClient({ transport: rpc }).getMilestones(42)).resolves.toEqual([
+      400n,
+      600n,
+    ]);
+    expect(invokedCall(rpc.simulateTransaction.mock.calls[0]![0])).toEqual({
+      contractId: CONTRACT_ID,
+      method: 'get_milestones',
+    });
+  });
+
+  it('returns null when the escrow has no milestone schedule', async () => {
+    rpc.simulateTransaction.mockResolvedValue(simulationSuccess(xdr.ScVal.scvVoid()));
+
+    await expect(makeEscrowClient({ transport: rpc }).getMilestones(42)).resolves.toBeNull();
+  });
 });
 
 describe('EscrowClient writes', () => {
@@ -153,6 +174,21 @@ describe('EscrowClient writes', () => {
     expect(Address.fromScVal(args[4]!).toString()).toBe(CONTRACT_ID);
     expect(scValToNative(args[5]!)).toBe(500_000_000n);
     expect(scValToNative(args[6]!)).toBe(2_000n);
+  });
+
+  it('encodes the milestone schedule as an ordered Vec<i128>', async () => {
+    await makeEscrowClient({ transport: rpc }).setMilestones({
+      id: 7n,
+      caller: ARBITER,
+      amounts: [400n, '600'],
+    });
+
+    const tx = rpc.prepareTransaction.mock.calls[0]![0];
+    const args = callArgs(tx);
+    expect(invokedCall(tx)).toEqual({ contractId: CONTRACT_ID, method: 'set_milestones' });
+    expect(scValToNative(args[0]!)).toBe(7n);
+    expect(Address.fromScVal(args[1]!).toString()).toBe(ARBITER);
+    expect(scValToNative(args[2]!)).toEqual([400n, 600n]);
   });
 
   it('rejects a token that is not a contract id before touching the RPC', async () => {
@@ -203,5 +239,46 @@ describe('EscrowClient writes', () => {
       'Simulation of release_escrow failed: ESCROW_NOT_FOUND (contract error #1) — HostError: Error(Contract, #1)',
     );
     expect(rpc.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a rejected milestone schedule through EscrowError.code', async () => {
+    rpc.simulateTransaction.mockResolvedValue(simulationError('HostError: Error(Contract, #13)'));
+
+    const error = (await makeEscrowClient({ transport: rpc })
+      .setMilestones({ id: 7, caller: ARBITER, amounts: [400n, 500n] })
+      .catch((e: unknown) => e)) as EscrowError;
+
+    expect(error).toBeInstanceOf(EscrowError);
+    expect(error.code).toBe('MILESTONE_SCHEDULE_INVALID');
+    expect(error.contractCode).toBe(13);
+    expect(rpc.sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [1, 'ESCROW_NOT_FOUND'],
+    [2, 'ESCROW_ALREADY_EXISTS'],
+    [3, 'INVALID_AMOUNT'],
+    [4, 'UNAUTHORIZED_OPERATION'],
+    [5, 'INVALID_STATE_TRANSITION'],
+    [6, 'DEADLINE_NOT_REACHED'],
+    [7, 'DEADLINE_EXPIRED'],
+    [8, 'ALREADY_FINALIZED'],
+    [9, 'INVALID_DEADLINE'],
+    [10, 'MILESTONE_SCHEDULE_NOT_FOUND'],
+    [11, 'MILESTONE_INDEX_OUT_OF_RANGE'],
+    [12, 'MILESTONE_ALREADY_RELEASED'],
+    [13, 'MILESTONE_SCHEDULE_INVALID'],
+  ] as const)('maps escrow contract error #%i to %s', async (contractCode, code) => {
+    rpc.simulateTransaction.mockResolvedValue(
+      simulationError(`HostError: Error(Contract, #${contractCode})`),
+    );
+
+    const error = (await makeEscrowClient({ transport: rpc })
+      .releaseEscrow(7, ARBITER)
+      .catch((e: unknown) => e)) as EscrowError;
+
+    expect(error).toBeInstanceOf(EscrowError);
+    expect(error.code).toBe(code);
+    expect(error.contractCode).toBe(contractCode);
   });
 });
