@@ -13,7 +13,7 @@ import {
   TriangleAlert,
   Wallet,
 } from 'lucide-react';
-import { cn, Footer, Header } from '@stellar-starter-kit/ui';
+import { cn, Footer, Header, Select } from '@stellar-starter-kit/ui';
 import {
   formatAddress,
   formatBps,
@@ -124,6 +124,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 export default function UiGallery() {
   const [loading, setLoading] = useState(false);
   const [toggled, setToggled] = useState(false);
+  const [network, setNetwork] = useState('testnet');
 
   return (
     <div className="min-h-screen bg-[#06060c] text-slate-100 selection:bg-purple-500/30 selection:text-purple-200">
@@ -294,16 +295,21 @@ export default function UiGallery() {
                   Must be a C... contract id.
                 </span>
               </label>
-              <label className="block">
-                <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                  Select
-                </span>
-                <select className={cn(inputClassName, 'mt-2')} defaultValue="testnet">
-                  <option value="local">Local</option>
-                  <option value="testnet">Testnet</option>
-                  <option value="mainnet">Mainnet</option>
-                </select>
-              </label>
+              <div>
+                <Select
+                  label="Select"
+                  value={network}
+                  onChange={setNetwork}
+                  options={[
+                    { value: 'local', label: 'Local' },
+                    { value: 'testnet', label: 'Testnet' },
+                    { value: 'mainnet', label: 'Mainnet' },
+                  ]}
+                />
+                <p className="mt-1.5 text-xs text-slate-500">
+                  Shared <code className="font-mono">Select</code> — currently {network}.
+                </p>
+              </div>
               <label className="block">
                 <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
                   Textarea

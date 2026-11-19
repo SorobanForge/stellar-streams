@@ -25,6 +25,7 @@ import {
   StatusBadge,
 } from '@stellar-starter-kit/ui';
 import { useCancelStream, useCreateStream, useWithdrawStream } from '@stellar-starter-kit/hooks';
+import { CopyButton } from '../../components/CopyButton';
 import { getStreamMetrics, type Stream } from '@stellar-starter-kit/types';
 import {
   formatAddress,
@@ -479,7 +480,10 @@ function StreamsDashboard({ config }: { config: EnvironmentConfig }) {
                   <dl className="grid grid-cols-2 gap-4 border-t border-slate-900 pt-4">
                     <div>
                       <dt className="text-[10px] text-slate-500 uppercase">Recipient</dt>
-                      <dd className="mt-1 text-slate-300">{formatAddress(stream.recipient, 6)}</dd>
+                      <dd className="mt-1 flex items-center gap-1 text-slate-300">
+                        {formatAddress(stream.recipient, 6)}
+                        <CopyButton value={stream.recipient} label="recipient address" />
+                      </dd>
                     </div>
                     <div>
                       <dt className="text-[10px] text-slate-500 uppercase">Total</dt>
@@ -545,6 +549,7 @@ function StreamsDashboard({ config }: { config: EnvironmentConfig }) {
                     >
                       Explorer <ExternalLink className="h-3 w-3" />
                     </a>
+                    {CONTRACT_ID ? <CopyButton value={CONTRACT_ID} label="contract id" /> : null}
                   </div>
                 </div>
               )}

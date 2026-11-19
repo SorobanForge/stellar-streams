@@ -15,6 +15,8 @@ import {
 } from './optimistic.js';
 
 export * from './splits.js';
+export { useTokenMetadata } from './token-metadata.js';
+export type { UseTokenMetadataResult } from './token-metadata.js';
 export type { MutationOptions, MutationResult, MutationStatus } from './mutation.js';
 
 /** Tracks browser connectivity as a lightweight proxy for network status. */
@@ -73,6 +75,14 @@ export interface UseStreamResult {
    * "reconnecting" hint instead of blanking the stream.
    */
   isStale: boolean;
+  /**
+   * `true` while polling is running: an interval is configured, a client and id
+   * are present, and the tab is visible. Hiding the tab pauses polling and
+   * flips this to `false`; showing it again resumes polling and flips it back.
+   */
+  isPolling: boolean;
+  /** Epoch milliseconds of the last successful load, or `null` before one. */
+  lastUpdatedAt: number | null;
   refresh: () => Promise<void>;
 }
 
@@ -111,6 +121,9 @@ export function useStream(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isStale, setIsStale] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
+  // Polling is suspended while the tab is hidden.
+  const [pollingPaused, setPollingPaused] = useState(false);
   const mounted = useRef(true);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   // Last value read from the chain; pending mutations are overlaid on it.
@@ -137,6 +150,7 @@ export function useStream(
         setClaimable(0n);
         setError(null);
         setIsStale(false);
+        setLastUpdatedAt(null);
         setLoading(false);
         return;
       }
@@ -163,6 +177,7 @@ export function useStream(
             setClaimable(nextClaimable);
             setError(null);
             setIsStale(false);
+            setLastUpdatedAt(Date.now());
             return;
           } catch (err) {
             if (!mounted.current) return;
@@ -231,11 +246,13 @@ export function useStream(
     // Handle visibility changes
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
+        setPollingPaused(false);
         // Resume polling with immediate refresh
         stopPolling();
         void refresh(); // Immediate refresh
         startPolling(); // Then start regular polling
       } else if (document.visibilityState === 'hidden') {
+        setPollingPaused(true);
         // Pause polling when tab is hidden
         stopPolling();
       }
@@ -249,6 +266,7 @@ export function useStream(
       document.addEventListener('visibilitychange', handleVisibilityChange);
 
       // Handle initial state (in case we start hidden)
+      setPollingPaused(document.visibilityState === 'hidden');
       if (document.visibilityState === 'hidden') {
         stopPolling();
       }
@@ -263,7 +281,9 @@ export function useStream(
     };
   }, [pollMs, refresh, client, id]);
 
-  return { stream, claimable, loading, error, isStale, refresh };
+  const isPolling = pollMs > 0 && client !== null && id !== null && !pollingPaused;
+
+  return { stream, claimable, loading, error, isStale, isPolling, lastUpdatedAt, refresh };
 }
 
 export type StreamMutationOptions = MutationOptions;

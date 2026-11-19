@@ -8,6 +8,7 @@ import {
   Card,
   Input,
   ProgressBar,
+  Select,
   Skeleton,
   StatusBadge,
   type AlertTone,
@@ -49,6 +50,72 @@ describe('Input', () => {
     expect(screen.getByText('Must be a valid address.').textContent).toBe(
       'Must be a valid address.',
     );
+  });
+});
+
+describe('Select', () => {
+  const options = [
+    { value: 'local', label: 'Local' },
+    { value: 'testnet', label: 'Testnet' },
+    { value: 'mainnet', label: 'Mainnet', disabled: true },
+  ];
+
+  it('shows the selected option and selects on click', () => {
+    const onChange = vi.fn();
+    render(<Select label="Network" options={options} value="local" onChange={onChange} />);
+
+    const combobox = screen.getByRole('combobox', { name: 'Network' });
+    expect(combobox.getAttribute('aria-expanded')).toBe('false');
+    expect(combobox.textContent).toContain('Local');
+
+    fireEvent.click(combobox);
+    expect(combobox.getAttribute('aria-expanded')).toBe('true');
+
+    fireEvent.click(screen.getByRole('option', { name: 'Testnet' }));
+    expect(onChange).toHaveBeenCalledWith('testnet');
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('moves with the arrow keys and selects with Enter', () => {
+    const onChange = vi.fn();
+    render(<Select label="Network" options={options} value="local" onChange={onChange} />);
+
+    const combobox = screen.getByRole('combobox', { name: 'Network' });
+    fireEvent.keyDown(combobox, { key: 'ArrowDown' });
+    fireEvent.keyDown(combobox, { key: 'ArrowDown' });
+    fireEvent.keyDown(combobox, { key: 'Enter' });
+
+    expect(onChange).toHaveBeenCalledWith('testnet');
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('skips disabled options and closes on Escape', () => {
+    const onChange = vi.fn();
+    render(<Select label="Network" options={options} value="local" onChange={onChange} />);
+
+    const combobox = screen.getByRole('combobox', { name: 'Network' });
+    fireEvent.keyDown(combobox, { key: 'ArrowDown' });
+    // local → testnet → wraps past the disabled mainnet back to local.
+    fireEvent.keyDown(combobox, { key: 'ArrowDown' });
+    fireEvent.keyDown(combobox, { key: 'ArrowDown' });
+    fireEvent.keyDown(combobox, { key: 'Enter' });
+    expect(onChange).toHaveBeenLastCalledWith('local');
+
+    fireEvent.keyDown(combobox, { key: 'ArrowDown' });
+    expect(screen.getByRole('listbox')).not.toBeNull();
+    fireEvent.keyDown(combobox, { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(combobox.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('does not open when disabled', () => {
+    const onChange = vi.fn();
+    render(<Select label="Network" options={options} value="local" onChange={onChange} disabled />);
+
+    const combobox = screen.getByRole('combobox', { name: 'Network' });
+    expect((combobox as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(combobox);
+    expect(screen.queryByRole('listbox')).toBeNull();
   });
 });
 

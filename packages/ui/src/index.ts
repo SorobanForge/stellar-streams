@@ -1,6 +1,15 @@
 export { cn } from './utils';
 export { REPO_URL } from './constants';
-export { Alert, Button, Card, Input, ProgressBar, Skeleton, StatusBadge } from './primitives';
+export {
+  Alert,
+  Button,
+  Card,
+  Input,
+  ProgressBar,
+  Select,
+  Skeleton,
+  StatusBadge,
+} from './primitives';
 export type {
   AlertProps,
   AlertTone,
@@ -8,6 +17,8 @@ export type {
   CardProps,
   InputProps,
   ProgressBarProps,
+  SelectOption,
+  SelectProps,
   SkeletonProps,
   SkeletonRounded,
   StatusBadgeProps,
