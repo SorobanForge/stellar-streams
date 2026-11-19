@@ -6,10 +6,10 @@
 
 ## 1. Overview of Privileged Operations
 
-- **`set_fee`**: Updates the protocol fee rate expressed in basis points (bps), where 100 bps = 1%. 
+- **`set_fee`**: Updates the protocol fee rate expressed in basis points (bps), where 100 bps = 1%.
   - **Fee Cap**: Enforced on-chain at a maximum of **1000 bps (10%)**. Any attempt to set a fee > 1000 bps will fail with a contract error.
 - **`set_treasury`**: Updates the recipient address designated to collect accumulated protocol fees.
-  - **Treasury-Not-Set Failure Mode**: If a stream contract has a non-zero fee configured (`fee_bps > 0`) but no valid treasury address has been initialized (`treasury` is unset/zero), fee collection during withdrawals will fail, reverting the transaction. Always configure a valid treasury address *before* or *simultaneously with* enabling protocol fees.
+  - **Treasury-Not-Set Failure Mode**: If a stream contract has a non-zero fee configured (`fee_bps > 0`) but no valid treasury address has been initialized (`treasury` is unset/zero), fee collection during withdrawals will fail, reverting the transaction. Always configure a valid treasury address _before_ or _simultaneously with_ enabling protocol fees.
 
 ---
 
