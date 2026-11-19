@@ -15,7 +15,15 @@ import {
 } from 'lucide-react';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
-import { Button, Footer, Header, Input } from '@stellar-starter-kit/ui';
+import {
+  Button,
+  Footer,
+  Header,
+  Input,
+  ProgressBar,
+  Skeleton,
+  StatusBadge,
+} from '@stellar-starter-kit/ui';
 import { useCancelStream, useCreateStream, useWithdrawStream } from '@stellar-starter-kit/hooks';
 import { getStreamMetrics, type Stream } from '@stellar-starter-kit/types';
 import {
@@ -430,31 +438,31 @@ export default function StreamsDashboard() {
                 </button>
               </div>
 
-              {stream && (
+              {loadingStream && (
+                <div className="mt-6 space-y-4 rounded-xl border border-slate-900 bg-slate-950/60 p-5">
+                  <span role="status" className="sr-only">
+                    Loading stream
+                  </span>
+                  <div className="flex items-center justify-between">
+                    <Skeleton width={120} height="1rem" rounded="sm" />
+                    <Skeleton width={72} height="1.25rem" rounded="full" />
+                  </div>
+                  <Skeleton height="0.5rem" rounded="full" />
+                  <div className="space-y-2">
+                    <Skeleton height="0.75rem" width="60%" rounded="sm" />
+                    <Skeleton height="0.75rem" width="45%" rounded="sm" />
+                  </div>
+                </div>
+              )}
+
+              {!loadingStream && stream && (
                 <div className="mt-6 space-y-4 rounded-xl border border-slate-900 bg-slate-950/60 p-5 font-mono text-xs">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-bold text-white">Stream #{stream.id}</span>
-                    <span
-                      className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
-                        status === 'streaming'
-                          ? 'border border-cyan-500/20 bg-cyan-500/10 text-cyan-300'
-                          : status === 'completed'
-                            ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
-                            : status === 'cancelled'
-                              ? 'border border-rose-500/20 bg-rose-500/10 text-rose-300'
-                              : 'border border-slate-700 bg-slate-800/40 text-slate-300'
-                      }`}
-                    >
-                      {status}
-                    </span>
+                    <StatusBadge status={status ?? 'unknown'} />
                   </div>
 
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-900">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-purple-500 to-cyan-400 transition-all"
-                      style={{ width: `${(progress / 100).toFixed(1)}%` }}
-                    />
-                  </div>
+                  <ProgressBar value={progress / 100} label="Vested" />
                   <div className="flex justify-between text-[10px] text-slate-500">
                     <span>{formatBps(progress)} vested</span>
                     <span>{formatDuration(streamMetrics?.remainingSeconds ?? 0)} remaining</span>
