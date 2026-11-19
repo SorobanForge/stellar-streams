@@ -16,6 +16,7 @@ import {
   type SignTransactionOptions,
 } from './adapter.js';
 import type { WalletType } from '../WalletProvider';
+import { toWalletLockedError } from '../errors.js';
 
 /** Adapter for the Freighter wallet extension (@stellar/freighter-api v6). */
 export class FreighterAdapter implements WalletAdapter {
@@ -39,9 +40,18 @@ export class FreighterAdapter implements WalletAdapter {
     try {
       const access = await requestFreighterAccess();
       address = access.address;
-    } catch {
-      const res = await getFreighterAddress();
-      address = res.address;
+    } catch (err) {
+      // A locked extension rejects access the same way a denied request does;
+      // falling back to getAddress would only repeat the opaque rejection.
+      const locked = toWalletLockedError(err, this.name);
+      if (locked) throw locked;
+
+      try {
+        const res = await getFreighterAddress();
+        address = res.address;
+      } catch (fallbackErr) {
+        throw toWalletLockedError(fallbackErr, this.name) ?? fallbackErr;
+      }
     }
 
     if (!address) {
@@ -65,18 +75,27 @@ export class FreighterAdapter implements WalletAdapter {
   }
 
   async signTransaction(xdr: string, opts?: SignTransactionOptions): Promise<string> {
-    const { signedTxXdr } = await signFreighterTransaction(xdr, {
-      networkPassphrase: resolveNetworkPassphrase(opts),
-      address: this.publicKey ?? '',
-    });
-    return signedTxXdr;
+    try {
+      const { signedTxXdr } = await signFreighterTransaction(xdr, {
+        networkPassphrase: resolveNetworkPassphrase(opts),
+        address: this.publicKey ?? '',
+      });
+      return signedTxXdr;
+    } catch (err) {
+      throw toWalletLockedError(err, this.name) ?? err;
+    }
   }
 
   async signAuthEntry(entryXdr: string, opts?: SignTransactionOptions): Promise<string> {
-    const { signedAuthEntry } = await signFreighterAuthEntry(entryXdr, {
-      networkPassphrase: resolveNetworkPassphrase(opts),
-      address: this.publicKey ?? '',
-    });
+    let signedAuthEntry: string | null | undefined;
+    try {
+      ({ signedAuthEntry } = await signFreighterAuthEntry(entryXdr, {
+        networkPassphrase: resolveNetworkPassphrase(opts),
+        address: this.publicKey ?? '',
+      }));
+    } catch (err) {
+      throw toWalletLockedError(err, this.name) ?? err;
+    }
     if (!signedAuthEntry) {
       throw new Error('Failed to sign auth entry.');
     }
