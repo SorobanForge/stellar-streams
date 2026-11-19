@@ -367,6 +367,77 @@ describe('WalletProvider', () => {
     expect(localStorage.getItem('stellar_starter_kit_wallet_address')).toBeNull();
   });
 
+  it('should report connect failures to the onError reporter', async () => {
+    const onError = vi.fn();
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockRejectedValue(new Error('Popup closed'));
+    vi.mocked(freighter.getAddress).mockRejectedValue(new Error('Popup closed'));
+
+    render(
+      <WalletProvider onError={onError}>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Freighter').click();
+    });
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    const context = onError.mock.calls[0][0];
+    expect(context).toMatchObject({ adapter: 'freighter', operation: 'connect' });
+    expect(context.error).toBeInstanceOf(Error);
+    expect((context.error as Error).message).toBe('Popup closed');
+    // The injected reporter replaces the default console logging.
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('should warn on connect failures when no reporter is provided', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockRejectedValue(new Error('Popup closed'));
+    vi.mocked(freighter.getAddress).mockRejectedValue(new Error('Popup closed'));
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Freighter').click();
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith('Wallet connection error:', expect.any(Error));
+  });
+
+  it('should report sign failures without including the signed XDR', async () => {
+    const onError = vi.fn();
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER' });
+    vi.mocked(freighter.signTransaction).mockRejectedValue(new Error('Signing failed.'));
+
+    render(
+      <WalletProvider onError={onError}>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Freighter').click();
+    });
+
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+
+    expect(onError).toHaveBeenCalledTimes(1);
+    const context = onError.mock.calls[0][0];
+    expect(context).toMatchObject({ adapter: 'freighter', operation: 'signTransaction' });
+    expect(context.error).toBeInstanceOf(Error);
+    expect(Object.keys(context).sort()).toEqual(['adapter', 'error', 'operation']);
+    expect(JSON.stringify(context)).not.toContain('mock-xdr');
+  });
+
   it('should surface a missing Rabet extension', async () => {
     render(
       <WalletProvider>

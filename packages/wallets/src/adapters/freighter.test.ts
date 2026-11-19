@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { FreighterAdapter } from './freighter';
+import { WalletLockedError } from '../errors';
 
 // The source imports the CommonJS package's default export, while these tests
 // assert on the named ones, so both point at the same mocks.
@@ -67,6 +68,51 @@ describe('FreighterAdapter', () => {
     const adapter = newAdapter();
     const key = await adapter.connect();
     expect(key).toBe('GB_FALLBACK');
+  });
+
+  it('maps a locked extension during connect to WalletLockedError', async () => {
+    vi.mocked(isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(requestAccess).mockRejectedValue(new Error('Wallet is locked'));
+    const adapter = newAdapter();
+
+    const error = await adapter.connect().catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(WalletLockedError);
+    expect((error as WalletLockedError).code).toBe('WALLET_LOCKED');
+    expect((error as WalletLockedError).message).toContain('Unlock the extension');
+    // A locked wallet must not be mistaken for a denied request and retried.
+    expect(getAddress).not.toHaveBeenCalled();
+  });
+
+  it('passes an unrelated connect failure through unchanged', async () => {
+    vi.mocked(isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(requestAccess).mockRejectedValue(new Error('Network unavailable'));
+    vi.mocked(getAddress).mockResolvedValue({ address: 'GB_FALLBACK' });
+    const adapter = newAdapter();
+
+    await expect(adapter.connect()).resolves.toBe('GB_FALLBACK');
+  });
+
+  it('maps a locked extension while signing', async () => {
+    vi.mocked(signTransaction).mockRejectedValue(new Error('Please unlock your wallet.'));
+    const adapter = newAdapter();
+
+    const error = await adapter.signTransaction('xdr', { network: 'TESTNET' }).catch((err) => err);
+
+    expect(error).toBeInstanceOf(WalletLockedError);
+    expect((error as WalletLockedError).message).toBe(
+      'Freighter wallet is locked. Unlock the extension and try again.',
+    );
+  });
+
+  it('does not remap unrelated signing failures', async () => {
+    vi.mocked(signTransaction).mockRejectedValue(new Error('User rejected the request.'));
+    const adapter = newAdapter();
+
+    const error = await adapter.signTransaction('xdr').catch((err) => err);
+
+    expect((error as Error).message).toBe('User rejected the request.');
+    expect(error).not.toBeInstanceOf(WalletLockedError);
   });
 
   it('connect throws when not connected', async () => {

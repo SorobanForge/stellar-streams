@@ -13,6 +13,28 @@ import { isUserRejection, NotSupportedError, toSigningError } from './errors.js'
 
 export type WalletType = 'freighter' | 'albedo' | 'rabe' | 'hana' | 'ledger';
 
+/** Provider operations that can fail and be reported. */
+export type WalletOperation = 'connect' | 'signTransaction' | 'signAuthEntry';
+
+/**
+ * Failure handed to the injectable reporter. It deliberately carries only the
+ * adapter id, the operation and the error: never the XDR being signed, a
+ * signature or any other secret.
+ */
+export interface WalletErrorContext {
+  adapter: WalletType;
+  operation: WalletOperation;
+  error: unknown;
+}
+
+export type WalletErrorReporter = (context: WalletErrorContext) => void;
+
+export interface WalletProviderProps {
+  children: React.ReactNode;
+  /** Receives adapter failures for telemetry. Falls back to a console warning. */
+  onError?: WalletErrorReporter;
+}
+
 export interface WalletContextType {
   activeAddress: string | null;
   activeProvider: WalletType | null;
@@ -54,7 +76,7 @@ const ADAPTERS: Record<WalletType, WalletAdapter> = {
   ledger: new LedgerAdapter(),
 };
 
-export function WalletProvider({ children }: { children: React.ReactNode }) {
+export function WalletProvider({ children, onError }: WalletProviderProps) {
   const [activeAddress, setActiveAddress] = useState<string | null>(null);
   const [activeProvider, setActiveProvider] = useState<WalletType | null>(null);
   const [network, setNetwork] = useState<string>('TESTNET');
@@ -66,6 +88,34 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const restoreId = useRef(0);
 
   const adapterFor = useCallback((provider: WalletType): WalletAdapter => ADAPTERS[provider], []);
+
+  /**
+   * Sends a failure to the injected reporter, or logs it at warning level when
+   * no reporter is configured. Logging here (rather than at each call site)
+   * keeps the default behaviour of surfacing failures instead of swallowing
+   * them, while a hosted deployment can ship the same events to telemetry.
+   */
+  const reportError = useCallback(
+    ({ adapter, operation, error }: WalletErrorContext) => {
+      if (onError) {
+        onError({ adapter, operation, error });
+        return;
+      }
+
+      if (operation === 'connect') {
+        console.warn('Wallet connection error:', error);
+        return;
+      }
+
+      const noun = operation === 'signTransaction' ? 'transaction' : 'auth entry';
+      if (isUserRejection(error instanceof Error ? error.message : '')) {
+        console.warn(`${noun} signing cancelled by user:`, error);
+      } else {
+        console.warn(`${noun} signing failed:`, error);
+      }
+    },
+    [onError],
+  );
 
   const connect = useCallback(
     async (provider: WalletType) => {
@@ -89,13 +139,13 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
             ? err.message
             : 'An unknown error occurred connecting to the wallet.';
         setError(message);
-        console.error('Wallet connection error:', err);
+        reportError({ adapter: provider, operation: 'connect', error: err });
         throw err;
       } finally {
         setIsConnecting(false);
       }
     },
-    [adapterFor],
+    [adapterFor, reportError],
   );
 
   const disconnect = useCallback(() => {
@@ -198,15 +248,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         return await sign.call(adapter, xdr, { networkPassphrase: passphrase, network });
       } catch (err) {
         const error = toSigningError(err, `Failed to sign ${noun}.`);
-        if (isUserRejection(error.message)) {
-          console.warn(`${noun} signing cancelled by user:`, err);
-        } else {
-          console.error(`${noun} signing failed:`, err);
-        }
+        reportError({ adapter: activeProvider, operation: method, error });
         throw error;
       }
     },
-    [activeProvider, activeAddress, network],
+    [activeProvider, activeAddress, network, reportError],
   );
 
   const signTransaction = useCallback(
