@@ -400,32 +400,29 @@ export function useReduceStream(
   client: ReduceStreamsClientLike | null,
   options: StreamMutationOptions = {},
 ): StreamMutationResult<[ReduceStreamParams]> {
-  const run = useCallback(
-    async (streams: ReduceStreamsClientLike, params: ReduceStreamParams) => {
-      let newTotal: bigint;
-      try {
-        newTotal = BigInt(params.newTotal);
-      } catch {
-        throw new Error('Stream total must be a whole number of base units');
-      }
-      if (newTotal < 0n) {
-        throw new Error('Stream total cannot be negative');
-      }
+  const run = useCallback(async (streams: ReduceStreamsClientLike, params: ReduceStreamParams) => {
+    let newTotal: bigint;
+    try {
+      newTotal = BigInt(params.newTotal);
+    } catch {
+      throw new Error('Stream total must be a whole number of base units');
+    }
+    if (newTotal < 0n) {
+      throw new Error('Stream total cannot be negative');
+    }
 
-      const key = String(params.id);
-      const opId = pushOptimistic(streams, key, () => ({ totalAmount: newTotal.toString() }));
-      try {
-        const result = await streams.reduceStream(params.id, newTotal);
-        settleOptimistic(streams, key, opId);
-        void notifyOptimisticRefresh(streams, key);
-        return result;
-      } catch (err) {
-        rollbackOptimistic(streams, key, opId);
-        throw err;
-      }
-    },
-    [],
-  );
+    const key = String(params.id);
+    const opId = pushOptimistic(streams, key, () => ({ totalAmount: newTotal.toString() }));
+    try {
+      const result = await streams.reduceStream(params.id, newTotal);
+      settleOptimistic(streams, key, opId);
+      void notifyOptimisticRefresh(streams, key);
+      return result;
+    } catch (err) {
+      rollbackOptimistic(streams, key, opId);
+      throw err;
+    }
+  }, []);
   return useContractMutation<ReduceStreamsClientLike, [ReduceStreamParams]>(client, run, options);
 }
 
