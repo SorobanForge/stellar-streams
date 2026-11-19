@@ -23,15 +23,31 @@ function fakeStream(id: string, address: string): Stream {
   };
 }
 
+// Mock dependencies
 vi.mock('@stellar-starter-kit/wallets', () => ({
-  useWallet: vi.fn(),
+  useWallet: vi.fn(() => ({
+    activeAddress: 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFDAGORAc3LM2T2NY2424',
+    isConnected: true,
+    isConnecting: false,
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    signTransaction: vi.fn(),
+  })),
 }));
 
 vi.mock('@stellar-starter-kit/hooks', () => ({
   useCreateStream: vi.fn(() => ({ status: 'idle', mutate: vi.fn() })),
   useWithdrawStream: vi.fn(() => ({ status: 'idle', mutate: vi.fn() })),
   useCancelStream: vi.fn(() => ({ status: 'idle', mutate: vi.fn() })),
-  useStreams: vi.fn(),
+  useStreams: vi.fn(() => ({
+    streams: [],
+    loading: false,
+    loadingMore: false,
+    hasMore: false,
+    loadMore: vi.fn(),
+    error: null,
+    refresh: vi.fn(),
+  })),
 }));
 
 vi.mock('next/dynamic', () => ({
@@ -45,6 +61,143 @@ vi.mock('next/link', () => ({
     </a>
   ),
 }));
+
+describe('StreamsDashboard Contract Configuration', () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.mocked(wallets.useWallet).mockReturnValue({
+      activeAddress: 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFDAGORAc3LM2T2NY2424',
+      isConnected: true,
+      isConnecting: false,
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      signTransaction: vi.fn(),
+    } as unknown as ReturnType<typeof wallets.useWallet>);
+    vi.mocked(hooks.useStreams).mockReturnValue({
+      streams: [],
+      loading: false,
+      loadingMore: false,
+      hasMore: false,
+      loadMore: vi.fn(),
+      error: null,
+      refresh: vi.fn(),
+    });
+  });
+
+  describe('when stream contract is unconfigured', () => {
+    it('renders setup notice naming NEXT_PUBLIC_STREAM_CONTRACT_ID and linking to development-guide.md', () => {
+      render(<StreamsDashboard contractId="" />);
+
+      // Notice paragraph is visible
+      const noticeHeading = screen.getByText('Stream contract not configured', { selector: 'p' });
+      expect(noticeHeading).toBeDefined();
+
+      // Names the environment variable
+      expect(screen.getAllByText('NEXT_PUBLIC_STREAM_CONTRACT_ID').length).toBeGreaterThan(0);
+
+      // Links to docs/development-guide.md
+      const docsLink = screen.getByRole('link', { name: /docs\/development-guide\.md/i });
+      expect(docsLink).toBeDefined();
+      expect(docsLink.getAttribute('href')).toContain('docs/development-guide.md');
+    });
+
+    it('disables the create form and shows an explanation instead of a dead button', () => {
+      render(<StreamsDashboard contractId="" />);
+
+      // Inputs should be disabled
+      const recipientInput = screen.getByRole('textbox', { name: /recipient/i });
+      const tokenInput = screen.getByRole('textbox', { name: /token contract/i });
+      const amountInput = screen.getByRole('spinbutton', { name: /amount/i });
+      const durationInput = screen.getByRole('spinbutton', { name: /duration/i });
+      const cliffInput = screen.getByRole('spinbutton', { name: /cliff/i });
+
+      expect(recipientInput.hasAttribute('disabled')).toBe(true);
+      expect(tokenInput.hasAttribute('disabled')).toBe(true);
+      expect(amountInput.hasAttribute('disabled')).toBe(true);
+      expect(durationInput.hasAttribute('disabled')).toBe(true);
+      expect(cliffInput.hasAttribute('disabled')).toBe(true);
+
+      // Submit button is disabled and displays explanation
+      const submitButton = screen.getByRole('button', { name: 'Stream contract not configured' });
+      expect(submitButton).toBeDefined();
+      expect(submitButton.hasAttribute('disabled')).toBe(true);
+
+      // Helper explanation text is rendered
+      const explanation = screen.getByText(
+        (_, el) =>
+          el?.tagName.toLowerCase() === 'p' &&
+          Boolean(
+            el?.textContent?.includes(
+              'Set NEXT_PUBLIC_STREAM_CONTRACT_ID to enable stream creation.',
+            ),
+          ),
+      );
+      expect(explanation).toBeDefined();
+    });
+
+    it('detects unconfigured contract from NEXT_PUBLIC_STREAM_CONTRACT_ID environment variable', () => {
+      vi.stubEnv('NEXT_PUBLIC_STREAM_CONTRACT_ID', '');
+      render(<StreamsDashboard />);
+
+      expect(screen.getByText('Stream contract not configured', { selector: 'p' })).toBeDefined();
+      const submitButton = screen.getByRole('button', { name: 'Stream contract not configured' });
+      expect(submitButton.hasAttribute('disabled')).toBe(true);
+    });
+  });
+
+  describe('when stream contract is configured', () => {
+    it('does not render setup notice and enables create form inputs', () => {
+      render(
+        <StreamsDashboard contractId="CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ" />,
+      );
+
+      // Notice should NOT be rendered
+      expect(screen.queryByText('Stream contract not configured', { selector: 'p' })).toBeNull();
+      expect(screen.queryByRole('link', { name: /docs\/development-guide\.md/i })).toBeNull();
+
+      // Form inputs should NOT be disabled
+      const recipientInput = screen.getByRole('textbox', { name: /recipient/i });
+      const tokenInput = screen.getByRole('textbox', { name: /token contract/i });
+      const amountInput = screen.getByRole('spinbutton', { name: /amount/i });
+      const durationInput = screen.getByRole('spinbutton', { name: /duration/i });
+      const cliffInput = screen.getByRole('spinbutton', { name: /cliff/i });
+
+      expect(recipientInput.hasAttribute('disabled')).toBe(false);
+      expect(tokenInput.hasAttribute('disabled')).toBe(false);
+      expect(amountInput.hasAttribute('disabled')).toBe(false);
+      expect(durationInput.hasAttribute('disabled')).toBe(false);
+      expect(cliffInput.hasAttribute('disabled')).toBe(false);
+
+      // Submit button should have standard text "Create stream", not the unconfigured notice
+      expect(screen.queryByRole('button', { name: 'Stream contract not configured' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Create stream' })).toBeDefined();
+
+      // Helper explanation text should not be present
+      expect(
+        screen.queryByText(
+          (_, el) =>
+            el?.tagName.toLowerCase() === 'p' &&
+            Boolean(
+              el?.textContent?.includes(
+                'Set NEXT_PUBLIC_STREAM_CONTRACT_ID to enable stream creation.',
+              ),
+            ),
+        ),
+      ).toBeNull();
+    });
+
+    it('detects configured contract from NEXT_PUBLIC_STREAM_CONTRACT_ID environment variable', () => {
+      vi.stubEnv(
+        'NEXT_PUBLIC_STREAM_CONTRACT_ID',
+        'CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ',
+      );
+      render(<StreamsDashboard />);
+
+      expect(screen.queryByText('Stream contract not configured', { selector: 'p' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Create stream' })).toBeDefined();
+    });
+  });
+});
 
 describe('StreamsDashboard Pagination', () => {
   beforeEach(() => {
