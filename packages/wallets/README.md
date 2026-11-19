@@ -43,6 +43,35 @@ instead of returning an unsigned entry.
 An auth-entry flow that targets a wallet without this capability is a
 follow-up feature, not something the dashboard should attempt today.
 
+## Loading wallets on demand
+
+`WalletProvider` does not import any adapter module at module scope. Each
+provider is registered as a loader that `import()`s the adapter on first use
+(`connect`, a signature, a session restore, or a disconnect), and each adapter
+`import()`s its own wallet SDK the same way — `@stellar/freighter-api` in
+`freighter.ts`, `@albedo-link/intent` in `albedo.ts`, and Ledger's device
+packages inside the connect path.
+
+The consequence for a page: mounting `WalletProvider` downloads none of the five
+wallet SDKs. Visiting `/streams` and never opening the wallet picker ships no
+adapter code at all, and choosing Freighter pulls Freighter's client without
+Albedo's or Rabet's. `isAvailable()` follows the same rule — probing the persisted
+provider loads only that provider's module, so the probe never pays for the
+adapters the visitor is not using.
+
+Adapters are instantiated once per provider and reused, because they keep
+session state on the instance (the account a signature is made for, Ledger's
+open transport). A loader that fails is retried on the next call rather than
+cached as a rejection.
+
+```tsx
+// No wallet SDK is fetched by this render.
+const { connect, isConnected } = useWallet();
+
+// This is the first moment Albedo's client is requested.
+await connect('albedo');
+```
+
 ## Ledger hardware wallet
 
 `LedgerAdapter` signs with the Stellar app on a Ledger device and is selected
