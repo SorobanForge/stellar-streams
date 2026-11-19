@@ -261,19 +261,44 @@ export function parseDuration(input: string): number {
   if (text.startsWith('-')) throw invalid('Durations must not be negative.');
   if (text.startsWith('+')) throw invalid('Expected a positive duration.');
 
-  // Longest unit first so `mo` is not read as `m` followed by stray text.
-  const token = /\s*(\d+)\s*(mo|[smhdwy])/gi;
+  // A hand-written scanner instead of a regex: the input is user provided and
+  // a pattern like /(\d+)\s*(mo|[smhdwy])/ can backtrack quadratically on long
+  // runs of digits, which CodeQL reports as a ReDoS risk. This walk is linear
+  // and accepts the same grammar.
+  const isDigit = (char: string): boolean => char >= '0' && char <= '9';
+  const isWhitespace = (char: string): boolean => char.trim() === '';
+
   let cursor = 0;
   let total = 0;
-  let matched = false;
 
-  for (const part of text.matchAll(token)) {
-    if (part.index !== cursor) break;
-    cursor = part.index + part[0].length;
-    matched = true;
+  while (cursor < text.length) {
+    while (cursor < text.length && isWhitespace(text[cursor])) cursor++;
+    if (cursor >= text.length) break;
 
-    const value = Number(part[1]);
-    const unit = DURATION_UNIT_SECONDS[part[2].toLowerCase()];
+    if (!isDigit(text[cursor])) {
+      throw invalid(
+        cursor === 0 ? 'Expected at least one value and unit.' : 'Unexpected characters.',
+      );
+    }
+
+    const numberStart = cursor;
+    while (cursor < text.length && isDigit(text[cursor])) cursor++;
+    const digits = text.slice(numberStart, cursor);
+
+    while (cursor < text.length && isWhitespace(text[cursor])) cursor++;
+
+    // Longest unit first so `mo` is not read as `m` followed by stray text.
+    let unitKey: string;
+    if (text.slice(cursor, cursor + 2).toLowerCase() === 'mo') {
+      unitKey = 'mo';
+      cursor += 2;
+    } else {
+      unitKey = text.slice(cursor, cursor + 1).toLowerCase();
+      cursor += unitKey === '' ? 0 : 1;
+    }
+
+    const value = Number(digits);
+    const unit = DURATION_UNIT_SECONDS[unitKey];
     if (!Number.isSafeInteger(value) || unit === undefined) {
       throw invalid('Expected whole numbers followed by a unit.');
     }
@@ -284,9 +309,6 @@ export function parseDuration(input: string): number {
     }
     total += seconds;
   }
-
-  if (!matched) throw invalid('Expected at least one value and unit.');
-  if (cursor !== text.length) throw invalid('Unexpected characters.');
 
   return total;
 }
