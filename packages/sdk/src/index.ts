@@ -434,6 +434,49 @@ export function assetContractId(
   return resolved.contractId(networkPassphrase);
 }
 
+/**
+ * The contract interface version this SDK is built against.
+ *
+ * Must match `CONTRACT_VERSION` in `contracts/version/src/lib.rs`, which is the
+ * value every contract's `version()` view returns; it is the one place the
+ * number is written in TypeScript. Bump it in the same release that bumps the
+ * contract interface, then compare deployments against it with
+ * {@link describeVersionMismatch}.
+ */
+export const SUPPORTED_CONTRACT_VERSION = 1;
+
+/**
+ * Compare a contract's reported interface version with the version this SDK was
+ * built against, so a stale dashboard or a mismatched deployment fails loudly
+ * instead of half-working.
+ *
+ * @param onChainVersion - The `u32` reported by
+ *   {@link StreamsClient.getVersion} / {@link EscrowClient.getVersion}.
+ * @param supportedVersion - The version to compare against; defaults to
+ *   {@link SUPPORTED_CONTRACT_VERSION}.
+ * @returns A message explaining the difference, or `null` when the two agree.
+ * @example
+ * ```typescript
+ * import { describeVersionMismatch } from '@stellar-starter-kit/sdk';
+ *
+ * const problem = describeVersionMismatch(await client.getVersion());
+ * if (problem) console.error(problem);
+ * ```
+ */
+export function describeVersionMismatch(
+  onChainVersion: number,
+  supportedVersion: number = SUPPORTED_CONTRACT_VERSION,
+): string | null {
+  if (onChainVersion === supportedVersion) return null;
+  const direction = onChainVersion > supportedVersion ? 'newer' : 'older';
+  return (
+    `The contract reports interface version ${onChainVersion}, which is ${direction} than the ` +
+    `version this SDK is built against (${supportedVersion}). Calls may fail or decode ` +
+    `unexpected values. Upgrade the SDK, or point the client at a version ${supportedVersion} ` +
+    'deployment.'
+  );
+}
+
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_POLL_TIMEOUT_MS = 30_000;
 /** Base fee used for write transactions when the caller does not pass `fee`. */
@@ -909,6 +952,30 @@ abstract class SorobanClient {
    */
   invalidateAccount(): void {
     this.account = null;
+  }
+
+  /**
+   * The deployed contract's interface version, read from its `version()` view.
+   *
+   * `stream`, `splits` and `escrow` all report the shared `CONTRACT_VERSION`
+   * constant, so `StreamsClient` and `EscrowClient` answer with the same number
+   * for one deployment. Compare the result with {@link SUPPORTED_CONTRACT_VERSION}
+   * — {@link describeVersionMismatch} turns the comparison into a message —
+   * before trusting a deployment a dashboard was configured with.
+   *
+   * @returns The contract's `u32` interface version.
+   * @throws StreamsError / EscrowError when the simulation fails.
+   * @example
+   * ```typescript
+   * import { describeVersionMismatch } from '@stellar-starter-kit/sdk';
+   *
+   * const onChain = await client.getVersion();
+   * const problem = describeVersionMismatch(onChain);
+   * if (problem) throw new Error(problem);
+   * ```
+   */
+  async getVersion(): Promise<number> {
+    return (await this.simulate('version')) as number;
   }
 
   /** Simulates a read-only call on the client's contract and returns the decoded result. */
