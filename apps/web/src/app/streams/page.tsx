@@ -24,7 +24,12 @@ import {
   Skeleton,
   StatusBadge,
 } from '@stellar-starter-kit/ui';
-import { useCancelStream, useCreateStream, useWithdrawStream } from '@stellar-starter-kit/hooks';
+import {
+  useCancelStream,
+  useCreateStream,
+  useStreams,
+  useWithdrawStream,
+} from '@stellar-starter-kit/hooks';
 import { getStreamMetrics, type Stream } from '@stellar-starter-kit/types';
 import {
   formatAddress,
@@ -108,6 +113,14 @@ export default function StreamsDashboard() {
       }),
     [activeAddress, signTransaction],
   );
+
+  const {
+    streams: listedStreams,
+    loading: listingLoading,
+    loadingMore,
+    hasMore,
+    loadMore,
+  } = useStreams(client, activeAddress);
 
   const notify = useCallback((kind: 'success' | 'error', message: string) => {
     if (kind === 'success') {
@@ -543,6 +556,101 @@ export default function StreamsDashboard() {
               )}
             </div>
           </div>
+        </div>
+
+        {/* Listed Streams & Pagination Section */}
+        <div className="mt-12 space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-white">Streams</h2>
+              <p className="mt-1 text-sm text-slate-400">
+                {isConnected
+                  ? `${listedStreams.length} stream${listedStreams.length === 1 ? '' : 's'} loaded`
+                  : 'Connect a wallet to view your streams'}
+              </p>
+            </div>
+          </div>
+
+          {listingLoading && (
+            <div className="space-y-3 rounded-2xl border border-slate-900 bg-slate-950/40 p-6">
+              <Skeleton height="1.5rem" width="30%" rounded="sm" />
+              <Skeleton height="1rem" width="60%" rounded="sm" />
+            </div>
+          )}
+
+          {!listingLoading && isConnected && listedStreams.length === 0 && (
+            <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-8 text-center">
+              <p className="text-sm text-slate-400">No streams found for this address.</p>
+            </div>
+          )}
+
+          {!listingLoading && listedStreams.length > 0 && (
+            <>
+              <div className="overflow-x-auto rounded-2xl border border-slate-900 bg-slate-950/40">
+                <table className="w-full text-left font-mono text-xs">
+                  <thead className="border-b border-slate-900 bg-slate-900/30 text-slate-400 uppercase">
+                    <tr>
+                      <th className="px-4 py-3">ID</th>
+                      <th className="px-4 py-3">Recipient</th>
+                      <th className="px-4 py-3">Total Amount</th>
+                      <th className="px-4 py-3">Withdrawn</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-900 text-slate-300">
+                    {listedStreams.map((item) => (
+                      <tr key={item.id} className="transition-colors hover:bg-slate-900/20">
+                        <td className="px-4 py-3 font-semibold text-white">#{item.id}</td>
+                        <td className="px-4 py-3">{formatAddress(item.recipient, 6)}</td>
+                        <td className="px-4 py-3">{formatTokenAmount(item.totalAmount, 7)} XLM</td>
+                        <td className="px-4 py-3">{formatTokenAmount(item.withdrawn, 7)} XLM</td>
+                        <td className="px-4 py-3">
+                          <StatusBadge
+                            status={
+                              item.cancelled
+                                ? 'cancelled'
+                                : getStreamMetrics(item, nowSeconds).status
+                            }
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLookupId(item.id);
+                              void loadStream(item.id);
+                            }}
+                            className="text-purple-400 underline hover:text-purple-300"
+                          >
+                            Inspect
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination Controls */}
+              <div className="flex flex-col items-center justify-center pt-2">
+                {hasMore ? (
+                  <Button
+                    type="button"
+                    onClick={() => void loadMore()}
+                    disabled={loadingMore}
+                    loading={loadingMore}
+                    variant="secondary"
+                    className="px-6 py-2"
+                  >
+                    {loadingMore ? 'Loading more streams...' : 'Load more'}
+                  </Button>
+                ) : (
+                  <p className="text-xs text-slate-500">End of list — all streams loaded</p>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </main>
       <Footer />
