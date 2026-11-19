@@ -12,7 +12,7 @@ The `@stellar-starter-kit/core` package provides centralized network configurati
 - **Environment Resolution**: Resolves configuration from `NEXT_PUBLIC_*` environment variables with sensible defaults
 - **Validation**: Ensures network/passphrase consistency to prevent configuration mismatches
 - **Type Safety**: Full TypeScript support with exported types for all configurations
-- **Zero Dependencies**: Minimal footprint with only `@stellar-starter-kit/types` as a peer dependency
+- **Single Source of Truth**: Reads the network table from `@stellar-starter-kit/config`, so endpoints never drift between packages
 
 ## Installation
 
@@ -95,7 +95,7 @@ Configure the network via these environment variables (all optional with default
 
 ```typescript
 {
-  rpcUrl: 'https://soroban-rpc.stellar.org',
+  rpcUrl: 'https://soroban-mainnet.stellar.org',
   horizonUrl: 'https://horizon.stellar.org',
   passphrase: 'Public Global Stellar Network ; September 2015'
 }
@@ -105,9 +105,9 @@ Configure the network via these environment variables (all optional with default
 
 ```typescript
 {
-  rpcUrl: 'http://localhost:8000',
+  rpcUrl: 'http://localhost:8000/soroban/rpc',
   horizonUrl: 'http://localhost:8000',
-  passphrase: 'Standalone Network ; February 2021'
+  passphrase: 'Standalone Network ; February 2017'
 }
 ```
 

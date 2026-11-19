@@ -290,6 +290,57 @@ describe('parseEnvironment', () => {
     });
   });
 
+  describe('URL validation', () => {
+    it('should reject an RPC URL without a scheme', () => {
+      const result = parseEnvironment({
+        [ENV_VARS.SOROBAN_RPC_URL]: 'soroban-testnet.stellar.org',
+      });
+
+      expect(result.success).toBe(false);
+      const error = result.errors.find((e) => e.field === ENV_VARS.SOROBAN_RPC_URL);
+      expect(error?.severity).toBe('error');
+      expect(error?.message).toContain(ENV_VARS.SOROBAN_RPC_URL);
+      expect(error?.message).toContain('soroban-testnet.stellar.org');
+    });
+
+    it('should reject a Horizon URL without a scheme', () => {
+      const result = parseEnvironment({
+        [ENV_VARS.HORIZON_URL]: 'horizon-testnet.stellar.org',
+      });
+
+      expect(result.success).toBe(false);
+      const error = result.errors.find((e) => e.field === ENV_VARS.HORIZON_URL);
+      expect(error?.severity).toBe('error');
+      expect(error?.message).toContain(ENV_VARS.HORIZON_URL);
+      expect(error?.message).toContain('horizon-testnet.stellar.org');
+    });
+
+    it('should reject non-http(s) URLs', () => {
+      const result = parseEnvironment({
+        [ENV_VARS.SOROBAN_RPC_URL]: 'ftp://soroban-testnet.stellar.org',
+        [ENV_VARS.HORIZON_URL]: 'ftp://horizon-testnet.stellar.org',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.errors.some((e) => e.field === ENV_VARS.SOROBAN_RPC_URL)).toBe(true);
+      expect(result.errors.some((e) => e.field === ENV_VARS.HORIZON_URL)).toBe(true);
+    });
+
+    it('should accept a plain http local quickstart URL', () => {
+      const result = parseEnvironment({
+        [ENV_VARS.NETWORK]: 'local',
+        [ENV_VARS.HORIZON_URL]: 'http://localhost:8000',
+        [ENV_VARS.SOROBAN_RPC_URL]: 'http://localhost:8000/soroban/rpc',
+        [ENV_VARS.NETWORK_PASSPHRASE]: KNOWN_NETWORKS.local.networkPassphrase,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(result.config?.horizonUrl).toBe('http://localhost:8000');
+      expect(result.config?.sorobanRpcUrl).toBe('http://localhost:8000/soroban/rpc');
+    });
+  });
+
   describe('Whitespace handling', () => {
     it('should trim whitespace from environment values', () => {
       const env = {
