@@ -5,13 +5,9 @@ import dynamic from 'next/dynamic';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { EscrowClient } from '@stellar-starter-kit/contracts';
 import { Footer, Header } from '@stellar-starter-kit/ui';
-import {
-  DEFAULT_NETWORK_PASSPHRASE,
-  DEFAULT_SOROBAN_RPC_URL,
-  DEFAULT_STELLAR_EXPERT_URL,
-  DEFAULT_STELLAR_NETWORK,
-  DEFAULT_TOKEN_CONTRACT_ID,
-} from '../../lib/constants';
+import type { EnvironmentConfig } from '@stellar-starter-kit/config';
+import { environmentConfig, environmentErrors } from '../../lib/environment';
+import ConfigurationError from '../../components/ConfigurationError';
 import { normalizeEscrow, type RawEscrow, type Escrow } from '@stellar-starter-kit/types';
 import {
   ArrowLeft,
@@ -47,21 +43,34 @@ interface LogEntry {
   details: string;
 }
 
-// Network settings are build-time values, shared with the streams page. An
-// unset escrow id leaves the page in a read-only "not configured" state rather
-// than falling back to a contract id from another network.
-const RPC_URL = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? DEFAULT_SOROBAN_RPC_URL;
-const NETWORK_PASSPHRASE =
-  process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ?? DEFAULT_NETWORK_PASSPHRASE;
-const CONTRACT_ID = process.env.NEXT_PUBLIC_ESCROW_CONTRACT_ID ?? '';
-// Testnet native XLM SAC by default; any SEP-41 token contract id works.
-const DEFAULT_TOKEN = process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID || DEFAULT_TOKEN_CONTRACT_ID;
-const NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? DEFAULT_STELLAR_NETWORK;
-const EXPERT_URL = process.env.NEXT_PUBLIC_STELLAR_EXPERT_URL ?? DEFAULT_STELLAR_EXPERT_URL;
-const NETWORK_LABEL = NETWORK.charAt(0).toUpperCase() + NETWORK.slice(1);
-const CONTRACT_CONFIGURED = CONTRACT_ID.length > 0;
+/**
+ * Route entry point: validates the environment once, then renders the demo.
+ * A failed validation replaces the page instead of silently using the Testnet
+ * defaults, which would point writes at the wrong network.
+ */
+export default function EscrowPage() {
+  const config = environmentConfig;
+  if (!config) {
+    return <ConfigurationError errors={environmentErrors} />;
+  }
+  return <EscrowDemo config={config} />;
+}
 
-export default function EscrowDemo() {
+function EscrowDemo({ config }: { config: EnvironmentConfig }) {
+  const {
+    sorobanRpcUrl,
+    networkPassphrase,
+    escrowContractId,
+    tokenContractId,
+    expertUrl,
+    network,
+  } = config;
+  // An unset escrow id leaves the page in a read-only "not configured" state
+  // rather than falling back to a contract id from another network.
+  const contractId = escrowContractId ?? '';
+  const contractConfigured = contractId.length > 0;
+  const networkLabel = network.charAt(0).toUpperCase() + network.slice(1);
+
   const {
     activeAddress,
     isConnected,
@@ -82,7 +91,7 @@ export default function EscrowDemo() {
   // Create Escrow Form State
   const [createPayee, setCreatePayee] = useState<string>('');
   const [createArbiter, setCreateArbiter] = useState<string>('');
-  const [createToken, setCreateToken] = useState<string>(DEFAULT_TOKEN); // Native XLM
+  const [createToken, setCreateToken] = useState<string>(tokenContractId); // Native XLM
   const [createAmount, setCreateAmount] = useState<string>('10'); // in XLM
   const [createDeadline, setCreateDeadline] = useState<string>('3600'); // seconds from now
 
@@ -112,22 +121,22 @@ export default function EscrowDemo() {
 
   // Helper to instantiate client. The guard keeps every write path from
   // constructing a client with an empty contract id when the page is deployed
-  // without NEXT_PUBLIC_ESCROW_CONTRACT_ID.
+  // without an escrow contract.
   const getClient = useCallback(() => {
-    if (!CONTRACT_ID) {
-      throw new Error('No escrow contract configured. Set NEXT_PUBLIC_ESCROW_CONTRACT_ID.');
+    if (!contractId) {
+      throw new Error('No escrow contract configured. Set the escrow contract id in your env.');
     }
     return new EscrowClient.Client({
-      contractId: CONTRACT_ID,
-      rpcUrl: RPC_URL,
-      networkPassphrase: NETWORK_PASSPHRASE,
+      contractId,
+      rpcUrl: sorobanRpcUrl,
+      networkPassphrase,
       publicKey: activeAddress || undefined,
       signTransaction: async (txXdr) => {
         const signedTxXdr = await signTransaction(txXdr);
         return { signedTxXdr };
       },
     });
-  }, [activeAddress, signTransaction]);
+  }, [activeAddress, signTransaction, contractId, sorobanRpcUrl, networkPassphrase]);
 
   // Set default caller to active address when it changes
   useEffect(() => {
@@ -143,8 +152,8 @@ export default function EscrowDemo() {
       setError('Please connect your wallet first.');
       return;
     }
-    if (!CONTRACT_ID) {
-      setError('No escrow contract configured. Set NEXT_PUBLIC_ESCROW_CONTRACT_ID.');
+    if (!contractId) {
+      setError('No escrow contract configured. Set the escrow contract id in your env.');
       return;
     }
 
@@ -342,15 +351,14 @@ export default function EscrowDemo() {
           </Link>
         </div>
 
-        {!CONTRACT_CONFIGURED && (
+        {!contractConfigured && (
           <div className="mb-8 flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-200">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
             <div>
               <p className="font-semibold">Escrow contract not configured</p>
               <p className="mt-1 font-light text-amber-200/80">
-                Deploy the <code className="font-mono">escrow</code> contract and set{' '}
-                <code className="font-mono">NEXT_PUBLIC_ESCROW_CONTRACT_ID</code> to enable this
-                page.
+                Deploy the <code className="font-mono">escrow</code> contract and set its id in{' '}
+                <code className="font-mono">apps/web/.env.local</code> to enable this page.
               </p>
             </div>
           </div>
@@ -575,7 +583,7 @@ export default function EscrowDemo() {
                     <div className="flex justify-end gap-4 border-t border-slate-900 pt-6">
                       <button
                         type="submit"
-                        disabled={!isConnected || actionLoading || !CONTRACT_CONFIGURED}
+                        disabled={!isConnected || actionLoading || !contractConfigured}
                         className="flex items-center gap-1.5 rounded-xl bg-gradient-to-tr from-purple-600 to-cyan-500 px-6 py-2.5 text-sm font-semibold text-white shadow-lg transition-all hover:brightness-110 disabled:pointer-events-none disabled:opacity-40"
                       >
                         {actionLoading ? (
@@ -626,7 +634,7 @@ export default function EscrowDemo() {
                       <button
                         onClick={() => handleFundEscrow(manageId)}
                         disabled={
-                          !isConnected || actionLoading || !manageId || !CONTRACT_CONFIGURED
+                          !isConnected || actionLoading || !manageId || !contractConfigured
                         }
                         className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/20 py-4 font-semibold text-slate-200 shadow-inner transition-all hover:bg-slate-900/50 disabled:pointer-events-none disabled:opacity-40"
                       >
@@ -638,7 +646,7 @@ export default function EscrowDemo() {
                       <button
                         onClick={() => handleLifecycleAction('release')}
                         disabled={
-                          !isConnected || actionLoading || !manageId || !CONTRACT_CONFIGURED
+                          !isConnected || actionLoading || !manageId || !contractConfigured
                         }
                         className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/20 py-4 font-semibold text-slate-200 shadow-inner transition-all hover:bg-slate-900/50 disabled:pointer-events-none disabled:opacity-40"
                       >
@@ -650,7 +658,7 @@ export default function EscrowDemo() {
                       <button
                         onClick={() => handleLifecycleAction('refund')}
                         disabled={
-                          !isConnected || actionLoading || !manageId || !CONTRACT_CONFIGURED
+                          !isConnected || actionLoading || !manageId || !contractConfigured
                         }
                         className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/20 py-4 font-semibold text-slate-200 shadow-inner transition-all hover:bg-slate-900/50 disabled:pointer-events-none disabled:opacity-40"
                       >
@@ -662,7 +670,7 @@ export default function EscrowDemo() {
                       <button
                         onClick={() => handleLifecycleAction('cancel')}
                         disabled={
-                          !isConnected || actionLoading || !manageId || !CONTRACT_CONFIGURED
+                          !isConnected || actionLoading || !manageId || !contractConfigured
                         }
                         className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/20 py-4 font-semibold text-slate-200 shadow-inner transition-all hover:bg-slate-900/50 disabled:pointer-events-none disabled:opacity-40"
                       >
@@ -686,7 +694,7 @@ export default function EscrowDemo() {
                       />
                       <button
                         onClick={() => handleLookupEscrow(lookupId)}
-                        disabled={lookupLoading || !lookupId || !CONTRACT_CONFIGURED}
+                        disabled={lookupLoading || !lookupId || !contractConfigured}
                         className="flex items-center gap-1.5 rounded-xl bg-purple-600 px-6 py-2.5 text-sm font-semibold text-white transition-all hover:bg-purple-500 disabled:pointer-events-none disabled:opacity-45"
                       >
                         {lookupLoading ? (
@@ -731,19 +739,19 @@ export default function EscrowDemo() {
                 <div>
                   <div className="text-[10px] text-slate-500 uppercase">Contract ID</div>
                   <div className="mt-1 break-all text-slate-300 transition-colors select-all hover:text-cyan-400">
-                    {CONTRACT_ID || 'Not configured'}
+                    {contractId || 'Not configured'}
                   </div>
                 </div>
                 <div>
                   <div className="text-[10px] text-slate-500 uppercase">Network</div>
-                  <div className="mt-1 text-slate-300">Stellar {NETWORK_LABEL}</div>
+                  <div className="mt-1 text-slate-300">Stellar {networkLabel}</div>
                 </div>
                 <div>
                   <div className="text-[10px] text-slate-500 uppercase">Explorer</div>
                   <div className="mt-1">
-                    {CONTRACT_ID ? (
+                    {contractId ? (
                       <a
-                        href={`${EXPERT_URL}/contract/${CONTRACT_ID}`}
+                        href={`${expertUrl}/contract/${contractId}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-1 text-cyan-400 hover:underline"
@@ -794,7 +802,7 @@ export default function EscrowDemo() {
                           </span>
                           {log.hash && (
                             <a
-                              href={`${EXPERT_URL}/tx/${log.hash}`}
+                              href={`${expertUrl}/tx/${log.hash}`}
                               target="_blank"
                               rel="noreferrer"
                               className="flex items-center gap-0.5 text-[10px] text-slate-500 hover:text-white"
