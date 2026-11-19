@@ -1,6 +1,6 @@
 import * as React from 'react';
 import type { StreamStatus } from '@stellar-starter-kit/types';
-import { AlertCircle, CheckCircle2, Info, TriangleAlert, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ChevronDown, Info, TriangleAlert, X } from 'lucide-react';
 import { cn } from './utils';
 
 const buttonBase =
@@ -96,6 +96,227 @@ export function Input({
         </span>
       ) : null}
     </label>
+  );
+}
+
+export interface SelectOption {
+  value: string;
+  /** Rendered inside the trigger and the option row. */
+  label: React.ReactNode;
+  disabled?: boolean;
+}
+
+export interface SelectProps {
+  options: readonly SelectOption[];
+  value: string;
+  onChange: (value: string) => void;
+  /** Visible field label; also names the combobox for assistive technology. */
+  label?: React.ReactNode;
+  disabled?: boolean;
+  /** Shown when no option matches `value`. */
+  placeholder?: string;
+  id?: string;
+  className?: string;
+}
+
+/**
+ * A listbox-backed select for network and token choices.
+ *
+ * Supports Arrow keys, Home/End, Enter/Space and Escape, so the interaction is
+ * testable in jsdom where a native `<select>` cannot be driven by keyboard
+ * events. Styling reuses the `Input` recipe and `cn`.
+ */
+export function Select({
+  options,
+  value,
+  onChange,
+  label,
+  disabled = false,
+  placeholder = 'Select…',
+  id,
+  className,
+}: SelectProps) {
+  const [open, setOpen] = React.useState(false);
+  const [activeIndex, setActiveIndex] = React.useState(-1);
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const buttonRef = React.useRef<HTMLButtonElement>(null);
+  const optionRefs = React.useRef<Array<HTMLLIElement | null>>([]);
+
+  const selectId =
+    id ?? (typeof label === 'string' ? label.toLowerCase().replace(/\s+/g, '-') : undefined);
+  const listboxId = `${selectId ?? 'select'}-listbox`;
+  const labelId = `${listboxId}-label`;
+  const selectedIndex = options.findIndex((option) => option.value === value);
+  const selected = selectedIndex >= 0 ? options[selectedIndex] : undefined;
+  const enabledIndexes = options.reduce<number[]>((indexes, option, index) => {
+    if (!option.disabled) indexes.push(index);
+    return indexes;
+  }, []);
+
+  // Dismiss on a pointer press outside, without closing on the option's own
+  // mousedown (which a blur handler would do before the click lands).
+  React.useEffect(() => {
+    if (!open) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [open]);
+
+  const openList = () => {
+    setActiveIndex(
+      selectedIndex >= 0 && !options[selectedIndex]?.disabled
+        ? selectedIndex
+        : (enabledIndexes[0] ?? -1),
+    );
+    setOpen(true);
+  };
+
+  const closeList = (restoreFocus = false) => {
+    setOpen(false);
+    if (restoreFocus) buttonRef.current?.focus();
+  };
+
+  const choose = (index: number) => {
+    const option = options[index];
+    if (!option || option.disabled) return;
+    onChange(option.value);
+    closeList(true);
+  };
+
+  const moveActive = (delta: 1 | -1) => {
+    if (!open) {
+      openList();
+      return;
+    }
+    if (enabledIndexes.length === 0) return;
+    const position = enabledIndexes.indexOf(activeIndex);
+    const nextPosition =
+      position === -1
+        ? delta > 0
+          ? 0
+          : enabledIndexes.length - 1
+        : (position + delta + enabledIndexes.length) % enabledIndexes.length;
+    const next = enabledIndexes[nextPosition]!;
+    setActiveIndex(next);
+    optionRefs.current[next]?.scrollIntoView?.({ block: 'nearest' });
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        moveActive(1);
+        break;
+      case 'ArrowUp':
+        event.preventDefault();
+        moveActive(-1);
+        break;
+      case 'Home':
+        if (open) {
+          event.preventDefault();
+          setActiveIndex(enabledIndexes[0] ?? -1);
+        }
+        break;
+      case 'End':
+        if (open) {
+          event.preventDefault();
+          setActiveIndex(enabledIndexes[enabledIndexes.length - 1] ?? -1);
+        }
+        break;
+      case 'Enter':
+      case ' ':
+        event.preventDefault();
+        if (open) choose(activeIndex);
+        else openList();
+        break;
+      case 'Escape':
+        if (open) {
+          event.preventDefault();
+          closeList(true);
+        }
+        break;
+      case 'Tab':
+        if (open) setOpen(false);
+        break;
+    }
+  };
+
+  return (
+    <div ref={rootRef} className={cn('relative', className)}>
+      {label ? (
+        <span
+          id={labelId}
+          className="mb-2 block text-xs font-semibold tracking-wider text-slate-500 uppercase"
+        >
+          {label}
+        </span>
+      ) : null}
+      <button
+        ref={buttonRef}
+        type="button"
+        id={selectId}
+        role="combobox"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        aria-labelledby={label ? labelId : undefined}
+        aria-label={typeof label === 'string' ? label : undefined}
+        disabled={disabled}
+        onClick={() => {
+          if (disabled) return;
+          if (open) closeList();
+          else openList();
+        }}
+        onKeyDown={handleKeyDown}
+        className={cn(
+          inputBase,
+          'flex items-center justify-between gap-2 text-left focus-visible:ring-2 focus-visible:ring-purple-500/40',
+          disabled && 'cursor-not-allowed opacity-40',
+        )}
+      >
+        <span className={cn('truncate', !selected && 'text-slate-500')}>
+          {selected ? selected.label : placeholder}
+        </span>
+        <ChevronDown
+          aria-hidden="true"
+          className={cn('h-4 w-4 shrink-0 text-slate-500 transition', open && 'rotate-180')}
+        />
+      </button>
+      {open ? (
+        <ul
+          id={listboxId}
+          role="listbox"
+          aria-labelledby={label ? labelId : undefined}
+          className="absolute z-50 mt-2 max-h-60 w-full overflow-auto rounded-xl border border-slate-900 bg-slate-950 p-1 shadow-2xl"
+        >
+          {options.map((option, index) => (
+            <li
+              key={option.value}
+              ref={(node) => {
+                optionRefs.current[index] = node;
+              }}
+              role="option"
+              aria-selected={option.value === value}
+              aria-disabled={option.disabled || undefined}
+              data-active={index === activeIndex || undefined}
+              onMouseEnter={() => {
+                if (!option.disabled) setActiveIndex(index);
+              }}
+              onClick={() => choose(index)}
+              className={cn(
+                'cursor-pointer rounded-lg px-3 py-2 font-mono text-sm text-slate-300',
+                index === activeIndex && 'bg-slate-900 text-white',
+                option.disabled && 'cursor-not-allowed opacity-40',
+              )}
+            >
+              {option.label}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }
 
