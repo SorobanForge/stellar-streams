@@ -1,8 +1,12 @@
+import { KNOWN_NETWORKS } from '@stellar-starter-kit/config';
 import type { StellarNetwork } from '@stellar-starter-kit/types';
 
 /**
  * Network configuration registry for all supported Stellar networks.
  * Each network defines its RPC endpoint, Horizon URL, and network passphrase.
+ *
+ * The data lives in `@stellar-starter-kit/config`, the single source of truth
+ * for network endpoints, so the SDK and the dashboard cannot drift apart.
  */
 export interface NetworkConfig {
   rpcUrl: string;
@@ -10,22 +14,19 @@ export interface NetworkConfig {
   passphrase: string;
 }
 
+function fromKnownNetwork(network: StellarNetwork): NetworkConfig {
+  const config = KNOWN_NETWORKS[network];
+  return {
+    rpcUrl: config.sorobanRpcUrl,
+    horizonUrl: config.horizonUrl,
+    passphrase: config.networkPassphrase,
+  };
+}
+
 export const NETWORKS: Record<StellarNetwork, NetworkConfig> = {
-  local: {
-    rpcUrl: 'http://localhost:8000',
-    horizonUrl: 'http://localhost:8000',
-    passphrase: 'Standalone Network ; February 2021',
-  },
-  testnet: {
-    rpcUrl: 'https://soroban-testnet.stellar.org',
-    horizonUrl: 'https://horizon-testnet.stellar.org',
-    passphrase: 'Test SDF Network ; September 2015',
-  },
-  mainnet: {
-    rpcUrl: 'https://soroban-rpc.stellar.org',
-    horizonUrl: 'https://horizon.stellar.org',
-    passphrase: 'Public Global Stellar Network ; September 2015',
-  },
+  local: fromKnownNetwork('local'),
+  testnet: fromKnownNetwork('testnet'),
+  mainnet: fromKnownNetwork('mainnet'),
 };
 
 /**

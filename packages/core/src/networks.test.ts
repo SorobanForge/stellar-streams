@@ -11,16 +11,16 @@ describe('NETWORKS registry', () => {
 
   it('should define mainnet configuration', () => {
     expect(NETWORKS.mainnet).toBeDefined();
-    expect(NETWORKS.mainnet.rpcUrl).toBe('https://soroban-rpc.stellar.org');
+    expect(NETWORKS.mainnet.rpcUrl).toBe('https://soroban-mainnet.stellar.org');
     expect(NETWORKS.mainnet.horizonUrl).toBe('https://horizon.stellar.org');
     expect(NETWORKS.mainnet.passphrase).toBe('Public Global Stellar Network ; September 2015');
   });
 
   it('should define local configuration', () => {
     expect(NETWORKS.local).toBeDefined();
-    expect(NETWORKS.local.rpcUrl).toBe('http://localhost:8000');
+    expect(NETWORKS.local.rpcUrl).toBe('http://localhost:8000/soroban/rpc');
     expect(NETWORKS.local.horizonUrl).toBe('http://localhost:8000');
-    expect(NETWORKS.local.passphrase).toBe('Standalone Network ; February 2021');
+    expect(NETWORKS.local.passphrase).toBe('Standalone Network ; February 2017');
   });
 
   it('should have all three networks as keys', () => {
