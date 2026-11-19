@@ -86,9 +86,85 @@ jobs:
       - name: Run Tests
         run: pnpm run test
 
-  contracts:
-    name: Test Soroban Contracts
+  # The contract tests are split per crate so a change to one contract no
+  # longer waits on the other two. On a pull request only the crates whose
+  # files changed are selected; a push to main and any change to shared
+  # workspace files (manifest, toolchain pin, test harness, version crate)
+  # select all three. The `contracts` job below is the aggregate status check
+  # required by branch protection, so the per-crate names can change freely.
+  contracts-changes:
+    name: Detect Contract Changes
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      any: ${{ steps.select.outputs.any }}
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Detect Changed Contract Crates
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            shared:
+              - 'contracts/Cargo.toml'
+              - 'contracts/Cargo.lock'
+              - 'contracts/clippy.toml'
+              - 'contracts/rust-toolchain.toml'
+              - 'contracts/rustfmt.toml'
+              - 'contracts/deny.toml'
+              - 'contracts/test-support/**'
+              - 'contracts/version/**'
+              - '.github/workflows/ci.yml'
+            stream:
+              - 'contracts/stream/**'
+            splits:
+              - 'contracts/splits/**'
+            escrow:
+              - 'contracts/escrow/**'
+
+      - name: Select Crates To Test
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          SHARED: ${{ steps.filter.outputs.shared }}
+          STREAM: ${{ steps.filter.outputs.stream }}
+          SPLITS: ${{ steps.filter.outputs.splits }}
+          ESCROW: ${{ steps.filter.outputs.escrow }}
+        run: |
+          is_selected() {
+            [ "$EVENT" != "pull_request" ] || [ "$SHARED" = "true" ] || [ "$1" = "true" ]
+          }
+
+          selected=()
+          if is_selected "$STREAM"; then selected+=(stream); fi
+          if is_selected "$SPLITS"; then selected+=(splits); fi
+          if is_selected "$ESCROW"; then selected+=(escrow); fi
+
+          if [ ${#selected[@]} -eq 0 ]; then
+            echo "No contract crate changed; skipping the contract test matrix."
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo 'matrix={"include":[]}' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          matrix=$(printf '%s\n' "${selected[@]}" | jq -R -s -c 'split("\n") | map(select(length > 0)) | map({crate: .}) | {include: .}')
+          echo "Testing: ${selected[*]}"
+          echo "any=true" >> "$GITHUB_OUTPUT"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  contracts-test:
+    name: Test Soroban Contracts (${{ matrix.crate }})
+    needs: contracts-changes
+    if: needs.contracts-changes.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.contracts-changes.outputs.matrix) }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
@@ -98,19 +174,52 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # One cache per crate: the three jobs run in parallel and must not race
+      # to save the same key.
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: contracts
+          key: ${{ matrix.crate }}
 
       - name: Check Formatting
-        run: cargo fmt --manifest-path contracts/Cargo.toml --all -- --check
+        run: cargo fmt --manifest-path contracts/Cargo.toml -p ${{ matrix.crate }} -- --check
 
       - name: Run Clippy
-        run: cargo clippy --manifest-path contracts/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --manifest-path contracts/Cargo.toml -p ${{ matrix.crate }} --all-targets -- -D warnings
 
       - name: Run Contract Tests
-        run: cargo test --manifest-path contracts/Cargo.toml
+        run: cargo test --manifest-path contracts/Cargo.toml -p ${{ matrix.crate }}
+
+  # Aggregate check: branch protection requires this single context, not the
+  # per-crate ones, so adding or renaming a crate does not silently leave it
+  # out of the required checks. A skipped matrix (no contract files changed)
+  # is a pass; a failed or cancelled leg is a failure.
+  contracts:
+    name: Test Soroban Contracts
+    needs: [contracts-changes, contracts-test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Contract Test Results
+        env:
+          CHANGES_RESULT: ${{ needs.contracts-changes.result }}
+          TEST_RESULT: ${{ needs.contracts-test.result }}
+        run: |
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "::error::Contract change detection failed, so no crate could be selected for testing."
+            exit 1
+          fi
+
+          case "$TEST_RESULT" in
+            success | skipped)
+              echo "All selected contract crates passed."
+              ;;
+            *)
+              echo "::error::At least one contract crate job did not pass (matrix result: $TEST_RESULT). See the per-crate jobs above."
+              exit 1
+              ;;
+          esac
 
   cargo-deny:
     name: Check Dependencies (cargo-deny)
