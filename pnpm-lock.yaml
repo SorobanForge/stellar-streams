@@ -191,6 +191,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@stellar-starter-kit/config':
+        specifier: workspace:*
+        version: link:../config
       '@stellar-starter-kit/types':
         specifier: workspace:*
         version: link:../types
