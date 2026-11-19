@@ -21,11 +21,13 @@ pub enum SplitError {
     Unauthorized = 7,
     ShareOverflow = 8,
     RecipientIndexOutOfBounds = 9,
+    InvalidStateTransition = 10,
 }
 
-/// An immutable, reusable split configuration: a set of recipients with
-/// proportional shares. Anyone may pay into it; funds are distributed on the
-/// spot according to the shares.
+/// A reusable split configuration: a set of recipients with proportional
+/// shares. Anyone may pay into it; funds are distributed on the spot according
+/// to the shares. The creator may still replace the recipients and shares up to
+/// the first distribution, after which the configuration is frozen.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Split {
@@ -34,6 +36,8 @@ pub struct Split {
     pub recipients: Vec<Address>,
     pub shares: Vec<u32>,
     pub total_shares: u32,
+    /// Set by the first `distribute`, which makes the configuration immutable.
+    pub distributed: bool,
 }
 
 #[contracttype]
@@ -77,31 +81,10 @@ impl SplitsContract {
     ) -> Result<u64, SplitError> {
         creator.require_auth();
 
-        let len = recipients.len();
-        if len == 0 {
-            return Err(SplitError::EmptyRecipients);
-        }
-        if shares.len() != len {
-            return Err(SplitError::LengthMismatch);
-        }
-
-        let mut total_shares: u32 = 0;
-        for i in 0..len {
-            let share = shares.get(i).unwrap();
-            if share == 0 {
-                return Err(SplitError::InvalidShares);
-            }
-            let address = recipients.get(i).unwrap();
-            for j in 0..i {
-                if recipients.get(j).unwrap() == address {
-                    return Err(SplitError::DuplicateRecipient);
-                }
-            }
-            total_shares = total_shares.checked_add(share).ok_or(SplitError::ShareOverflow)?;
-        }
+        let total_shares = validate_split(&recipients, &shares)?;
 
         let id = next_id(&env);
-        let split = Split { id, creator, recipients, shares, total_shares };
+        let split = Split { id, creator, recipients, shares, total_shares, distributed: false };
 
         let key = DataKey::Split(id);
         env.storage().persistent().set(&key, &split);
@@ -111,6 +94,43 @@ impl SplitsContract {
         SplitCreated { id, creator: split.creator.clone(), total_shares }.publish(&env);
 
         Ok(id)
+    }
+
+    /// Replace a split's recipients and shares before it has been distributed.
+    ///
+    /// Only the creator may call this, and only while no distribution has
+    /// happened yet: once funds have been paid out the configuration is frozen,
+    /// so a later change can never rewrite history. The vectors are validated
+    /// exactly like [`SplitsContract::create_split`]'s (non-empty, same length,
+    /// positive shares, no duplicate recipient, no share-sum overflow).
+    pub fn update_shares(
+        env: Env,
+        split_id: u64,
+        creator: Address,
+        recipients: Vec<Address>,
+        shares: Vec<u32>,
+    ) -> Result<(), SplitError> {
+        let key = DataKey::Split(split_id);
+        let mut split: Split =
+            env.storage().persistent().get(&key).ok_or(SplitError::SplitNotFound)?;
+
+        creator.require_auth();
+        if creator != split.creator {
+            return Err(SplitError::Unauthorized);
+        }
+        if split.distributed {
+            return Err(SplitError::InvalidStateTransition);
+        }
+
+        let total_shares = validate_split(&recipients, &shares)?;
+        split.recipients = recipients;
+        split.shares = shares;
+        split.total_shares = total_shares;
+
+        env.storage().persistent().set(&key, &split);
+        env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+
+        Ok(())
     }
 
     /// Transfer `amount` of `token` from `from` and distribute it across the
@@ -130,13 +150,18 @@ impl SplitsContract {
         from.require_auth();
 
         let key = DataKey::Split(split_id);
-        let split: Split = env.storage().persistent().get(&key).ok_or(SplitError::SplitNotFound)?;
+        let mut split: Split =
+            env.storage().persistent().get(&key).ok_or(SplitError::SplitNotFound)?;
 
         env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
         env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
 
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&from, env.current_contract_address(), &amount);
+
+        // The split is paid into from here on, so its configuration is frozen.
+        split.distributed = true;
+        env.storage().persistent().set(&key, &split);
 
         let len = split.recipients.len();
         let mut distributed: i128 = 0;
@@ -156,6 +181,38 @@ impl SplitsContract {
     /// Fetch a split by id.
     pub fn get_split(env: Env, split_id: u64) -> Option<Split> {
         env.storage().persistent().get(&DataKey::Split(split_id))
+    }
+
+    /// Return the amount every recipient would receive for a hypothetical
+    /// distribution, in the same order as `recipients`.
+    ///
+    /// The allocation is computed by the same rule `distribute` uses — integer
+    /// shares plus the rounding dust assigned to the final recipient — so the
+    /// returned vector sums to exactly `amount` and matches the transfers a real
+    /// distribution of that amount would make.
+    pub fn preview_distribution(
+        env: Env,
+        split_id: u64,
+        amount: i128,
+    ) -> Result<Vec<i128>, SplitError> {
+        if amount <= 0 {
+            return Err(SplitError::InvalidAmount);
+        }
+
+        let split: Split = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Split(split_id))
+            .ok_or(SplitError::SplitNotFound)?;
+
+        let mut preview = Vec::new(&env);
+        let mut distributed: i128 = 0;
+        for i in 0..split.recipients.len() {
+            let portion = recipient_portion(&split, i, amount, distributed);
+            preview.push_back(portion);
+            distributed += portion;
+        }
+        Ok(preview)
     }
 
     /// Return the amount a recipient would receive for a hypothetical distribution.
@@ -202,6 +259,36 @@ fn next_id(env: &Env) -> u64 {
     let id: u64 = env.storage().instance().get(&DataKey::NextId).unwrap_or(1);
     env.storage().instance().set(&DataKey::NextId, &(id + 1));
     id
+}
+
+/// The validation `create_split` and `update_shares` share, returning the
+/// checked sum of the shares. Keeping it in one place means the two entry
+/// points cannot accept different configurations.
+fn validate_split(recipients: &Vec<Address>, shares: &Vec<u32>) -> Result<u32, SplitError> {
+    let len = recipients.len();
+    if len == 0 {
+        return Err(SplitError::EmptyRecipients);
+    }
+    if shares.len() != len {
+        return Err(SplitError::LengthMismatch);
+    }
+
+    let mut total_shares: u32 = 0;
+    for i in 0..len {
+        let share = shares.get(i).unwrap();
+        if share == 0 {
+            return Err(SplitError::InvalidShares);
+        }
+        let address = recipients.get(i).unwrap();
+        for j in 0..i {
+            if recipients.get(j).unwrap() == address {
+                return Err(SplitError::DuplicateRecipient);
+            }
+        }
+        total_shares = total_shares.checked_add(share).ok_or(SplitError::ShareOverflow)?;
+    }
+
+    Ok(total_shares)
 }
 
 fn recipient_portion(split: &Split, index: u32, amount: i128, distributed: i128) -> i128 {
