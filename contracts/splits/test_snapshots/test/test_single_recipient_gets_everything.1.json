@@ -255,6 +255,14 @@
                   },
                   {
                     "key": {
+                      "symbol": "distributed"
+                    },
+                    "val": {
+                      "bool": true
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "id"
                     },
                     "val": {
