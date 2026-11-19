@@ -532,6 +532,12 @@ export type StreamErrorCode =
   | 'EMPTY_BATCH'
   | 'BATCH_TOO_LARGE'
   | 'BATCH_OVERFLOW'
+  | 'STREAM_PAUSED'
+  | 'NOT_PAUSED'
+  | 'STREAM_COMPLETED'
+  | 'AMOUNT_OVERFLOW'
+  | 'REDUCTION_BELOW_VESTED'
+  | 'INVALID_REDUCTION'
   | 'SAME_RECIPIENT';
 
 /**
@@ -580,7 +586,13 @@ const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
   13: 'EMPTY_BATCH',
   14: 'BATCH_TOO_LARGE',
   15: 'BATCH_OVERFLOW',
-  20: 'SAME_RECIPIENT',
+  16: 'STREAM_PAUSED',
+  17: 'NOT_PAUSED',
+  18: 'STREAM_COMPLETED',
+  19: 'AMOUNT_OVERFLOW',
+  20: 'REDUCTION_BELOW_VESTED',
+  21: 'INVALID_REDUCTION',
+  22: 'SAME_RECIPIENT',
 };
 
 /**
@@ -646,7 +658,12 @@ export type EscrowErrorCode =
   | 'INVALID_STATE_TRANSITION'
   | 'DEADLINE_NOT_REACHED'
   | 'DEADLINE_EXPIRED'
-  | 'ALREADY_FINALIZED';
+  | 'ALREADY_FINALIZED'
+  | 'INVALID_DEADLINE'
+  | 'MILESTONE_SCHEDULE_NOT_FOUND'
+  | 'MILESTONE_INDEX_OUT_OF_RANGE'
+  | 'MILESTONE_ALREADY_RELEASED'
+  | 'MILESTONE_SCHEDULE_INVALID';
 
 /** Events requested per `getEvents` call when {@link StreamsClient.listStreams} pages. */
 export const DEFAULT_EVENT_PAGE_SIZE = 100;
@@ -740,6 +757,11 @@ const ESCROW_ERROR_CODES: Record<number, EscrowErrorCode> = {
   6: 'DEADLINE_NOT_REACHED',
   7: 'DEADLINE_EXPIRED',
   8: 'ALREADY_FINALIZED',
+  9: 'INVALID_DEADLINE',
+  10: 'MILESTONE_SCHEDULE_NOT_FOUND',
+  11: 'MILESTONE_INDEX_OUT_OF_RANGE',
+  12: 'MILESTONE_ALREADY_RELEASED',
+  13: 'MILESTONE_SCHEDULE_INVALID',
 };
 
 /** The escrow counterpart of `StreamsError`; raised for `EscrowClient` failures. */

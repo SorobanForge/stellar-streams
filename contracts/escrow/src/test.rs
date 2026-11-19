@@ -810,3 +810,122 @@ fn test_milestone_schedule_must_sum_to_escrow_amount() {
     );
     assert_eq!(client.get_milestones(&1), None);
 }
+
+#[test]
+fn test_set_milestones_rejects_too_few_entries() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+
+    // A single milestone is not a schedule: it could never release partially.
+    assert_eq!(
+        client.try_set_milestones(&1, &payer, &vec![&env, 1000]),
+        Err(Ok(EscrowError::MilestoneScheduleInvalid))
+    );
+    assert_eq!(client.get_milestones(&1), None);
+
+    // Two entries that sum to the escrow amount are the minimum valid schedule.
+    client.set_milestones(&1, &payer, &vec![&env, 400, 600]);
+    assert_eq!(client.get_milestones(&1).unwrap(), vec![&env, 400, 600]);
+}
+
+#[test]
+fn test_set_milestones_rejects_non_positive_amounts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+
+    // A zero-weight milestone would release nothing while blocking the rest.
+    assert_eq!(
+        client.try_set_milestones(&1, &payer, &vec![&env, 0, 1000]),
+        Err(Ok(EscrowError::MilestoneScheduleInvalid))
+    );
+    // A negative weight would make the schedule sum to less than the escrow.
+    assert_eq!(
+        client.try_set_milestones(&1, &payer, &vec![&env, -500, 1500]),
+        Err(Ok(EscrowError::MilestoneScheduleInvalid))
+    );
+    assert_eq!(client.get_milestones(&1), None);
+}
+
+#[test]
+fn test_set_milestones_rejects_an_overflowing_sum() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+
+    // Each entry is positive, but their sum does not fit in an i128.
+    assert_eq!(
+        client.try_set_milestones(&1, &payer, &vec![&env, i128::MAX, 1]),
+        Err(Ok(EscrowError::MilestoneScheduleInvalid))
+    );
+    assert_eq!(client.get_milestones(&1), None);
+}
+
+#[test]
+fn test_set_milestones_only_the_payer_may_configure() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+
+    assert_eq!(
+        client.try_set_milestones(&1, &payee, &vec![&env, 400, 600]),
+        Err(Ok(EscrowError::UnauthorizedOperation))
+    );
+    assert_eq!(
+        client.try_set_milestones(&1, &arbiter, &vec![&env, 400, 600]),
+        Err(Ok(EscrowError::UnauthorizedOperation))
+    );
+    assert_eq!(client.get_milestones(&1), None);
+
+    // The payer is the only authorized caller.
+    client.set_milestones(&1, &payer, &vec![&env, 400, 600]);
+    assert_eq!(client.get_milestones(&1).unwrap(), vec![&env, 400, 600]);
+}
+
+#[test]
+fn test_set_milestones_after_funding_is_an_invalid_state_transition() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    let client = register(&env);
+    token.mint(&payer, 1000);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+    client.fund_escrow(&1);
+
+    // The schedule decides how the escrowed balance may be paid out, so it is
+    // frozen once the tokens are in the contract.
+    assert_eq!(
+        client.try_set_milestones(&1, &payer, &vec![&env, 400, 600]),
+        Err(Ok(EscrowError::InvalidStateTransition))
+    );
+    assert_eq!(client.get_milestones(&1), None);
+}
