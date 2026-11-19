@@ -212,8 +212,41 @@ export interface RawSplit {
   total_shares: number;
 }
 
-/** Convert a generated snake_case split result into the domain shape. */
-export function normalizeSplit(raw: RawSplit): Split {
+/** Check the runtime shape returned by the splits contract. */
+export function isSplit(value: unknown): value is RawSplit {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'bigint' &&
+    typeof value.creator === 'string' &&
+    Array.isArray(value.recipients) &&
+    value.recipients.every((recipient) => typeof recipient === 'string') &&
+    Array.isArray(value.shares) &&
+    value.shares.every(isInteger) &&
+    isInteger(value.total_shares)
+  );
+}
+
+function assertSplit(value: unknown): asserts value is RawSplit {
+  if (!isRecord(value)) throw new ContractResponseError('split', '<response>', 'an object');
+  const fields: Array<[string, (v: unknown) => boolean, string]> = [
+    ['id', (v) => typeof v === 'bigint', 'a bigint'],
+    ['creator', (v) => typeof v === 'string', 'a string'],
+    [
+      'recipients',
+      (v) => Array.isArray(v) && v.every((recipient) => typeof recipient === 'string'),
+      'an array of strings',
+    ],
+    ['shares', (v) => Array.isArray(v) && v.every(isInteger), 'an array of integers'],
+    ['total_shares', isInteger, 'an integer'],
+  ];
+  for (const [field, check, expected] of fields) {
+    if (!check(value[field])) throw new ContractResponseError('split', field, expected);
+  }
+}
+
+/** Convert a generated snake_case split result into the domain shape after validating it. */
+export function normalizeSplit(raw: unknown): Split {
+  assertSplit(raw);
   return {
     id: raw.id.toString(),
     creator: raw.creator,
@@ -356,6 +389,74 @@ const ESCROW_STATUSES: readonly EscrowStatus[] = [
   'refunded',
   'cancelled',
 ];
+
+/** A single tranche of an escrow's milestone schedule. */
+export interface EscrowMilestone {
+  index: number;
+  /** Milestone amount in the token's smallest unit. */
+  amount: bigint;
+  released: boolean;
+}
+
+/** The full milestone schedule attached to an escrow. */
+export interface EscrowSchedule {
+  milestones: EscrowMilestone[];
+  /** Sum of the amounts already released. */
+  releasedAmount: bigint;
+}
+
+/**
+ * Check that the `get_milestones` amounts and the `is_milestone_released` flags
+ * describe the same schedule.
+ */
+export function isEscrowSchedule(amounts: unknown, released: unknown): boolean {
+  return (
+    Array.isArray(amounts) &&
+    amounts.every((amount) => typeof amount === 'bigint') &&
+    Array.isArray(released) &&
+    released.every((flag) => typeof flag === 'boolean') &&
+    amounts.length === released.length
+  );
+}
+
+/**
+ * Assert that the milestone amounts and released flags line up, so a partial
+ * response never produces a silently inconsistent domain schedule.
+ */
+export function assertEscrowSchedule(
+  amounts: unknown,
+  released: unknown,
+): asserts amounts is readonly bigint[] {
+  if (!Array.isArray(amounts) || !amounts.every((amount) => typeof amount === 'bigint')) {
+    throw new ContractResponseError('escrow', 'milestones', 'an array of bigint amounts');
+  }
+  if (!Array.isArray(released) || !released.every((flag) => typeof flag === 'boolean')) {
+    throw new ContractResponseError('escrow', 'released', 'an array of booleans');
+  }
+  if (amounts.length !== released.length) {
+    throw new ContractResponseError(
+      'escrow',
+      'milestones',
+      'the same number of amounts and released flags',
+    );
+  }
+}
+
+/** Convert raw milestone amounts and released flags into the domain schedule. */
+export function normalizeEscrowSchedule(amounts: unknown, released: unknown): EscrowSchedule {
+  assertEscrowSchedule(amounts, released);
+  const flags = released as boolean[];
+  const milestones: EscrowMilestone[] = amounts.map((amount, index) => ({
+    index,
+    amount,
+    released: flags[index],
+  }));
+  const releasedAmount = milestones.reduce(
+    (total, milestone) => (milestone.released ? total + milestone.amount : total),
+    0n,
+  );
+  return { milestones, releasedAmount };
+}
 
 /**
  * Inputs for `create_escrow`. `id` is chosen by the caller (the escrow
