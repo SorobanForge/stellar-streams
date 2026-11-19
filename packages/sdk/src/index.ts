@@ -444,6 +444,11 @@ const MAX_BACKOFF_MS = 8_000;
 const MAX_LABEL_BYTES = 64;
 /** Must match `MAX_REFERENCE_LEN` in the stream contract. */
 const MAX_REFERENCE_BYTES = 128;
+/**
+ * Most streams one `createStreams` call may create. Must match `MAX_BATCH` in
+ * the stream contract: a larger batch is rejected with `BATCH_TOO_LARGE`.
+ */
+export const MAX_BATCH_STREAMS = 14;
 /** `getStream` calls {@link StreamsClient.listStreams} runs at a time. */
 const STREAM_FETCH_CONCURRENCY = 8;
 
@@ -1134,14 +1139,22 @@ abstract class SorobanClient {
     }
   }
 
-  /** Polls `getTransaction` until the transaction succeeds, fails, or times out. */
-  private async poll(hash: string, signal?: AbortSignal): Promise<{ hash: string }> {
+  /**
+   * Polls `getTransaction` until the transaction succeeds, fails, or times out.
+   * A successful invoke also reports the contract's return value, which is the
+   * only truthful source for values the caller cannot predict, such as the ids
+   * allocated by `create_streams`.
+   */
+  private async poll(
+    hash: string,
+    signal?: AbortSignal,
+  ): Promise<{ hash: string; returnValue?: xdr.ScVal }> {
     const startedAt = Date.now();
     for (;;) {
       throwIfAborted(signal);
       const result = await this.transport.getTransaction(hash);
       if (result.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
-        return { hash };
+        return { hash, returnValue: result.returnValue };
       }
       if (result.status === SorobanRpc.Api.GetTransactionStatus.FAILED) {
         throw new Error(
@@ -1176,6 +1189,44 @@ abstract class SorobanClient {
     );
   }
 }
+
+/** One stream in a {@link StreamsClient.createStreams} batch. */
+export interface CreateStreamsEntry {
+  /** Address that receives the stream. */
+  recipient: string;
+  /** Amount to lock, in the token's smallest unit, as a decimal integer string. */
+  amount: string;
+  /** Unix seconds the stream starts vesting. */
+  startTime: number;
+  /** Unix seconds the stream is fully vested; must be after `startTime`. */
+  endTime: number;
+  /** Unix seconds before which nothing is claimable; between start and end. */
+  cliffTime: number;
+}
+
+/** Arguments for {@link StreamsClient.createStreams}. */
+export interface CreateStreamsParams {
+  /** Account that funds every stream and signs the batch. */
+  sender: string;
+  /** Token contract id (`C...`) every stream locks. */
+  token: string;
+  /** Streams to create, 1 to {@link MAX_BATCH_STREAMS} entries. */
+  entries: CreateStreamsEntry[];
+}
+
+/** The result of a confirmed {@link StreamsClient.createStreams} call. */
+export interface CreateStreamsResult extends WriteResult {
+  /** Ids allocated by the contract, in `entries` order. */
+  ids: bigint[];
+}
+
+/**
+ * `simulateOnly: true` changes the return type of `createStreams` like every
+ * other write; a confirmed batch resolves with its ids and hash.
+ */
+export type CreateStreamsResultFor<O extends WriteOptions> = O extends { simulateOnly: true }
+  ? SimulationResult
+  : CreateStreamsResult;
 
 /**
  * A typed client for the Stellar Streams protocol. Read calls simulate against
@@ -1574,6 +1625,100 @@ export class StreamsClient extends SorobanClient {
       ],
       opts,
     );
+  }
+
+  /**
+   * Create up to {@link MAX_BATCH_STREAMS} streams in one transaction, the
+   * payroll path: `sender` funds every stream and authorizes once, instead of
+   * sending one transaction per recipient.
+   *
+   * The contract's `create_streams(sender, token, entries)` takes each entry as
+   * `(recipient, amount, start_time, cliff_time, end_time)`. Entries carry no
+   * metadata: batch streams store an empty `label` and `reference`. The call is
+   * all-or-nothing, so one invalid entry moves no tokens and allocates no ids.
+   *
+   * Every entry is validated with the same rules as {@link createStream} before
+   * the transaction is built, and an empty or oversized batch is rejected
+   * without a network round trip. The resolved `ids` are the ids the contract
+   * allocated, in input order (`ids[i]` belongs to `entries[i]`).
+   *
+   * @param params - `sender`, `token`, and the entries to create.
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns `{ ids, hash }`: the allocated stream ids and the confirmed
+   *   transaction hash. With `simulateOnly: true` it resolves with the
+   *   simulation instead, like every other write.
+   * @throws Error when `sender`/`token` is invalid, `entries` is empty or has
+   *   more than {@link MAX_BATCH_STREAMS} items, or an entry's recipient,
+   *   amount or schedule is invalid — before any network call.
+   * @throws Error when no `publicKey` / `signTransaction` was configured.
+   * @throws StreamsError when the contract rejects the batch — `EMPTY_BATCH`,
+   *   `BATCH_TOO_LARGE`, `BATCH_OVERFLOW`, `INVALID_AMOUNT`,
+   *   `INVALID_START_TIME`, `INVALID_TIME_RANGE` or `INVALID_CLIFF`.
+   * @example
+   * ```typescript
+   * const now = Math.floor(Date.now() / 1_000);
+   * const { ids, hash } = await client.createStreams({
+   *   sender: address,
+   *   token: USDC,
+   *   entries: payroll.map(({ recipient, amount }) => ({
+   *     recipient,
+   *     amount: parseTokenAmount(amount, decimals).toString(),
+   *     startTime: now,
+   *     endTime: now + 30 * 86_400,
+   *     cliffTime: now,
+   *   })),
+   * });
+   * // ids[i] is the stream created for entries[i].
+   * ```
+   */
+  async createStreams<O extends WriteOptions = WriteOptions>(
+    params: CreateStreamsParams,
+    opts: O = {} as O,
+  ): Promise<CreateStreamsResultFor<O>> {
+    assertAddress(params.sender, 'sender');
+    assertTokenId(params.token);
+    if (params.entries.length === 0) {
+      throw new Error('Invalid entries: a batch must contain at least one stream.');
+    }
+    if (params.entries.length > MAX_BATCH_STREAMS) {
+      throw new Error(
+        `Invalid entries: ${params.entries.length} streams. A batch may contain at most ${MAX_BATCH_STREAMS}.`,
+      );
+    }
+
+    // Same per-entry rules as `createStream`; the contract applies them again.
+    // Entries are encoded in the contract's tuple order, which puts the cliff
+    // before the end time.
+    const entries = params.entries.map((entry) => {
+      assertAddress(entry.recipient, 'recipient');
+      const amount = parseAmount(entry.amount);
+      assertSchedule(entry.startTime, entry.endTime, entry.cliffTime);
+      return xdr.ScVal.scvVec([
+        addressToScVal(entry.recipient),
+        nativeToScVal(amount, { type: 'i128' }),
+        nativeToScVal(BigInt(entry.startTime), { type: 'u64' }),
+        nativeToScVal(BigInt(entry.cliffTime), { type: 'u64' }),
+        nativeToScVal(BigInt(entry.endTime), { type: 'u64' }),
+      ]);
+    });
+
+    const outcome = await this.invoke(
+      'create_streams',
+      [addressToScVal(params.sender), addressToScVal(params.token), xdr.ScVal.scvVec(entries)],
+      opts,
+    );
+    if (opts.simulateOnly) return outcome as CreateStreamsResultFor<O>;
+
+    const { hash, returnValue } = outcome as unknown as {
+      hash: string;
+      returnValue?: xdr.ScVal;
+    };
+    if (!returnValue) {
+      throw new Error(
+        `Transaction ${hash} confirmed without a return value, so the created stream ids are unknown.`,
+      );
+    }
+    return { hash, ids: scValToNative(returnValue) as bigint[] } as CreateStreamsResultFor<O>;
   }
 
   /**
