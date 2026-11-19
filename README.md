@@ -53,6 +53,7 @@ The [`docs/`](docs/README.md) directory carries an index of every page — start
 - [Contract reference](docs/contracts.md) — entry points, error codes, and event shapes.
 - [Local development guide](docs/development-guide.md) — toolchain versions, contracts workflow.
 - [Deployments](docs/deployments.md) — contract ids per network.
+- [Admin Runbook](docs/admin-runbook.md) — secure procedures for protocol fee and treasury changes.
 
 ---
 
@@ -333,7 +334,7 @@ See [examples/basic-payment](examples/basic-payment) for a complete, runnable ex
 # Setup
 pnpm install
 cd examples/basic-payment
-cp .env.example .env
+lp .env.example .env
 # Edit .env with your contract id, sender key, and recipient address
 
 # Run
