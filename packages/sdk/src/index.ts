@@ -1495,6 +1495,9 @@ export class StreamsClient extends SorobanClient {
    * Lock tokens and open a new stream. `params.token` may be any token
    * contract id; `params.amount` is in that token's smallest unit, so scale it
    * by the token's own `decimals` (see {@link getTokenMetadata}), not by 7.
+   * `params.amount` accepts a decimal string or a `bigint`: a caller holding a
+   * `bigint` (a claimable or vested result, say) can pass it as-is, and the
+   * client stringifies it before the same validation runs.
    *
    * Inputs are validated before the transaction is built: an invalid address,
    * a non-positive amount, an inconsistent schedule or oversized metadata
@@ -1503,14 +1506,15 @@ export class StreamsClient extends SorobanClient {
    * metadata (empty strings).
    *
    * @param params - Sender, recipient, token, amount in the token's smallest
-   *   unit, the `startTime`/`endTime`/`cliffTime` schedule (Unix seconds), and
-   *   optional `label` (64 bytes) / `reference` (128 bytes) metadata.
+   *   unit (decimal string or `bigint`), the `startTime`/`endTime`/`cliffTime`
+   *   schedule (Unix seconds), and optional `label` (64 bytes) / `reference`
+   *   (128 bytes) metadata.
    * @returns The hash of the confirmed transaction; resolve the new stream id
    *   with {@link nextStreamId} before the call or by reading events after it.
    * @throws Error when a field is invalid — `sender`/`recipient` are not
    *   `G...`/`C...` addresses, `token` is not a `C...` address, `amount` is not
-   *   a positive decimal integer string, `endTime <= startTime`, `cliffTime` is
-   *   outside the schedule, or the metadata is too long.
+   *   a positive integer that fits in an `i128`, `endTime <= startTime`,
+   *   `cliffTime` is outside the schedule, or the metadata is too long.
    * @throws Error when no `publicKey` / `signTransaction` was configured.
    * @throws StreamsError when the pre-flight simulation or the submitted
    *   transaction is rejected by the contract — e.g. `INVALID_AMOUNT`,
@@ -1550,7 +1554,9 @@ export class StreamsClient extends SorobanClient {
     assertAddress(params.sender, 'sender');
     assertAddress(params.recipient, 'recipient');
     assertTokenId(params.token);
-    const amount = parseAmount(params.amount);
+    // `amount` may be a bigint; stringify first so validation and the error
+    // messages are identical for both input forms.
+    const amount = parseAmount(params.amount.toString());
     assertSchedule(params.startTime, params.endTime, params.cliffTime);
     assertMetadata(label, reference);
     return this.invoke(
@@ -1848,13 +1854,26 @@ function assertStreamAddress(address: string): void {
   }
 }
 
-/** Parses `params.amount` and enforces the contract's `amount > 0`. */
+/** The inclusive range of the contract's `i128` amount argument. */
+const I128_MIN = -(1n << 127n);
+const I128_MAX = (1n << 127n) - 1n;
+
+/**
+ * Parses `params.amount` and enforces the contract's `amount > 0`.
+ *
+ * The range check runs here rather than being left to XDR encoding so an
+ * out-of-range value fails with the same field-named error as any other bad
+ * amount, before a transaction is built.
+ */
 function parseAmount(amount: string): bigint {
   let value: bigint;
   try {
     value = BigInt(amount);
   } catch {
     throw new Error(`Invalid amount: ${amount}. Expected a decimal integer string.`);
+  }
+  if (value < I128_MIN || value > I128_MAX) {
+    throw new Error(`Invalid amount: ${amount}. Must fit in a signed 128-bit integer.`);
   }
   if (value <= 0n) {
     throw new Error(`Invalid amount: ${amount}. Must be greater than 0.`);

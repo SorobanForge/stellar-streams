@@ -169,15 +169,24 @@ export function normalizeConfig(raw: unknown): StreamConfig {
 
 /**
  * Inputs for `create_stream`. `token` is any token contract id (C...), and
- * `amount` is a decimal string in that token's smallest unit — scale it by the
- * token's own `decimals()`, which is 7 for XLM and SACs but not for every token.
+ * `amount` is in that token's smallest unit — scale it by the token's own
+ * `decimals()`, which is 7 for XLM and SACs but not for every token.
  */
 export interface CreateStreamParams {
   sender: string;
   recipient: string;
   /** Token contract id (C...): the XLM SAC, an issued asset's SAC, or a custom token. */
   token: string;
-  amount: string;
+  /**
+   * Amount in the token's smallest unit, as a decimal string or a `bigint`.
+   *
+   * A `bigint` is accepted so a caller holding one — for example the value
+   * returned by a claimable/vested read — can pass it straight through instead
+   * of converting it back to text first. The SDK stringifies it before
+   * validation, so both forms are held to the same rules: a positive integer
+   * that fits in an `i128`.
+   */
+  amount: string | bigint;
   startTime: number;
   endTime: number;
   cliffTime: number;
