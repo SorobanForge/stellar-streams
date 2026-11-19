@@ -37,11 +37,9 @@ import {
   formatDuration,
   formatRelativeTime,
 } from '@stellar-starter-kit/utils';
-import {
-  DEFAULT_NETWORK_PASSPHRASE,
-  DEFAULT_SOROBAN_RPC_URL,
-  DEFAULT_TOKEN_CONTRACT_ID,
-} from '../../lib/constants';
+import type { EnvironmentConfig } from '@stellar-starter-kit/config';
+import { environmentConfig, environmentErrors } from '../../lib/environment';
+import ConfigurationError from '../../components/ConfigurationError';
 import {
   getStreamDurationSeconds,
   getStreamCliffSeconds,
@@ -53,14 +51,6 @@ import {
 const NotificationBanner = dynamic(() => import('../../components/NotificationBanner'), {
   ssr: false,
 });
-
-const RPC_URL = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? DEFAULT_SOROBAN_RPC_URL;
-const NETWORK_PASSPHRASE =
-  process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ?? DEFAULT_NETWORK_PASSPHRASE;
-const CONTRACT_ID = process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID ?? '';
-// Testnet native XLM SAC by default; any SEP-41 token contract id works.
-const DEFAULT_TOKEN = process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID || DEFAULT_TOKEN_CONTRACT_ID;
-const EXPERT_URL = process.env.NEXT_PUBLIC_STELLAR_EXPERT_URL ?? 'https://stellar.expert';
 
 /** One-line vesting timeline for the inspected stream, expressed in relative time. */
 function streamTimeline(stream: Stream, nowSeconds: number): string {
@@ -76,7 +66,25 @@ function streamTimeline(stream: Stream, nowSeconds: number): string {
   return `Ends ${formatRelativeTime(stream.endTime, nowSeconds)}`;
 }
 
-export default function StreamsDashboard() {
+/**
+ * Route entry point: validates the environment once, then renders the
+ * dashboard. A failed validation is shown instead of mounting the page, so no
+ * client is ever built from the Testnet defaults by accident.
+ */
+export default function StreamsDashboardPage() {
+  const config = environmentConfig;
+  if (!config) {
+    return <ConfigurationError errors={environmentErrors} />;
+  }
+  return <StreamsDashboard config={config} />;
+}
+
+function StreamsDashboard({ config }: { config: EnvironmentConfig }) {
+  const { sorobanRpcUrl, networkPassphrase, streamContractId, tokenContractId, expertUrl } = config;
+  // An unset stream contract is a valid environment (nothing is deployed yet),
+  // so it gets the in-page "not configured" state rather than a config error.
+  const contractId = streamContractId ?? '';
+
   const { activeAddress, isConnected, isConnecting, connect, disconnect, signTransaction } =
     useWallet();
 
@@ -85,7 +93,7 @@ export default function StreamsDashboard() {
 
   // Create form.
   const [recipient, setRecipient] = useState('');
-  const [token, setToken] = useState(DEFAULT_TOKEN);
+  const [token, setToken] = useState(tokenContractId);
   const [amount, setAmount] = useState('100');
   const [durationDays, setDurationDays] = useState('30');
   const [cliffDays, setCliffDays] = useState('0');
@@ -101,13 +109,13 @@ export default function StreamsDashboard() {
   const client = useMemo(
     () =>
       new StreamsClient({
-        contractId: CONTRACT_ID,
-        rpcUrl: RPC_URL,
-        networkPassphrase: NETWORK_PASSPHRASE,
+        contractId,
+        rpcUrl: sorobanRpcUrl,
+        networkPassphrase,
         publicKey: activeAddress ?? undefined,
         signTransaction: async (xdr: string) => signTransaction(xdr),
       }),
-    [activeAddress, signTransaction],
+    [activeAddress, signTransaction, contractId, sorobanRpcUrl, networkPassphrase],
   );
 
   const notify = useCallback((kind: 'success' | 'error', message: string) => {
@@ -205,8 +213,8 @@ export default function StreamsDashboard() {
       notify('error', 'Connect a wallet to create a stream.');
       return;
     }
-    if (!CONTRACT_ID) {
-      notify('error', 'No stream contract configured. Set NEXT_PUBLIC_STREAM_CONTRACT_ID.');
+    if (!contractId) {
+      notify('error', 'No stream contract configured. Set the stream contract id in your env.');
       return;
     }
 
@@ -280,15 +288,14 @@ export default function StreamsDashboard() {
           </p>
         </div>
 
-        {!CONTRACT_ID && (
+        {!contractId && (
           <div className="mb-8 flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-200">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
             <div>
               <p className="font-semibold">Stream contract not configured</p>
               <p className="mt-1 font-light text-amber-200/80">
-                Deploy the <code className="font-mono">stream</code> contract and set{' '}
-                <code className="font-mono">NEXT_PUBLIC_STREAM_CONTRACT_ID</code> to enable the
-                dashboard.
+                Deploy the <code className="font-mono">stream</code> contract and set its id in{' '}
+                <code className="font-mono">apps/web/.env.local</code> to enable the dashboard.
               </p>
             </div>
           </div>
@@ -404,7 +411,7 @@ export default function StreamsDashboard() {
 
             <Button
               type="submit"
-              disabled={busy || !isConnected || !CONTRACT_ID || !isFormValid}
+              disabled={busy || !isConnected || !contractId || !isFormValid}
               loading={busy}
               className="w-full"
             >
@@ -535,7 +542,7 @@ export default function StreamsDashboard() {
                       <Ban className="h-3.5 w-3.5 text-rose-400" /> Cancel
                     </button>
                     <a
-                      href={`${EXPERT_URL}/explorer/testnet/contract/${CONTRACT_ID}`}
+                      href={`${expertUrl}/contract/${contractId}`}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex items-center gap-1.5 px-2 py-2 text-[10px] text-slate-500 transition hover:text-white"
