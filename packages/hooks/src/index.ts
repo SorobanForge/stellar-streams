@@ -361,6 +361,73 @@ export function useCancelStream(
   return useContractMutation<StreamsClient, [StreamId]>(client, run, options);
 }
 
+/** Arguments for a sender's top-up: the stream and the amount to add. */
+export interface TopUpStreamArgs {
+  id: StreamId;
+  /** Amount in the token's smallest unit; must be a positive integer. */
+  amount: bigint | number | string;
+}
+
+/**
+ * Tops up a stream, extending its schedule at the current payment rate.
+ *
+ * The amount is validated as a positive integer before the client is called;
+ * contract rejections (e.g. `STREAM_COMPLETED` or `AMOUNT_OVERFLOW`) surface
+ * unchanged through `error` and `errorCode`.
+ */
+export function useTopUpStream(
+  client: StreamsClient | null,
+  options: StreamMutationOptions = {},
+): StreamMutationResult<[TopUpStreamArgs]> {
+  const run = useCallback(async (streams: StreamsClient, args: TopUpStreamArgs) => {
+    let amount: bigint;
+    try {
+      amount = BigInt(args.amount);
+    } catch {
+      throw new Error(`Invalid top-up amount: ${args.amount}. Use a whole number.`);
+    }
+    if (amount <= 0n) {
+      throw new Error('Top-up amount must be greater than zero.');
+    }
+    return streams.topUp(args.id, amount);
+  }, []);
+  return useContractMutation<StreamsClient, [TopUpStreamArgs]>(client, run, options);
+}
+
+/** Arguments for a sender's reduction: the stream and its new total. */
+export interface ReduceStreamArgs {
+  id: StreamId;
+  /** New total in the token's smallest unit; must be a positive integer. */
+  newTotal: bigint | number | string;
+}
+
+/**
+ * Reduces a stream's total, refunding the difference to the sender.
+ *
+ * The new total is validated as a positive integer before the client is
+ * called. The contract still enforces that it is below the current total and
+ * at least the vested amount, so `REDUCTION_BELOW_VESTED` and
+ * `INVALID_REDUCTION` arrive through `errorCode`.
+ */
+export function useReduceStream(
+  client: StreamsClient | null,
+  options: StreamMutationOptions = {},
+): StreamMutationResult<[ReduceStreamArgs]> {
+  const run = useCallback(async (streams: StreamsClient, args: ReduceStreamArgs) => {
+    let newTotal: bigint;
+    try {
+      newTotal = BigInt(args.newTotal);
+    } catch {
+      throw new Error(`Invalid new total: ${args.newTotal}. Use a whole number.`);
+    }
+    if (newTotal <= 0n) {
+      throw new Error('New total must be greater than zero.');
+    }
+    return streams.reduceStream(args.id, newTotal);
+  }, []);
+  return useContractMutation<StreamsClient, [ReduceStreamArgs]>(client, run, options);
+}
+
 export interface UseStreamsResult {
   /** Streams involving the address, or an empty array while loading / unsupported. */
   streams: Stream[];

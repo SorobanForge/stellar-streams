@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import {
@@ -12,11 +12,20 @@ import {
   Ban,
   Search,
   Wallet,
+  PlusCircle,
+  MinusCircle,
+  History,
 } from 'lucide-react';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
 import { Button, Footer, Header, Input } from '@stellar-starter-kit/ui';
-import { useCancelStream, useCreateStream, useWithdrawStream } from '@stellar-starter-kit/hooks';
+import {
+  useCancelStream,
+  useCreateStream,
+  useReduceStream,
+  useTopUpStream,
+  useWithdrawStream,
+} from '@stellar-starter-kit/hooks';
 import { getStreamMetrics, type Stream } from '@stellar-starter-kit/types';
 import {
   formatAddress,
@@ -31,8 +40,21 @@ import {
 import {
   DEFAULT_NETWORK_PASSPHRASE,
   DEFAULT_SOROBAN_RPC_URL,
+  DEFAULT_STELLAR_NETWORK,
   DEFAULT_TOKEN_CONTRACT_ID,
 } from '../../lib/constants';
+import {
+  describeStreamActionError,
+  parsePositiveTokenAmount,
+  validateReduceTotal,
+  validateTopUpAmount,
+} from '../../lib/stream-actions';
+import {
+  clearRecentStreams,
+  readRecentStreams,
+  rememberRecentStream,
+} from '../../lib/stream-history';
+import { validateStreamSchedule } from '../../lib/stream-schedule-validation';
 import {
   getStreamDurationSeconds,
   getStreamCliffSeconds,
@@ -52,6 +74,8 @@ const CONTRACT_ID = process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID ?? '';
 // Testnet native XLM SAC by default; any SEP-41 token contract id works.
 const DEFAULT_TOKEN = process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID || DEFAULT_TOKEN_CONTRACT_ID;
 const EXPERT_URL = process.env.NEXT_PUBLIC_STELLAR_EXPERT_URL ?? 'https://stellar.expert';
+// Recent stream ids are kept per network, so testnet ids never leak into mainnet.
+const NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? DEFAULT_STELLAR_NETWORK;
 
 /** One-line vesting timeline for the inspected stream, expressed in relative time. */
 function streamTimeline(stream: Stream, nowSeconds: number): string {
@@ -83,11 +107,22 @@ export default function StreamsDashboard() {
 
   // Lookup.
   const [lookupId, setLookupId] = useState('');
+  const [recentIds, setRecentIds] = useState<string[]>([]);
   const [stream, setStream] = useState<Stream | null>(null);
   const [contractClaimable, setContractClaimable] = useState<bigint>(0n);
   const [streamToken, setStreamToken] = useState<TokenMetadata | null>(null);
   const [loadingStream, setLoadingStream] = useState(false);
   const [feeBps, setFeeBps] = useState<number | null>(null);
+
+  // Sender adjustments.
+  const [topUpAmount, setTopUpAmount] = useState('');
+  const [reduceTotal, setReduceTotal] = useState('');
+
+  // localStorage is only available after mount; reading during render would
+  // produce a hydration mismatch (and throw during SSR).
+  useEffect(() => {
+    setRecentIds(readRecentStreams(NETWORK));
+  }, []);
 
   const client = useMemo(
     () =>
@@ -137,7 +172,8 @@ export default function StreamsDashboard() {
         // Fetch protocol config for feeBps
         const config = await client.getConfig().catch(() => null);
         setFeeBps(config ? config.feeBps : 0);
-        if (!found) notify('error', `No stream found with id ${id}.`);
+        if (found) setRecentIds(rememberRecentStream(NETWORK, found.id));
+        else notify('error', `No stream found with id ${id}.`);
       } catch (err: unknown) {
         notify('error', err instanceof Error ? err.message : 'Failed to load stream.');
       } finally {
@@ -173,12 +209,30 @@ export default function StreamsDashboard() {
     onError: (message) => notify('error', message),
   });
 
+  const topUpStream = useTopUpStream(client, {
+    onSuccess: ({ hash }) => {
+      notify('success', `Top-up confirmed. Tx ${formatAddress(hash, 6)}`);
+      setTopUpAmount('');
+      if (stream) void loadStream(stream.id);
+    },
+  });
+
+  const reduceStream = useReduceStream(client, {
+    onSuccess: ({ hash }) => {
+      notify('success', `Stream reduced and the difference refunded. Tx ${formatAddress(hash, 6)}`);
+      setReduceTotal('');
+      if (stream) void loadStream(stream.id);
+    },
+  });
+
   // One mutation per hook instance is allowed at a time; `busy` mirrors that for
   // the buttons that must not start a second write.
   const busy =
     createStream.status === 'pending' ||
     withdrawStream.status === 'pending' ||
-    cancelStream.status === 'pending';
+    cancelStream.status === 'pending' ||
+    topUpStream.status === 'pending' ||
+    reduceStream.status === 'pending';
 
   const runWithdraw = () => {
     if (!stream) return;
@@ -188,6 +242,52 @@ export default function StreamsDashboard() {
   const runCancel = () => {
     if (!stream) return;
     void cancelStream.mutate(stream.id);
+  };
+
+  const streamDecimals = streamToken?.decimals ?? 7;
+  const currentTotal = stream ? BigInt(stream.totalAmount) : 0n;
+  const topUpValidation = topUpAmount ? validateTopUpAmount(topUpAmount, streamDecimals) : null;
+  const reduceValidation = reduceTotal
+    ? validateReduceTotal(reduceTotal, currentTotal, streamDecimals)
+    : null;
+  const topUpError = describeStreamActionError(topUpStream.error, topUpStream.errorCode);
+  const reduceError = describeStreamActionError(reduceStream.error, reduceStream.errorCode);
+  // Only the on-chain sender may top up or reduce; recipients see no form.
+  const isSender = Boolean(stream && activeAddress && stream.sender === activeAddress);
+
+  const handleTopUp = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!stream) return;
+    const problem = validateTopUpAmount(topUpAmount, streamDecimals);
+    if (problem) {
+      notify('error', problem);
+      return;
+    }
+    const amount = parsePositiveTokenAmount(topUpAmount, streamDecimals);
+    if (amount === null) return;
+    setError(null);
+    setSuccess(null);
+    await topUpStream.mutate({ id: stream.id, amount });
+  };
+
+  const handleReduce = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!stream) return;
+    const problem = validateReduceTotal(reduceTotal, currentTotal, streamDecimals);
+    if (problem) {
+      notify('error', problem);
+      return;
+    }
+    const newTotal = parsePositiveTokenAmount(reduceTotal, streamDecimals);
+    if (newTotal === null) return;
+    setError(null);
+    setSuccess(null);
+    await reduceStream.mutate({ id: stream.id, newTotal });
+  };
+
+  const handleClearHistory = () => {
+    clearRecentStreams(NETWORK);
+    setRecentIds([]);
   };
 
   const handleCreate = async (event: React.FormEvent) => {
@@ -213,6 +313,15 @@ export default function StreamsDashboard() {
       const startTime = now;
       const endTime = now + getStreamDurationSeconds(durationDays);
       const cliffTime = now + getStreamCliffSeconds(cliffDays);
+
+      // Guard the exact timestamps the contract will see, in addition to the
+      // day-based form checks above.
+      const scheduleErrors = validateStreamSchedule({ startTime, endTime, cliffTime }, now);
+      const scheduleProblem = Object.values(scheduleErrors)[0];
+      if (scheduleProblem) {
+        notify('error', scheduleProblem);
+        return;
+      }
 
       const { decimals } = await client.getTokenMetadata(token.trim());
       await createStream.mutate({
@@ -414,8 +523,14 @@ export default function StreamsDashboard() {
                   value={lookupId}
                   onChange={(e) => setLookupId(e.target.value)}
                   placeholder="Stream id"
+                  list="recent-stream-ids"
                   className="w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
                 />
+                <datalist id="recent-stream-ids">
+                  {recentIds.map((id) => (
+                    <option key={id} value={id} />
+                  ))}
+                </datalist>
                 <button
                   onClick={() => loadStream(lookupId)}
                   disabled={loadingStream || !lookupId}
@@ -428,6 +543,23 @@ export default function StreamsDashboard() {
                   )}
                   Load
                 </button>
+              </div>
+
+              <div className="mt-2 flex h-5 items-center justify-between text-[10px] text-slate-500">
+                <span>
+                  {recentIds.length > 0
+                    ? 'Recent lookups are remembered on this device.'
+                    : 'Your recent lookups will appear here.'}
+                </span>
+                {recentIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearHistory}
+                    className="inline-flex items-center gap-1 transition-colors hover:text-white"
+                  >
+                    <History className="h-3 w-3" /> Clear history
+                  </button>
+                )}
               </div>
 
               {stream && (
@@ -531,6 +663,126 @@ export default function StreamsDashboard() {
                       Explorer <ExternalLink className="h-3 w-3" />
                     </a>
                   </div>
+
+                  {isSender && (
+                    <div className="space-y-4 border-t border-slate-900 pt-4">
+                      <div className="flex items-center gap-2 text-[10px] tracking-wider text-slate-500 uppercase">
+                        <History className="h-3 w-3" /> Sender controls
+                      </div>
+
+                      <form
+                        onSubmit={handleTopUp}
+                        className="space-y-2 rounded-lg border border-slate-900 bg-slate-950/40 p-3"
+                      >
+                        <label
+                          htmlFor="top-up-amount"
+                          className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-400 uppercase"
+                        >
+                          <PlusCircle className="h-3.5 w-3.5 text-cyan-400" /> Top up
+                        </label>
+                        <p className="text-[10px] font-light text-slate-500">
+                          Adds tokens and extends the end date at the current payment rate.
+                          Already-vested tokens stay vested.
+                        </p>
+                        <div className="flex gap-2">
+                          <input
+                            id="top-up-amount"
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={topUpAmount}
+                            onChange={(e) => {
+                              setTopUpAmount(e.target.value);
+                              if (topUpStream.status === 'error') topUpStream.reset();
+                            }}
+                            placeholder={`Amount in ${streamToken?.symbol ?? 'token units'}`}
+                            aria-invalid={Boolean(topUpValidation)}
+                            className="w-full rounded-lg border border-slate-900 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-200 focus:border-purple-500 focus:outline-none"
+                          />
+                          <button
+                            type="submit"
+                            disabled={
+                              busy ||
+                              !isConnected ||
+                              !topUpAmount.trim() ||
+                              stream.cancelled ||
+                              nowSeconds >= stream.endTime ||
+                              Boolean(topUpValidation)
+                            }
+                            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-cyan-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-500 disabled:pointer-events-none disabled:opacity-40"
+                          >
+                            {topUpStream.status === 'pending' ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <PlusCircle className="h-3.5 w-3.5" />
+                            )}
+                            Top up
+                          </button>
+                        </div>
+                        {(topUpValidation || topUpError) && (
+                          <p role="alert" className="text-[10px] text-rose-300">
+                            {topUpValidation ?? topUpError}
+                          </p>
+                        )}
+                      </form>
+
+                      <form
+                        onSubmit={handleReduce}
+                        className="space-y-2 rounded-lg border border-slate-900 bg-slate-950/40 p-3"
+                      >
+                        <label
+                          htmlFor="reduce-total"
+                          className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-400 uppercase"
+                        >
+                          <MinusCircle className="h-3.5 w-3.5 text-amber-400" /> Reduce total
+                        </label>
+                        <p className="text-[10px] font-light text-slate-500">
+                          Sets a new total and refunds the difference to you immediately. The
+                          payment rate is unchanged, so the stream ends sooner. It cannot go below
+                          the amount already vested.
+                        </p>
+                        <div className="flex gap-2">
+                          <input
+                            id="reduce-total"
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={reduceTotal}
+                            onChange={(e) => {
+                              setReduceTotal(e.target.value);
+                              if (reduceStream.status === 'error') reduceStream.reset();
+                            }}
+                            placeholder={`New total (current ${formatAmount(stream.totalAmount)})`}
+                            aria-invalid={Boolean(reduceValidation)}
+                            className="w-full rounded-lg border border-slate-900 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-200 focus:border-purple-500 focus:outline-none"
+                          />
+                          <button
+                            type="submit"
+                            disabled={
+                              busy ||
+                              !isConnected ||
+                              !reduceTotal.trim() ||
+                              stream.cancelled ||
+                              Boolean(reduceValidation)
+                            }
+                            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-200 transition hover:bg-amber-500/20 disabled:pointer-events-none disabled:opacity-40"
+                          >
+                            {reduceStream.status === 'pending' ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <MinusCircle className="h-3.5 w-3.5" />
+                            )}
+                            Reduce
+                          </button>
+                        </div>
+                        {(reduceValidation || reduceError) && (
+                          <p role="alert" className="text-[10px] text-rose-300">
+                            {reduceValidation ?? reduceError}
+                          </p>
+                        )}
+                      </form>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -19,6 +19,11 @@ export interface MutationResult<TArgs extends unknown[]> {
   mutate: (...args: TArgs) => Promise<{ hash: string } | null>;
   status: MutationStatus;
   error: string | null;
+  /**
+   * Stable contract error code from the last failure (e.g.
+   * `REDUCTION_BELOW_VESTED`), when the failure carried one.
+   */
+  errorCode: string | null;
   /** Hash of the last confirmed transaction; cleared by `reset`. */
   hash: string | null;
   /** Returns the hook to `idle` and clears `error` and `hash`. */
@@ -42,6 +47,7 @@ export function useContractMutation<TClient extends object, TArgs extends unknow
 ): MutationResult<TArgs> {
   const [status, setStatus] = useState<MutationStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [hash, setHash] = useState<string | null>(null);
   const inFlight = useRef(false);
   const mounted = useRef(true);
@@ -67,6 +73,7 @@ export function useContractMutation<TClient extends object, TArgs extends unknow
       inFlight.current = true;
       setStatus('pending');
       setError(null);
+      setErrorCode(null);
       setHash(null);
       try {
         const result = await run(client, ...args);
@@ -78,8 +85,13 @@ export function useContractMutation<TClient extends object, TArgs extends unknow
         return result;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Transaction failed';
+        const code =
+          typeof (err as { code?: unknown })?.code === 'string'
+            ? ((err as { code: string }).code ?? null)
+            : null;
         if (mounted.current) {
           setError(message);
+          setErrorCode(code);
           setStatus('error');
         }
         callbacks.current.onError?.(message);
@@ -94,8 +106,9 @@ export function useContractMutation<TClient extends object, TArgs extends unknow
   const reset = useCallback(() => {
     setStatus('idle');
     setError(null);
+    setErrorCode(null);
     setHash(null);
   }, []);
 
-  return { mutate, status, error, hash, reset };
+  return { mutate, status, error, errorCode, hash, reset };
 }

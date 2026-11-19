@@ -2,7 +2,13 @@ import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { StreamsClient } from '@stellar-starter-kit/sdk';
 import type { CreateStreamParams } from '@stellar-starter-kit/types';
-import { useCancelStream, useCreateStream, useWithdrawStream } from './index';
+import {
+  useCancelStream,
+  useCreateStream,
+  useReduceStream,
+  useTopUpStream,
+  useWithdrawStream,
+} from './index';
 
 /** A promise plus its resolver, so a test can hold a mutation in flight. */
 function deferred<T>() {
@@ -133,5 +139,75 @@ describe('stream mutation hooks', () => {
 
     expect(result.current.status).toBe('idle');
     expect(result.current.error).toBeNull();
+  });
+
+  it('tops up a stream with a validated amount', async () => {
+    const topUp = vi.fn().mockResolvedValue({ hash: 'tx-top-up' });
+    const client = { topUp } as unknown as StreamsClient;
+    const onSuccess = vi.fn();
+
+    const { result } = renderHook(() => useTopUpStream(client, { onSuccess }));
+
+    await act(async () => {
+      expect(await result.current.mutate({ id: 3, amount: '250' })).toEqual({
+        hash: 'tx-top-up',
+      });
+    });
+
+    expect(topUp).toHaveBeenCalledWith(3, 250n);
+    expect(result.current.status).toBe('success');
+    expect(onSuccess).toHaveBeenCalledWith({ hash: 'tx-top-up' });
+  });
+
+  it('rejects a non-positive top-up before calling the client', async () => {
+    const topUp = vi.fn();
+    const client = { topUp } as unknown as StreamsClient;
+
+    const { result } = renderHook(() => useTopUpStream(client));
+
+    await act(async () => {
+      expect(await result.current.mutate({ id: 3, amount: '0' })).toBeNull();
+    });
+
+    expect(topUp).not.toHaveBeenCalled();
+    expect(result.current.status).toBe('error');
+    expect(result.current.error).toMatch(/greater than zero/i);
+  });
+
+  it('reduces a stream and keeps the contract error code', async () => {
+    const reduceStream = vi.fn().mockRejectedValue(
+      Object.assign(new Error('Simulation of reduce_stream failed'), {
+        code: 'REDUCTION_BELOW_VESTED',
+      }),
+    );
+    const client = { reduceStream } as unknown as StreamsClient;
+
+    const { result } = renderHook(() => useReduceStream(client));
+
+    await act(async () => {
+      expect(await result.current.mutate({ id: 4, newTotal: '40' })).toBeNull();
+    });
+
+    expect(reduceStream).toHaveBeenCalledWith(4, 40n);
+    expect(result.current.status).toBe('error');
+    expect(result.current.error).toBe('Simulation of reduce_stream failed');
+    expect(result.current.errorCode).toBe('REDUCTION_BELOW_VESTED');
+  });
+
+  it('clears the error code on reset', async () => {
+    const reduceStream = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('rejected'), { code: 'INVALID_REDUCTION' }));
+    const client = { reduceStream } as unknown as StreamsClient;
+
+    const { result } = renderHook(() => useReduceStream(client));
+
+    await act(async () => {
+      await result.current.mutate({ id: 4, newTotal: '40' });
+    });
+    act(() => result.current.reset());
+
+    expect(result.current.status).toBe('idle');
+    expect(result.current.errorCode).toBeNull();
   });
 });

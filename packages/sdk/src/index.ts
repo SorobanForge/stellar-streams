@@ -532,6 +532,12 @@ export type StreamErrorCode =
   | 'EMPTY_BATCH'
   | 'BATCH_TOO_LARGE'
   | 'BATCH_OVERFLOW'
+  | 'STREAM_PAUSED'
+  | 'NOT_PAUSED'
+  | 'STREAM_COMPLETED'
+  | 'AMOUNT_OVERFLOW'
+  | 'REDUCTION_BELOW_VESTED'
+  | 'INVALID_REDUCTION'
   | 'SAME_RECIPIENT';
 
 /**
@@ -580,7 +586,13 @@ const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
   13: 'EMPTY_BATCH',
   14: 'BATCH_TOO_LARGE',
   15: 'BATCH_OVERFLOW',
-  20: 'SAME_RECIPIENT',
+  16: 'STREAM_PAUSED',
+  17: 'NOT_PAUSED',
+  18: 'STREAM_COMPLETED',
+  19: 'AMOUNT_OVERFLOW',
+  20: 'REDUCTION_BELOW_VESTED',
+  21: 'INVALID_REDUCTION',
+  22: 'SAME_RECIPIENT',
 };
 
 /**
@@ -1626,6 +1638,68 @@ export class StreamsClient extends SorobanClient {
     opts: O = {} as O,
   ): Promise<WriteResultFor<O>> {
     return this.invoke('cancel', [nativeToScVal(BigInt(id), { type: 'u64' })], opts);
+  }
+
+  /**
+   * Add `amount` to a stream's deposit without changing its payment rate. The
+   * contract extends `endTime` so tokens that already vested stay vested.
+   *
+   * Only the stream's sender can authorize a top-up, and only while the stream
+   * is still streaming.
+   *
+   * @param id - Stream id as `bigint`, `number`, or decimal string.
+   * @param amount - Amount to add, in the token's smallest unit. Must be a
+   *   positive integer (`bigint`, `number`, or decimal string).
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns The hash of the confirmed transaction. Read the stream again to
+   *   see the new `totalAmount` and `endTime`.
+   * @throws Error when `amount` is not a positive integer, or no wallet is configured.
+   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`,
+   *   `ALREADY_CANCELLED`, `STREAM_COMPLETED`, `AMOUNT_OVERFLOW` or `UNAUTHORIZED`.
+   */
+  async topUp<O extends WriteOptions = WriteOptions>(
+    id: bigint | number | string,
+    amount: bigint | number | string,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    const value = parseAmount(String(amount));
+    return this.invoke(
+      'top_up',
+      [nativeToScVal(BigInt(id), { type: 'u64' }), nativeToScVal(value, { type: 'i128' })],
+      opts,
+    );
+  }
+
+  /**
+   * Shrink a stream's total without cancelling it. The difference between the
+   * current total and `newTotal` is refunded to the sender immediately, and the
+   * contract shortens `endTime` so the payment rate is preserved.
+   *
+   * Only the stream's sender can authorize a reduction. `newTotal` must be
+   * positive, strictly below the current total, and at least the amount that
+   * has already vested.
+   *
+   * @param id - Stream id as `bigint`, `number`, or decimal string.
+   * @param newTotal - The new total, in the token's smallest unit.
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns The hash of the confirmed transaction. Read the stream again to
+   *   see the reduced `totalAmount` and `endTime`.
+   * @throws Error when `newTotal` is not a positive integer, or no wallet is configured.
+   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`,
+   *   `ALREADY_CANCELLED`, `INVALID_REDUCTION`, `REDUCTION_BELOW_VESTED`,
+   *   `AMOUNT_OVERFLOW` or `UNAUTHORIZED`.
+   */
+  async reduceStream<O extends WriteOptions = WriteOptions>(
+    id: bigint | number | string,
+    newTotal: bigint | number | string,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    const value = parseAmount(String(newTotal));
+    return this.invoke(
+      'reduce_stream',
+      [nativeToScVal(BigInt(id), { type: 'u64' }), nativeToScVal(value, { type: 'i128' })],
+      opts,
+    );
   }
 
   /**
