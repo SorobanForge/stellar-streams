@@ -9,6 +9,7 @@ const nextConfig = {
     '@stellar-starter-kit/hooks',
     '@stellar-starter-kit/types',
     '@stellar-starter-kit/utils',
+    '@stellar-starter-kit/config',
   ],
 };
 
