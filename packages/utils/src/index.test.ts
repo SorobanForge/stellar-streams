@@ -13,6 +13,10 @@ import {
   formatBps,
   formatTokenAmount,
   parseTokenAmount,
+  parseDuration,
+  toSafeNumber,
+  bigintRatio,
+  splitAmounts,
   XLM_DECIMALS,
   toCsv,
   vestingCurve,
@@ -277,6 +281,70 @@ describe('formatDuration', () => {
   });
 });
 
+describe('parseDuration', () => {
+  it('parses the documented units back to seconds', () => {
+    expect(parseDuration('30d')).toBe(2_592_000);
+    expect(parseDuration('12h')).toBe(43_200);
+    expect(parseDuration('90m')).toBe(5_400);
+    expect(parseDuration('45s')).toBe(45);
+  });
+
+  it('parses weeks, months and years like formatDuration renders them', () => {
+    expect(parseDuration('2w')).toBe(14 * 86_400);
+    expect(parseDuration('1mo')).toBe(30 * 86_400);
+    expect(parseDuration('1y')).toBe(365 * 86_400);
+    // `mo` must not be read as `m` followed by stray text.
+    expect(parseDuration('1mo 2d')).toBe(32 * 86_400);
+    expect(parseDuration('1m')).toBe(60);
+  });
+
+  it('accepts whitespace, upper case and compound input', () => {
+    expect(parseDuration(' 30D ')).toBe(2_592_000);
+    expect(parseDuration('1d 2h')).toBe(93_600);
+    expect(parseDuration('1d2h')).toBe(93_600);
+    expect(parseDuration('1y  2mo   3d')).toBe((365 + 60 + 3) * 86_400);
+    expect(parseDuration('1 d 2 h')).toBe(93_600);
+  });
+
+  it('round-trips with formatDuration for representable durations', () => {
+    // Only values whose formatter output carries every second: past 7 days the
+    // formatter keeps the two most significant units and drops the rest.
+    const table = [
+      0,
+      1,
+      45,
+      60,
+      3_600,
+      2 * 3_600 + 30 * 60,
+      86_400,
+      7 * 86_400,
+      8 * 86_400,
+      30 * 86_400,
+      365 * 86_400,
+    ];
+
+    for (const seconds of table) {
+      expect(parseDuration(formatDuration(seconds))).toBe(seconds);
+    }
+
+    // The documented lossy case: 400 days renders as "1y 1mo" and parses back
+    // as 395 days, exactly what `formatDuration` promises to drop.
+    expect(parseDuration(formatDuration(400 * 86_400))).toBe(395 * 86_400);
+  });
+
+  it('rejects unparseable input with a message naming the accepted units', () => {
+    for (const input of ['', '   ', '30', 'abc', '1.5d', '1d 2', '1x', '+1d', '1d!']) {
+      expect(() => parseDuration(input)).toThrowError(/s, m, h, d, w, mo, y/);
+    }
+  });
+
+  it('rejects negative durations with the same unit guidance', () => {
+    expect(() => parseDuration('-5m')).toThrowError(/must not be negative/);
+    expect(() => parseDuration('-5m')).toThrowError(/s, m, h, d, w, mo, y/);
+    expect(() => parseDuration('1d -2h')).toThrowError(/s, m, h, d, w, mo, y/);
+  });
+});
+
 describe('formatRelativeTime', () => {
   // A fixed clock keeps every expectation below independent of the real date.
   const now = 1_700_000_000;
@@ -347,6 +415,62 @@ describe('vesting math', () => {
     expect(computeProgressBps(schedule, 1_000)).toBe(10_000);
     expect(formatBps(5_000)).toBe('50%');
     expect(formatBps(2_550)).toBe('25.5%');
+  });
+
+  it('keeps the pre-pause results when no pause fields are passed', () => {
+    expect(computeVestedAmount(schedule, 250)).toBe(250n);
+    expect(computeVestedAmount(schedule, 1_000)).toBe(1_000n);
+    expect(computeVestedAmount(schedule, 5_000)).toBe(1_000n);
+    expect(computeVestedAmount(schedule, 500)).toBe(
+      computeVestedAmount({ ...schedule, totalPaused: 0 }, 500),
+    );
+  });
+
+  // Values below mirror `test_pause_freezes_accrual_until_resumed` in
+  // contracts/stream/src/test.rs: total 1000, start 0, end 1000, paused at 250,
+  // resumed at 750 (total_paused = 500).
+  it('freezes accrual while paused, like the contract', () => {
+    const paused = { ...schedule, pausedAt: 250 };
+    expect(computeVestedAmount(paused, 250)).toBe(250n);
+    expect(computeVestedAmount(paused, 500)).toBe(250n);
+    expect(computeVestedAmount(paused, 750)).toBe(250n);
+  });
+
+  it('folds a past pause window out of the schedule, like the contract', () => {
+    const resumed = { ...schedule, totalPaused: 500 };
+    expect(computeVestedAmount(resumed, 750)).toBe(250n);
+    expect(computeVestedAmount(resumed, 1_000)).toBe(500n);
+    expect(computeVestedAmount(resumed, 5_000)).toBe(500n);
+  });
+
+  it('caps an open pause window at endTime', () => {
+    // Paused at 250 and never resumed: the contract caps `now` at endTime, so
+    // the active window is 750s and only 250s of the schedule count.
+    expect(computeVestedAmount({ ...schedule, pausedAt: 250 }, 2_000)).toBe(250n);
+  });
+
+  it('combines past and active pause windows', () => {
+    const scheduleWithPauses = { ...schedule, totalPaused: 200, pausedAt: 600 };
+    // At t=700: elapsed 700 - 200 past - 100 active = 400.
+    expect(computeVestedAmount(scheduleWithPauses, 700)).toBe(400n);
+  });
+
+  it('saturates rather than going negative when pauses exceed elapsed', () => {
+    expect(computeVestedAmount({ ...schedule, totalPaused: 2_000 }, 500)).toBe(0n);
+  });
+
+  it('applies pause fields through computeClaimable', () => {
+    const stream: ClaimableStream = {
+      totalAmount: '1000',
+      withdrawn: '100',
+      startTime: 0,
+      endTime: 1_000,
+      cliffTime: 0,
+      totalPaused: 500,
+    };
+    // Vested at t=1000 with 500 paused seconds: 500. Withdrawn 100 leaves 400.
+    expect(computeClaimable(stream, 1_000)).toBe(400n);
+    expect(computeClaimable({ ...stream, pausedAt: 900 }, 1_000)).toBe(300n);
   });
 });
 
@@ -502,6 +626,110 @@ describe('mulDiv', () => {
   it('handles remainder division with floor semantics', () => {
     expect(mulDiv(7n, 1n, 2n)).toBe(3n);
     expect(mulDiv(100n, 33n, 7n)).toBe(471n);
+  });
+});
+
+describe('toSafeNumber', () => {
+  it('returns numbers inside the safe integer range', () => {
+    expect(toSafeNumber(0n)).toBe(0);
+    expect(toSafeNumber(1n)).toBe(1);
+    expect(toSafeNumber(-1n)).toBe(-1);
+    expect(toSafeNumber(BigInt(Number.MAX_SAFE_INTEGER))).toBe(Number.MAX_SAFE_INTEGER);
+    expect(toSafeNumber(BigInt(Number.MIN_SAFE_INTEGER))).toBe(Number.MIN_SAFE_INTEGER);
+  });
+
+  it('throws one past the safe range in either direction', () => {
+    expect(() => toSafeNumber(BigInt(Number.MAX_SAFE_INTEGER) + 1n)).toThrowError(
+      /outside the safe integer range/,
+    );
+    expect(() => toSafeNumber(BigInt(Number.MIN_SAFE_INTEGER) - 1n)).toThrowError(
+      /outside the safe integer range/,
+    );
+  });
+
+  it('throws instead of returning Infinity for an i128-scale amount', () => {
+    expect(() => toSafeNumber(2n ** 127n - 1n)).toThrowError(/outside the safe integer range/);
+  });
+});
+
+describe('bigintRatio', () => {
+  it('returns a 0-1 fraction for ordinary values', () => {
+    expect(bigintRatio(0n, 100n)).toBe(0);
+    expect(bigintRatio(1n, 4n)).toBe(0.25);
+    expect(bigintRatio(1n, 2n)).toBe(0.5);
+    expect(bigintRatio(100n, 100n)).toBe(1);
+  });
+
+  it('clamps values outside 0-1', () => {
+    expect(bigintRatio(-5n, 100n)).toBe(0);
+    expect(bigintRatio(150n, 100n)).toBe(1);
+  });
+
+  it('stays finite for bigints far beyond Number.MAX_SAFE_INTEGER', () => {
+    const i128Max = 2n ** 127n - 1n;
+    expect(bigintRatio(i128Max, i128Max)).toBe(1);
+    expect(bigintRatio(i128Max - 1n, i128Max)).toBeGreaterThanOrEqual(0.999_999_999);
+    expect(bigintRatio(i128Max - 1n, i128Max)).toBeLessThanOrEqual(1);
+    expect(Number.isFinite(bigintRatio(i128Max, 2n))).toBe(true);
+  });
+
+  it('handles a 7-decimal token amount exactly', () => {
+    // 1.234567 of a 7-decimal token as a fraction of one whole token.
+    expect(bigintRatio(1_234_567n, 10_000_000n)).toBe(0.1234567);
+  });
+
+  it('rejects a non-positive whole', () => {
+    expect(() => bigintRatio(1n, 0n)).toThrowError(/whole must be greater than zero/);
+    expect(() => bigintRatio(1n, -1n)).toThrowError(/whole must be greater than zero/);
+  });
+});
+
+describe('splitAmounts', () => {
+  it('sums exactly to the amount and gives the dust to the last entry', () => {
+    expect(splitAmounts(100n, [1, 1, 1])).toEqual([33n, 33n, 34n]);
+    expect(splitAmounts(10n, [3, 7])).toEqual([3n, 7n]);
+    expect(splitAmounts(1n, [1, 1, 1])).toEqual([0n, 0n, 1n]);
+    expect(splitAmounts(0n, [1, 2])).toEqual([0n, 0n]);
+  });
+
+  it('accepts bigint shares and mixed-safe inputs', () => {
+    expect(splitAmounts(100n, [1n, 2n, 3n])).toEqual([16n, 33n, 51n]);
+    expect(splitAmounts(100n, [1, 2n])).toEqual(splitAmounts(100n, [1n, 2n]));
+  });
+
+  it('cross-checks 100 shares against a prime amount', () => {
+    const amount = 1_000_003n; // prime
+    const shares = Array.from({ length: 100 }, (_, i) => i + 1);
+    const amounts = splitAmounts(amount, shares);
+    const totalShares = shares.reduce((sum, share) => sum + BigInt(share), 0n);
+
+    expect(amounts).toHaveLength(100);
+    expect(amounts.reduce((sum, portion) => sum + portion, 0n)).toBe(amount);
+
+    // Each entry matches `recipient_portion`: truncated integer division, with
+    // the remainder handed to the final recipient.
+    let distributed = 0n;
+    for (let i = 0; i < shares.length - 1; i++) {
+      const expected = (amount * BigInt(shares[i])) / totalShares;
+      expect(amounts[i]).toBe(expected);
+      distributed += expected;
+    }
+    expect(amounts[99]).toBe(amount - distributed);
+    expect(amounts[99]).toBeGreaterThanOrEqual(amounts[98]);
+  });
+
+  it('keeps the total across a very large amount', () => {
+    const amount = 2n ** 127n - 1n;
+    const amounts = splitAmounts(amount, [2, 3, 5]);
+    expect(amounts.reduce((sum, portion) => sum + portion, 0n)).toBe(amount);
+  });
+
+  it('rejects invalid input', () => {
+    expect(() => splitAmounts(-1n, [1])).toThrowError(/amount must not be negative/);
+    expect(() => splitAmounts(10n, [])).toThrowError(/shares must not be empty/);
+    expect(() => splitAmounts(10n, [0, 0])).toThrowError(/total shares must be greater than zero/);
+    expect(() => splitAmounts(10n, [1, -1])).toThrowError(/must not be negative/);
+    expect(() => splitAmounts(10n, [1, 1.5])).toThrowError(/must be a safe integer/);
   });
 });
 

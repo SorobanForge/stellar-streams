@@ -86,6 +86,22 @@ describe('createStream input validation', () => {
     expect(rpc.calls()).toBe(0);
   });
 
+  it('rejects a bigint above the i128 range with the invalid-amount error', async () => {
+    const client = makeClient();
+    await expect(client.createStream(validParams({ amount: 2n ** 127n }))).rejects.toThrow(
+      'Invalid amount',
+    );
+    expect(rpc.calls()).toBe(0);
+  });
+
+  it('rejects a bigint below the i128 range with the invalid-amount error', async () => {
+    const client = makeClient();
+    await expect(client.createStream(validParams({ amount: -(2n ** 127n) - 1n }))).rejects.toThrow(
+      'Invalid amount',
+    );
+    expect(rpc.calls()).toBe(0);
+  });
+
   it('rejects an endTime that is not after the startTime', async () => {
     const client = makeClient();
     await expect(
@@ -183,5 +199,11 @@ describe('createStream metadata', () => {
     const args = createStreamArgs(rpc);
     expect(scValToNative(args[7]!)).toBe(label);
     expect(scValToNative(args[8]!)).toBe(reference);
+  });
+
+  it('accepts a bigint amount and sends the same value a string would', async () => {
+    await makeClient().createStream(validParams({ amount: 1_000_000_000n }));
+
+    expect(scValToNative(createStreamArgs(rpc)[3]!)).toBe(1_000_000_000n);
   });
 });

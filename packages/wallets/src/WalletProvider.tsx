@@ -3,12 +3,19 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { WalletAdapter } from './adapters/adapter.js';
 import { isUserRejection, NotSupportedError, toSigningError } from './errors.js';
+import { getWalletCapabilities, type WalletCapabilities } from './capabilities.js';
 
 export type WalletType = 'freighter' | 'albedo' | 'rabe' | 'hana' | 'ledger';
 
 export interface WalletContextType {
   activeAddress: string | null;
   activeProvider: WalletType | null;
+  /**
+   * Capabilities of the active wallet, or `null` when no wallet is connected.
+   * Read this before offering a wallet-specific action (for example an
+   * auth-entry signature) instead of waiting for the call to fail.
+   */
+  capabilities: WalletCapabilities | null;
   isConnected: boolean;
   isConnecting: boolean;
   isRestoring: boolean;
@@ -241,11 +248,16 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     [signWith],
   );
 
+  // Derived from the active provider so the context value can never drift from
+  // the adapter that actually signs.
+  const capabilities = getWalletCapabilities(activeProvider);
+
   return (
     <WalletContext.Provider
       value={{
         activeAddress,
         activeProvider,
+        capabilities,
         isConnected: !!activeAddress,
         isConnecting,
         isRestoring,

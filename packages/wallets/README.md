@@ -39,37 +39,48 @@ instead of returning an unsigned entry.
 | `AlbedoAdapter`    | `albedo`     | Yes     | No         | Yes               | No              |
 | `RabetAdapter`     | `rabe`       | Yes     | Yes        | Yes               | No              |
 | `HanaAdapter`      | `hana`       | Yes     | No         | Yes               | No              |
+| `LedgerAdapter`    | `ledger`     | Yes     | Yes        | Yes               | No              |
 
 An auth-entry flow that targets a wallet without this capability is a
 follow-up feature, not something the dashboard should attempt today.
 
-## Loading wallets on demand
+## Capability matrix
 
-`WalletProvider` does not import any adapter module at module scope. Each
-provider is registered as a loader that `import()`s the adapter on first use
-(`connect`, a signature, a session restore, or a disconnect), and each adapter
-`import()`s its own wallet SDK the same way — `@stellar/freighter-api` in
-`freighter.ts`, `@albedo-link/intent` in `albedo.ts`, and Ledger's device
-packages inside the connect path.
+`WALLET_CAPABILITIES` publishes the same information as data, so a component
+can decide what to render instead of showing a button that will fail with
+`NotSupportedError`.
 
-The consequence for a page: mounting `WalletProvider` downloads none of the five
-wallet SDKs. Visiting `/streams` and never opening the wallet picker ships no
-adapter code at all, and choosing Freighter pulls Freighter's client without
-Albedo's or Rabet's. `isAvailable()` follows the same rule — probing the persisted
-provider loads only that provider's module, so the probe never pays for the
-adapters the visitor is not using.
+| Key         | Adapter            | `signAuthEntry` | `hardware` | `deepLink` |
+| ----------- | ------------------ | --------------- | ---------- | ---------- |
+| `freighter` | `FreighterAdapter` | Yes             | No         | No         |
+| `albedo`    | `AlbedoAdapter`    | No              | No         | Yes        |
+| `rabe`      | `RabetAdapter`     | No              | No         | No         |
+| `hana`      | `HanaAdapter`      | No              | No         | No         |
+| `ledger`    | `LedgerAdapter`    | No              | Yes        | No         |
 
-Adapters are instantiated once per provider and reused, because they keep
-session state on the instance (the account a signature is made for, Ledger's
-open transport). A loader that fails is retried on the next call rather than
-cached as a rejection.
+- **`signAuthEntry`** — the adapter implements Soroban auth-entry signing.
+- **`hardware`** — the wallet is a device (Ledger), not an extension or web
+  wallet; Ledger also requires WebHID.
+- **`deepLink`** — the wallet is driven through a web link/intent (Albedo's
+  `@albedo-link/intent`) rather than an injected `window` provider.
+
+The matrix is asserted against the adapters in `capabilities.test.ts`, so
+adding or removing an adapter method fails the build before the table can go
+stale. Read it directly, or through the provider:
 
 ```tsx
-// No wallet SDK is fetched by this render.
-const { connect, isConnected } = useWallet();
+import { useWallet, WALLET_CAPABILITIES } from '@stellar-starter-kit/wallets';
 
-// This is the first moment Albedo's client is requested.
-await connect('albedo');
+// Static lookup, e.g. to label the wallet picker before connecting.
+const ledgerSupportsAuthEntry = WALLET_CAPABILITIES.ledger.signAuthEntry;
+
+export function SignAuthEntryButton() {
+  // Active wallet, from the provider context (null while disconnected).
+  const { capabilities } = useWallet();
+  if (!capabilities?.signAuthEntry) return null;
+
+  return <button type="button">Sign auth entry</button>;
+}
 ```
 
 ## Ledger hardware wallet
