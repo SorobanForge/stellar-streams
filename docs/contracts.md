@@ -215,8 +215,8 @@ fields), not as a positional tuple, so decoding does not depend on field order.
 
 The Rust event types are `StreamCreated`, `StreamWithdrawn`, `StreamCancelled`,
 `StreamRecipientTransferred` and `StreamMetadataUpdated`; their field names are
-exactly the map keys above. An indexer tracking who a stream pays should start from `created`'s
-`recipient` and follow each `transferred` event. `amount` on
+exactly the map keys above. An indexer tracking who a stream pays should start
+from `created`'s `recipient` and follow each `transferred` event. `amount` on
 `withdrawn` is what the recipient actually received and `fee` what the treasury
 received — they sum to the gross claimable amount. `cancelled` carries only the
 refunded unvested portion: the recipient's vested remainder is still to be
