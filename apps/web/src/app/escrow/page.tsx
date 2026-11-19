@@ -633,9 +633,7 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                       {/* Fund */}
                       <button
                         onClick={() => handleFundEscrow(manageId)}
-                        disabled={
-                          !isConnected || actionLoading || !manageId || !contractConfigured
-                        }
+                        disabled={!isConnected || actionLoading || !manageId || !contractConfigured}
                         className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/20 py-4 font-semibold text-slate-200 shadow-inner transition-all hover:bg-slate-900/50 disabled:pointer-events-none disabled:opacity-40"
                       >
                         <Coins className="h-5 w-5 text-yellow-400" />
@@ -645,9 +643,7 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                       {/* Release */}
                       <button
                         onClick={() => handleLifecycleAction('release')}
-                        disabled={
-                          !isConnected || actionLoading || !manageId || !contractConfigured
-                        }
+                        disabled={!isConnected || actionLoading || !manageId || !contractConfigured}
                         className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/20 py-4 font-semibold text-slate-200 shadow-inner transition-all hover:bg-slate-900/50 disabled:pointer-events-none disabled:opacity-40"
                       >
                         <Play className="h-5 w-5 text-emerald-400" />
@@ -657,9 +653,7 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                       {/* Refund */}
                       <button
                         onClick={() => handleLifecycleAction('refund')}
-                        disabled={
-                          !isConnected || actionLoading || !manageId || !contractConfigured
-                        }
+                        disabled={!isConnected || actionLoading || !manageId || !contractConfigured}
                         className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/20 py-4 font-semibold text-slate-200 shadow-inner transition-all hover:bg-slate-900/50 disabled:pointer-events-none disabled:opacity-40"
                       >
                         <Undo2 className="h-5 w-5 text-cyan-400" />
@@ -669,9 +663,7 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                       {/* Cancel */}
                       <button
                         onClick={() => handleLifecycleAction('cancel')}
-                        disabled={
-                          !isConnected || actionLoading || !manageId || !contractConfigured
-                        }
+                        disabled={!isConnected || actionLoading || !manageId || !contractConfigured}
                         className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/20 py-4 font-semibold text-slate-200 shadow-inner transition-all hover:bg-slate-900/50 disabled:pointer-events-none disabled:opacity-40"
                       >
                         <Ban className="h-5 w-5 text-rose-400" />

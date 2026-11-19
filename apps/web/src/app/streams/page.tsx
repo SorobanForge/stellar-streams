@@ -79,13 +79,7 @@ export default function StreamsDashboardPage() {
 }
 
 function StreamsDashboard({ config }: { config: EnvironmentConfig }) {
-  const {
-    sorobanRpcUrl,
-    networkPassphrase,
-    streamContractId,
-    tokenContractId,
-    expertUrl,
-  } = config;
+  const { sorobanRpcUrl, networkPassphrase, streamContractId, tokenContractId, expertUrl } = config;
   // An unset stream contract is a valid environment (nothing is deployed yet),
   // so it gets the in-page "not configured" state rather than a config error.
   const contractId = streamContractId ?? '';
