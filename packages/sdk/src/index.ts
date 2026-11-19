@@ -532,6 +532,8 @@ export type StreamErrorCode =
   | 'EMPTY_BATCH'
   | 'BATCH_TOO_LARGE'
   | 'BATCH_OVERFLOW'
+  | 'STREAM_PAUSED'
+  | 'NOT_PAUSED'
   | 'SAME_RECIPIENT';
 
 /**
@@ -580,6 +582,8 @@ const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
   13: 'EMPTY_BATCH',
   14: 'BATCH_TOO_LARGE',
   15: 'BATCH_OVERFLOW',
+  16: 'STREAM_PAUSED',
+  17: 'NOT_PAUSED',
   20: 'SAME_RECIPIENT',
 };
 
@@ -1626,6 +1630,40 @@ export class StreamsClient extends SorobanClient {
     opts: O = {} as O,
   ): Promise<WriteResultFor<O>> {
     return this.invoke('cancel', [nativeToScVal(BigInt(id), { type: 'u64' })], opts);
+  }
+
+  /**
+   * Pause accrual for a stream. Only the sender can authorize it.
+   *
+   * @param id - Stream id as `bigint`, `number`, or decimal string.
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns The hash of the confirmed transaction.
+   * @throws Error when no `publicKey` / `signTransaction` was configured.
+   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`,
+   *   `UNAUTHORIZED`, or `ALREADY_CANCELLED`.
+   */
+  async pause<O extends WriteOptions = WriteOptions>(
+    id: bigint | number | string,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    return this.invoke('pause', [nativeToScVal(BigInt(id), { type: 'u64' })], opts);
+  }
+
+  /**
+   * Resume accrual for a stream. Only the sender can authorize it.
+   *
+   * @param id - Stream id as `bigint`, `number`, or decimal string.
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns The hash of the confirmed transaction.
+   * @throws Error when no `publicKey` / `signTransaction` was configured.
+   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`,
+   *   `UNAUTHORIZED`, or `ALREADY_CANCELLED`.
+   */
+  async resume<O extends WriteOptions = WriteOptions>(
+    id: bigint | number | string,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    return this.invoke('resume', [nativeToScVal(BigInt(id), { type: 'u64' })], opts);
   }
 
   /**
