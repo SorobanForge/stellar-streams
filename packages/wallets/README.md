@@ -36,9 +36,10 @@ instead of returning an unsigned entry.
 | Adapter            | `WalletType` | Connect | Disconnect | `signTransaction` | `signAuthEntry` |
 | ------------------ | ------------ | ------- | ---------- | ----------------- | --------------- |
 | `FreighterAdapter` | `freighter`  | Yes     | No         | Yes               | Yes             |
-| `AlbedoAdapter`    | `albedo`     | Yes     | No         | Yes               | No              |
-| `RabetAdapter`     | `rabe`       | Yes     | Yes        | Yes               | No              |
-| `HanaAdapter`      | `hana`       | Yes     | No         | Yes               | No              |
+| `AlbedoAdapter`        | `albedo`        | Yes     | No         | Yes               | No              |
+| `RabetAdapter`         | `rabe`          | Yes     | Yes        | Yes               | No              |
+| `HanaAdapter`          | `hana`          | Yes     | No         | Yes               | No              |
+| `WalletConnectAdapter` | `walletconnect` | Yes     | Yes        | Yes               | Yes             |
 
 An auth-entry flow that targets a wallet without this capability is a
 follow-up feature, not something the dashboard should attempt today.
@@ -170,6 +171,38 @@ gone away.
   names the wallet and method.
 - **No active session** – signing before connecting throws
   `No active wallet session to sign transaction.` (or `... sign auth entry.`).
+
+### Sequence diagram
+
+For the complete end-to-end signing and submission sequence diagram across the UI, SDK, wallet adapter, fee-bump sponsorship, and Soroban RPC, see [Transaction Signing and Submission Lifecycle in ARCHITECTURE.md](../../ARCHITECTURE.md#transaction-signing-and-submission-lifecycle).
+
+## WalletConnect mobile wallet adapter
+
+`WalletConnectAdapter` bridges mobile wallets (Lobstr, Solar, etc.) via the WalletConnect v2
+SignClient protocol, enabling seamless connection via pairing URIs / QR codes and transaction / auth-entry signing according to SEP-0007 / SEP-0043.
+
+```ts
+import { WalletConnectAdapter } from '@stellar-starter-kit/wallets';
+
+const wcAdapter = new WalletConnectAdapter({
+  projectId: '<YOUR_WALLETCONNECT_PROJECT_ID>',
+  onUri: (uri) => {
+    // Render QR code or open mobile deep link
+    console.log('Pairing URI:', uri);
+  },
+});
+
+const address = await wcAdapter.connect();
+const signedXdr = await wcAdapter.signTransaction(xdr, { network: 'TESTNET' });
+await wcAdapter.disconnect();
+```
+
+### Features and Behavior
+
+- **Session Handling:** Stores and restores active session topics across browser reloads via `stellar_streams_wc_topic` in localStorage.
+- **Cleanup:** Calling `disconnect()` sends a session termination RPC to peer mobile clients and purges stored session keys.
+- **Methods:** Implements `signTransaction` (`stellar_signXDR`) and `signAuthEntry` (`stellar_signAuthEntry`) conforming to CAIP-2 Stellar chain identifiers (`stellar:pubnet`, `stellar:testnet`).
+- **Dynamic Chunking:** Dynamically loads `@walletconnect/sign-client` so applications only download WalletConnect bundles when mobile wallet pairing is requested.
 
 ## Troubleshooting
 
