@@ -28,22 +28,28 @@ between `start_time` and `end_time`, with an optional cliff.
 
 ### Entry points
 
-| Function             | Arguments                                                                                                                                              | Returns                                                                 | Auth                                           |
-| :------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------- | :--------------------------------------------- |
-| `initialize`         | `admin: Address, treasury: Address, fee_bps: u32`                                                                                                      | `Result<(), StreamError>`                                               | `admin`                                        |
-| `set_fee`            | `fee_bps: u32`                                                                                                                                         | `Result<(), StreamError>`                                               | stored `admin`                                 |
-| `set_treasury`       | `treasury: Address`                                                                                                                                    | `Result<(), StreamError>`                                               | stored `admin`                                 |
-| `create_stream`      | `sender: Address, recipient: Address, token: Address, amount: i128, start_time: u64, end_time: u64, cliff_time: u64, label: String, reference: String` | `Result<u64, StreamError>` — the new stream id                          | `sender`                                       |
-| `create_streams`     | `sender: Address, token: Address, entries: Vec<(Address, i128, u64, u64, u64)>`                                                                        | `Result<Vec<u64>, StreamError>` — the new ids, in input order           | `sender`                                       |
-| `withdraw`           | `stream_id: u64`                                                                                                                                       | `Result<i128, StreamError>` — net amount paid after fee                 | `recipient`                                    |
-| `cancel`             | `stream_id: u64`                                                                                                                                       | `Result<(), StreamError>`                                               | `sender`                                       |
-| `transfer_recipient` | `stream_id: u64, caller: Address, new_recipient: Address`                                                                                              | `Result<(), StreamError>`                                               | `caller`, which must be the stored `recipient` |
-| `claimable`          | `stream_id: u64`                                                                                                                                       | `Result<i128, StreamError>` — vested minus already withdrawn, floor `0` | —                                              |
-| `vested`             | `stream_id: u64`                                                                                                                                       | `Result<i128, StreamError>` — total vested so far                       | —                                              |
-| `get_stream`         | `stream_id: u64`                                                                                                                                       | `Option<Stream>`                                                        | —                                              |
-| `get_config`         | —                                                                                                                                                      | `Option<Config>` (`None` if uninitialized)                              | —                                              |
-| `next_stream_id`     | —                                                                                                                                                      | `u64` (`1` on a fresh deploy)                                           | —                                              |
-| `version`            | —                                                                                                                                                      | `u32` (the shared `CONTRACT_VERSION`)                                   | —                                              |
+| Function             | Arguments                                                                                                                                              | Returns                                                                        | Auth                                           |
+| :------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------- | :--------------------------------------------- |
+| `initialize`         | `admin: Address, treasury: Address, fee_bps: u32`                                                                                                      | `Result<(), StreamError>`                                                      | `admin`                                        |
+| `set_fee`            | `fee_bps: u32`                                                                                                                                         | `Result<(), StreamError>`                                                      | stored `admin`                                 |
+| `set_treasury`       | `treasury: Address`                                                                                                                                    | `Result<(), StreamError>`                                                      | stored `admin`                                 |
+| `create_stream`      | `sender: Address, recipient: Address, token: Address, amount: i128, start_time: u64, end_time: u64, cliff_time: u64, label: String, reference: String` | `Result<u64, StreamError>` — the new stream id                                 | `sender`                                       |
+| `create_streams`     | `sender: Address, token: Address, entries: Vec<(Address, i128, u64, u64, u64)>`                                                                        | `Result<Vec<u64>, StreamError>` — the new ids, in input order                  | `sender`                                       |
+| `withdraw`           | `stream_id: u64`                                                                                                                                       | `Result<i128, StreamError>` — net amount paid after fee                        | `recipient`                                    |
+| `preview_withdraw`   | `stream_id: u64`                                                                                                                                       | `Result<WithdrawPreview, StreamError>` — gross, fee and net of a `withdraw`    | —                                              |
+| `cancel`             | `stream_id: u64`                                                                                                                                       | `Result<(), StreamError>`                                                      | `sender`                                       |
+| `transfer_recipient` | `stream_id: u64, caller: Address, new_recipient: Address`                                                                                              | `Result<(), StreamError>`                                                      | `caller`, which must be the stored `recipient` |
+| `set_metadata`       | `stream_id: u64, sender: Address, label: String, reference: String`                                                                                    | `Result<(), StreamError>`                                                      | `sender`, which must be the stream's `sender`  |
+| `pause`              | `stream_id: u64`                                                                                                                                       | `Result<(), StreamError>`                                                      | `sender`                                       |
+| `resume`             | `stream_id: u64`                                                                                                                                       | `Result<(), StreamError>`                                                      | `sender`                                       |
+| `claimable`          | `stream_id: u64`                                                                                                                                       | `Result<i128, StreamError>` — vested minus already withdrawn, floor `0`        | —                                              |
+| `vested`             | `stream_id: u64`                                                                                                                                       | `Result<i128, StreamError>` — total vested so far                              | —                                              |
+| `unvested`           | `stream_id: u64`                                                                                                                                       | `Result<i128, StreamError>` — `total_amount - vested`, floor `0`               | —                                              |
+| `vesting_summary`    | `stream_id: u64`                                                                                                                                       | `Result<VestingSummary, StreamError>` — `vested` and `claimable` from one read | —                                              |
+| `get_stream`         | `stream_id: u64`                                                                                                                                       | `Option<Stream>`                                                               | —                                              |
+| `get_config`         | —                                                                                                                                                      | `Option<Config>` (`None` if uninitialized)                                     | —                                              |
+| `next_stream_id`     | —                                                                                                                                                      | `u64` (`1` on a fresh deploy)                                                  | —                                              |
+| `version`            | —                                                                                                                                                      | `u32` (the shared `CONTRACT_VERSION`)                                          | —                                              |
 
 Types returned by the views:
 
@@ -54,8 +60,11 @@ struct Stream {
     start_time: u64, end_time: u64, cliff_time: u64,
     label: String, reference: String,
     cancelled: bool,
+    paused_at: Option<u64>, total_paused: u64,
 }
 struct Config { admin: Address, treasury: Address, fee_bps: u32 }
+struct VestingSummary { vested: i128, claimable: i128 }
+struct WithdrawPreview { gross: i128, fee: i128, net: i128 }
 ```
 
 `label` and `reference` are optional, purely descriptive metadata — a payroll
@@ -64,6 +73,52 @@ label and an invoice/grant id. They never affect vesting, are stored as empty
 `label` at 64 bytes (`MAX_LABEL_LEN`), `reference` at 128 bytes
 (`MAX_REFERENCE_LEN`), compared against `String::len()` so the limit is the
 encoded byte length, not a character count. Longer input is code `11`.
+
+`unvested` is the complement clients used to compute themselves:
+`max(total_amount - vested, 0)`. It calls the same vesting helper as `vested`,
+so the two always add up to `total_amount` before the stream ends and it can
+never report a negative remainder — not after a full withdrawal, not after the
+end time, and not while a pause is freezing accrual.
+
+`preview_withdraw` answers what `withdraw` would do at the current ledger time:
+`{ gross, fee, net }`, where `gross` is what is claimable, `fee` is
+`gross * fee_bps / 10_000` and `net` is `gross - fee`. It shares the fee
+arithmetic and the treasury lookup with `withdraw` itself, so a client showing a
+preview cannot drift from the payout, and it needs no `computeProtocolFee`
+mirror. When nothing is claimable it returns all zeroes instead of
+`NothingToWithdraw`, so it can be polled freely; a stream inside an active pause
+returns `StreamPaused` (`16`), exactly what `withdraw` would answer, because the
+preview describes a call that would be rejected.
+
+`set_metadata` replaces `label` and `reference` after creation (an invoice id
+attached late, a corrected typo). Only the stream's `sender` may call it: the
+`sender` argument must sign and must match the stored sender, otherwise the call
+is rejected with `Unauthorized` (`6`) rather than trapping at `require_auth()` —
+the same explicit-caller pattern as `transfer_recipient`. The metadata caps are
+the creation caps, checked by the same helper (`64` / `128` bytes, error `11`),
+and a cancelled stream is rejected with `AlreadyCancelled` (`8`) because its
+record is settled. The update bumps the stream entry's TTL and emits
+`StreamMetadataUpdated`. Metadata never affects vesting or balances.
+
+### Pausing
+
+`pause` stops accrual and blocks `withdraw` for the recipient; `resume` folds the
+elapsed window into `total_paused` and unfreezes the stream. Both are
+sender-only, both are idempotent while the stream is in the matching state, and
+`pause` on a stream whose `end_time` has passed returns `StreamCompleted` (`18`)
+because there is no accrual left to freeze.
+
+A single pause window is capped at `MAX_PAUSE_SECONDS` — **30 days**
+(2,592,000 seconds) — so a sender can never lock a recipient out past the agreed
+schedule indefinitely. The cap is enforced by letting the pause *lapse on its
+own* rather than by rejecting the call: once more than `MAX_PAUSE_SECONDS` have
+elapsed since `paused_at`, `vested`, `unvested`, `claimable`, `vesting_summary`,
+`preview_withdraw` and `withdraw` treat the stream as running again, and the
+recipient can withdraw, even though `paused_at` is still recorded — a read path
+cannot rewrite storage. `resume` after that point has nothing left to resume and
+returns `PauseWindowExceeded` (`23`); the stream is not left frozen by that
+error. A sender who wants to freeze it again calls `pause`, which folds the
+lapsed window into `total_paused` and opens a fresh one.
 
 `cancel` compresses the schedule on the way out: `total_amount` becomes the
 vested amount and `start_time`, `end_time` and `cliff_time` are all set to now, so
@@ -117,24 +172,27 @@ event-size limits. Larger payroll runs are split into multiple batches.
 
 ### Errors — `StreamError` (`#[repr(u32)]`)
 
-| Code | Variant              | Produced when                                                                                                                                                                                                                                                                  |
-| :--: | :------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-|  1   | `InvalidAmount`      | `create_stream`, or one `create_streams` entry, with `amount <= 0`.                                                                                                                                                                                                            |
-|  2   | `InvalidTimeRange`   | `create_stream`, or one `create_streams` entry, with `end_time <= start_time`.                                                                                                                                                                                                 |
-|  3   | `InvalidCliff`       | `create_stream`, or one `create_streams` entry, with `cliff_time < start_time` or `cliff_time > end_time`.                                                                                                                                                                     |
-|  4   | `StreamNotFound`     | No stored stream under `stream_id` — raised by `withdraw`, `cancel`, `claimable`, `vested`. Also what a recipient sees if a persistent entry was archived after its TTL lapsed.                                                                                                |
-|  5   | `NothingToWithdraw`  | `withdraw` when `vested(now) - withdrawn <= 0` — before the cliff, at the start of a stream, after a full withdrawal, or for a stream whose vested amount is `0`.                                                                                                              |
-|  6   | `Unauthorized`       | `set_fee` or `set_treasury` called before `initialize` stored an admin, or `transfer_recipient` with a `caller` other than the stream's current recipient. Otherwise a wrong-signer call is not this code: `require_auth()` traps with a `Context` error before the body runs. |
-|  7   | `InvalidFee`         | `fee_bps > 1000` (the 10 % cap) in `initialize` or `set_fee`.                                                                                                                                                                                                                  |
-|  8   | `AlreadyCancelled`   | `cancel` on a stream whose `cancelled` flag is already set.                                                                                                                                                                                                                    |
-|  9   | `AlreadyInitialized` | A second `initialize` call — the presence of `DataKey::Admin` is the guard.                                                                                                                                                                                                    |
-|  10  | `TreasuryNotSet`     | `withdraw` when the fee is non-zero but no treasury address is stored.                                                                                                                                                                                                         |
-|  11  | `MetadataTooLong`    | `create_stream` when `label.len() > 64` or `reference.len() > 128`. Checked with the other arguments, before any token moves.                                                                                                                                                  |
-|  12  | `InvalidStartTime`   | `create_stream`, or one `create_streams` entry, with `start_time < env.ledger().timestamp()`. A `start_time` equal to the current ledger time is accepted. Checked before any token moves.                                                                                     |
-|  13  | `EmptyBatch`         | `create_streams` with no entries. Checked before validation, transfer or storage writes.                                                                                                                                                                                       |
-|  14  | `BatchTooLarge`      | `create_streams` with more than `MAX_BATCH` (14) entries.                                                                                                                                                                                                                      |
-|  15  | `BatchOverflow`      | `create_streams` whose deposits sum past `i128::MAX`, or whose id range would overflow `u64`. Checked before any token moves.                                                                                                                                                  |
-|  20  | `SameRecipient`      | `transfer_recipient` when `new_recipient` is already the stream's recipient, so a no-op hand-off never emits a `transferred` event.                                                                                                                                            |
+| Code | Variant               | Produced when                                                                                                                                                                                                                                                                  |
+| :--: | :-------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+|  1   | `InvalidAmount`       | `create_stream`, or one `create_streams` entry, with `amount <= 0`.                                                                                                                                                                                                            |
+|  2   | `InvalidTimeRange`    | `create_stream`, or one `create_streams` entry, with `end_time <= start_time`.                                                                                                                                                                                                 |
+|  3   | `InvalidCliff`        | `create_stream`, or one `create_streams` entry, with `cliff_time < start_time` or `cliff_time > end_time`.                                                                                                                                                                     |
+|  4   | `StreamNotFound`      | No stored stream under `stream_id` — raised by `withdraw`, `cancel`, `claimable`, `vested`. Also what a recipient sees if a persistent entry was archived after its TTL lapsed.                                                                                                |
+|  5   | `NothingToWithdraw`   | `withdraw` when `vested(now) - withdrawn <= 0` — before the cliff, at the start of a stream, after a full withdrawal, or for a stream whose vested amount is `0`.                                                                                                              |
+|  6   | `Unauthorized`        | `set_fee` or `set_treasury` called before `initialize` stored an admin, or `transfer_recipient` with a `caller` other than the stream's current recipient. Otherwise a wrong-signer call is not this code: `require_auth()` traps with a `Context` error before the body runs. |
+|  7   | `InvalidFee`          | `fee_bps > 1000` (the 10 % cap) in `initialize` or `set_fee`.                                                                                                                                                                                                                  |
+|  8   | `AlreadyCancelled`    | `cancel` on a stream whose `cancelled` flag is already set.                                                                                                                                                                                                                    |
+|  9   | `AlreadyInitialized`  | A second `initialize` call — the presence of `DataKey::Admin` is the guard.                                                                                                                                                                                                    |
+|  10  | `TreasuryNotSet`      | `withdraw` when the fee is non-zero but no treasury address is stored.                                                                                                                                                                                                         |
+|  11  | `MetadataTooLong`     | `create_stream` when `label.len() > 64` or `reference.len() > 128`. Checked with the other arguments, before any token moves.                                                                                                                                                  |
+|  12  | `InvalidStartTime`    | `create_stream`, or one `create_streams` entry, with `start_time < env.ledger().timestamp()`. A `start_time` equal to the current ledger time is accepted. Checked before any token moves.                                                                                     |
+|  13  | `EmptyBatch`          | `create_streams` with no entries. Checked before validation, transfer or storage writes.                                                                                                                                                                                       |
+|  14  | `BatchTooLarge`       | `create_streams` with more than `MAX_BATCH` (14) entries.                                                                                                                                                                                                                      |
+|  15  | `BatchOverflow`       | `create_streams` whose deposits sum past `i128::MAX`, or whose id range would overflow `u64`. Checked before any token moves.                                                                                                                                                  |
+|  16  | `StreamPaused`        | `withdraw` or `preview_withdraw` while the stream is inside an active pause window. A pause that has lapsed (`now - paused_at > MAX_PAUSE_SECONDS`) no longer produces it.                                                                                                     |
+|  18  | `StreamCompleted`     | `pause` when `ledger().timestamp() >= end_time`: the schedule has ended, so there is no accrual left to freeze. Also `top_up` past the end time.                                                                                                                               |
+|  20  | `SameRecipient`       | `transfer_recipient` when `new_recipient` is already the stream's recipient, so a no-op hand-off never emits a `transferred` event.                                                                                                                                            |
+|  23  | `PauseWindowExceeded` | `resume` when the pause already lapsed on its own (`now - paused_at > MAX_PAUSE_SECONDS`). The stream accrues and withdraws normally regardless; this only reports that there was nothing left to resume.                                                                      |
 
 `STREAM_ERROR_CODES` in `packages/sdk/src/index.ts` is the one place these
 numbers are named on the client side; codes outside that table fall back to the
@@ -153,10 +211,11 @@ fields), not as a positional tuple, so decoding does not depend on field order.
 | `("stream", "withdrawn", id: u64)`   | `recipient: Address`, `amount: i128`, `fee: i128`                                             | `withdraw`                                                        |
 | `("stream", "cancelled", id: u64)`   | `sender: Address`, `refunded: i128`                                                           | `cancel`                                                          |
 | `("stream", "transferred", id: u64)` | `old_recipient: Address`, `new_recipient: Address`                                            | `transfer_recipient`                                              |
+| `("stream", "metadata", id: u64)`    | `sender: Address`, `label: String`, `reference: String`                                       | `set_metadata`                                                    |
 
-The Rust event types are `StreamCreated`, `StreamWithdrawn`, `StreamCancelled`
-and `StreamRecipientTransferred`; their field names are exactly the map keys
-above. An indexer tracking who a stream pays should start from `created`'s
+The Rust event types are `StreamCreated`, `StreamWithdrawn`, `StreamCancelled`,
+`StreamRecipientTransferred` and `StreamMetadataUpdated`; their field names are
+exactly the map keys above. An indexer tracking who a stream pays should start from `created`'s
 `recipient` and follow each `transferred` event. `amount` on
 `withdrawn` is what the recipient actually received and `fee` what the treasury
 received — they sum to the gross claimable amount. `cancelled` carries only the
