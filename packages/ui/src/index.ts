@@ -13,6 +13,8 @@ export type {
   StatusBadgeProps,
   StatusBadgeStatus,
 } from './primitives';
+export { FormField } from './FormField';
+export type { FormFieldProps, FormFieldRenderProps } from './FormField';
 export { Header } from './components/Header';
 export { Footer } from './components/Footer';
 export { Logo } from './components/Logo';
