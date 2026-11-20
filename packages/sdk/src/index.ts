@@ -16,8 +16,8 @@ import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
 // Explicit extension: tsc keeps this specifier as written in dist, and Node's
 // ESM resolver will not load a directory, so the published entry fails without it.
 import { decodeStreamEvent } from './events.js';
-// Type-only: the SDK never imports another workspace package at runtime, so
-// its tests run in CI's `test` job straight off a checkout with no build step.
+// Workspace packages are aliased to source in the vitest config, so tests run
+// straight off a checkout with no build step; consumers resolve the built dist.
 import type {
   CreateEscrowParams,
   CreateStreamParams,
@@ -26,6 +26,7 @@ import type {
   StreamConfig,
 } from '@stellar-starter-kit/types';
 import { normalizeConfig, normalizeEscrow, normalizeStream } from '@stellar-starter-kit/types';
+import { parseTokenAmount } from '@stellar-starter-kit/utils';
 
 /**
  * A memo attached to a write transaction. Text memos are for exchange-style
@@ -48,6 +49,12 @@ export interface WriteOptions {
    * simulation are still added on top by Soroban assembly.
    */
   fee?: string;
+  /**
+   * Ceiling for this call's base fee, in stroops. Together with the client's
+   * `maxFee` option, the stricter (lower) value wins. A call whose fee would
+   * exceed it throws before the wallet prompt opens.
+   */
+  maxFee?: string;
   /** Memo to attach to the transaction. Omit to leave the transaction memo-less. */
   memo?: TransactionMemo;
   /**
@@ -173,6 +180,13 @@ export interface StreamsClientOptions {
    * are then only discovered once the transaction is submitted.
    */
   skipSimulation?: boolean;
+  /**
+   * Ceiling for the base fee of every write transaction, in stroops. A
+   * per-call `WriteOptions.maxFee` overrides it; the stricter (lower) value
+   * wins. A call whose fee would exceed it throws before the wallet prompt
+   * opens. Leave unset for no ceiling beyond the caller's own `fee`.
+   */
+  maxFee?: string;
   /** Base delay between confirmation polls and submission retries. Defaults to 1s. */
   pollIntervalMs?: number;
   /** How long to wait for a submitted transaction to confirm. Defaults to 30s. */
@@ -537,6 +551,12 @@ export type StreamErrorCode =
   | 'EMPTY_BATCH'
   | 'BATCH_TOO_LARGE'
   | 'BATCH_OVERFLOW'
+  | 'STREAM_PAUSED'
+  | 'NOT_PAUSED'
+  | 'STREAM_COMPLETED'
+  | 'AMOUNT_OVERFLOW'
+  | 'REDUCTION_BELOW_VESTED'
+  | 'INVALID_REDUCTION'
   | 'SAME_RECIPIENT';
 
 /**
@@ -585,7 +605,13 @@ const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
   13: 'EMPTY_BATCH',
   14: 'BATCH_TOO_LARGE',
   15: 'BATCH_OVERFLOW',
-  20: 'SAME_RECIPIENT',
+  16: 'STREAM_PAUSED',
+  17: 'NOT_PAUSED',
+  18: 'STREAM_COMPLETED',
+  19: 'AMOUNT_OVERFLOW',
+  20: 'REDUCTION_BELOW_VESTED',
+  21: 'INVALID_REDUCTION',
+  22: 'SAME_RECIPIENT',
 };
 
 /**
@@ -962,6 +988,10 @@ abstract class SorobanClient {
     }
     const signal = opts.signal ?? this.options.signal;
     const fee = opts.fee === undefined ? DEFAULT_WRITE_FEE : validateFee(opts.fee);
+    // Enforce the fee ceiling before any transaction is built or a wallet
+    // prompt is opened. The stricter of the client and per-call maxFee wins.
+    const maxFee = maxFeeLimit(this.options.maxFee, opts.maxFee);
+    assertWithinMaxFee(fee, maxFee);
     const memo = opts.memo === undefined ? undefined : toMemo(opts.memo);
 
     // A cached sequence can go stale if the account transacted elsewhere; in
@@ -1013,7 +1043,10 @@ abstract class SorobanClient {
 
       let hash: string;
       try {
-        hash = await this.submit(this.options.feeBump ? await this.bumpFees(inner) : inner, signal);
+        hash = await this.submit(
+          this.options.feeBump ? await this.bumpFees(inner, maxFee) : inner,
+          signal,
+        );
       } catch (error) {
         this.invalidateAccount();
         if (error instanceof StaleSequenceError && attempt === 0) continue;
@@ -1055,7 +1088,7 @@ abstract class SorobanClient {
    * @throws StreamsError when the sponsor's signer returns something other than
    * a signed fee-bump envelope.
    */
-  private async bumpFees(inner: Transaction): Promise<FeeBumpTransaction> {
+  private async bumpFees(inner: Transaction, maxFee?: string): Promise<FeeBumpTransaction> {
     const { feeBump } = this.options;
     if (!feeBump) {
       throw new Error('bumpFees called without a feeBump hook.');
@@ -1070,6 +1103,8 @@ abstract class SorobanClient {
       baseFee === undefined
         ? ceilDiv(BigInt(inner.fee), BigInt(inner.operations.length)).toString()
         : String(baseFee);
+    // The outer (sponsor) fee is capped by the same ceiling as the inner fee.
+    assertWithinMaxFee(rate, maxFee);
 
     const unsigned = TransactionBuilder.buildFeeBumpTransaction(
       feeSource,
@@ -1203,6 +1238,16 @@ export interface CreateStreamsEntry {
   /** Unix seconds before which nothing is claimable; between start and end. */
   cliffTime: number;
 }
+
+/**
+ * Arguments for {@link StreamsClient.createStreamFromAmount}. Same as
+ * {@link CreateStreamParams}, but `amount` is a human-readable decimal string in
+ * the token's display unit (for example `'12.5'` XLM) instead of smallest units.
+ */
+export type CreateStreamFromAmountParams = Omit<CreateStreamParams, 'amount'> & {
+  /** Human-readable amount in the token's display unit, e.g. `'12.5'`. */
+  amount: string;
+};
 
 /** Arguments for {@link StreamsClient.createStreams}. */
 export interface CreateStreamsParams {
@@ -1628,6 +1673,68 @@ export class StreamsClient extends SorobanClient {
   }
 
   /**
+   * Like {@link createStream}, but takes a human-readable amount in the token's
+   * display unit instead of smallest units. The scale comes from the token's
+   * own `decimals()`, read through the cached {@link getTokenMetadata} — no
+   * extra metadata round trip on repeat calls with the same token.
+   *
+   * `amount` is a plain decimal string (`'12.5'`, `'.5'`, `'100'`). Fractional
+   * digits beyond the token's precision are truncated toward zero, matching
+   * {@link parseTokenAmount} from `@stellar-starter-kit/utils`. The scaled value
+   * must be a positive integer that fits in an `i128`, otherwise it throws
+   * before the transaction is built or a wallet prompt is opened.
+   *
+   * All other fields are validated before the metadata lookup. The contract
+   * call itself is identical to `createStream`'s, so simulation errors and
+   * write options behave the same way.
+   *
+   * @param params - Same as {@link CreateStreamParams}, except `amount` is a
+   *   decimal string in the token's display unit.
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns The hash of the confirmed transaction.
+   * @throws Error when a field is invalid, `amount` does not scale to a
+   *   positive `i128`, or the token metadata cannot be read.
+   * @throws StreamsError when the contract rejects the stream.
+   * @example
+   * ```typescript
+   * // A 7-decimal token: 12.5 -> 125000000 stroops.
+   * const { hash } = await client.createStreamFromAmount({
+   *   sender: address,
+   *   recipient,
+   *   token: xlmSac,
+   *   amount: '12.5',
+   *   startTime: now,
+   *   endTime: now + 86_400,
+   *   cliffTime: now,
+   * });
+   * ```
+   */
+  async createStreamFromAmount<O extends WriteOptions = WriteOptions>(
+    params: CreateStreamFromAmountParams,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    const label = params.label ?? '';
+    const reference = params.reference ?? '';
+    // Validate everything that does not need token metadata up front, so a
+    // malformed schedule or address never costs a network round trip.
+    assertAddress(params.sender, 'sender');
+    assertAddress(params.recipient, 'recipient');
+    assertTokenId(params.token);
+    assertSchedule(params.startTime, params.endTime, params.cliffTime);
+    assertMetadata(label, reference);
+
+    const { decimals } = await this.getTokenMetadata(params.token);
+    const amount = parseTokenAmount(params.amount, decimals);
+    if (amount <= 0n) {
+      throw new Error(`Invalid amount: ${params.amount}. Must be greater than 0.`);
+    }
+    if (amount > I128_MAX) {
+      throw new Error(`Invalid amount: ${params.amount}. Must fit in a signed 128-bit integer.`);
+    }
+    return this.createStream({ ...params, amount: amount.toString() }, opts);
+  }
+
+  /**
    * Create up to {@link MAX_BATCH_STREAMS} streams in one transaction, the
    * payroll path: `sender` funds every stream and authorizes once, instead of
    * sending one transaction per recipient.
@@ -1816,6 +1923,78 @@ export class StreamsClient extends SorobanClient {
       opts,
     );
   }
+
+  /**
+   * Add funds to an existing stream, extending its schedule so the payment
+   * rate stays the same. Only the stream's sender may top it up, and the stream
+   * must still be streaming — cancelled and completed streams are rejected.
+   *
+   * `amount` is in the token's smallest unit, as a positive decimal integer
+   * string (or a `bigint`). It is validated before a transaction is built or a
+   * wallet prompt is opened, and encoded as the contract's `i128` argument.
+   *
+   * @param id - Stream id as `bigint`, `number`, or decimal string.
+   * @param amount - Positive amount to add, in the token's smallest unit.
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns The hash of the confirmed transaction.
+   * @throws Error when `amount` is not a positive decimal integer that fits in
+   *   an `i128`, or no `publicKey` / `signTransaction` was configured.
+   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`,
+   *   `UNAUTHORIZED`, `STREAM_COMPLETED` or `AMOUNT_OVERFLOW`.
+   * @example
+   * ```typescript
+   * const { hash } = await client.topUp(stream.id, '1000000000'); // 100 XLM
+   * ```
+   */
+  async topUp<O extends WriteOptions = WriteOptions>(
+    id: bigint | number | string,
+    amount: string | bigint,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    const value = parseAmount(amount.toString());
+    return this.invoke(
+      'top_up',
+      [nativeToScVal(BigInt(id), { type: 'u64' }), nativeToScVal(value, { type: 'i128' })],
+      opts,
+    );
+  }
+
+  /**
+   * Reduce a stream's total deposit, refunding the difference to the sender.
+   * Only the sender may reduce a stream. `newTotal` is the new total amount in
+   * the token's smallest unit, as a positive decimal integer string (or a
+   * `bigint`); it must be below the current total and at least what has already
+   * vested, as enforced by the contract.
+   *
+   * The amount is validated before a transaction is built or a wallet prompt
+   * is opened, and encoded as the contract's `i128` argument.
+   *
+   * @param id - Stream id as `bigint`, `number`, or decimal string.
+   * @param newTotal - New total amount, in the token's smallest unit.
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns The hash of the confirmed transaction.
+   * @throws Error when `newTotal` is not a positive decimal integer that fits
+   *   in an `i128`, or no `publicKey` / `signTransaction` was configured.
+   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`,
+   *   `UNAUTHORIZED`, `ALREADY_CANCELLED`, `REDUCTION_BELOW_VESTED`,
+   *   `INVALID_REDUCTION` or `AMOUNT_OVERFLOW`.
+   * @example
+   * ```typescript
+   * const { hash } = await client.reduceStream(stream.id, '500000000'); // halve a 100 XLM stream
+   * ```
+   */
+  async reduceStream<O extends WriteOptions = WriteOptions>(
+    id: bigint | number | string,
+    newTotal: string | bigint,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    const value = parseAmount(newTotal.toString());
+    return this.invoke(
+      'reduce_stream',
+      [nativeToScVal(BigInt(id), { type: 'u64' }), nativeToScVal(value, { type: 'i128' })],
+      opts,
+    );
+  }
 }
 
 /**
@@ -1936,6 +2115,35 @@ function validateFee(fee: string): string {
     throw new Error(`Invalid fee: ${fee}. Must be greater than 0.`);
   }
   return value.toString();
+}
+
+/** Validates a fee ceiling and normalises it to a decimal string. */
+function validateMaxFee(maxFee: string): string {
+  if (!/^\d+$/.test(maxFee)) {
+    throw new Error(`Invalid maxFee: ${maxFee}. Expected a decimal integer string of stroops.`);
+  }
+  const value = BigInt(maxFee);
+  if (value <= 0n) {
+    throw new Error(`Invalid maxFee: ${maxFee}. Must be greater than 0.`);
+  }
+  return value.toString();
+}
+
+/** The stricter (lower) of the client and per-call fee ceilings, or `undefined`. */
+function maxFeeLimit(clientMaxFee?: string, callMaxFee?: string): string | undefined {
+  const client = clientMaxFee === undefined ? undefined : BigInt(validateMaxFee(clientMaxFee));
+  const call = callMaxFee === undefined ? undefined : BigInt(validateMaxFee(callMaxFee));
+  if (client === undefined) return callMaxFee;
+  if (call === undefined) return clientMaxFee;
+  return call < client ? callMaxFee : clientMaxFee;
+}
+
+/** Throws when `fee` exceeds `maxFee`, naming both values. */
+function assertWithinMaxFee(fee: string, maxFee?: string): void {
+  if (maxFee === undefined) return;
+  if (BigInt(fee) > BigInt(validateMaxFee(maxFee))) {
+    throw new Error(`Fee ${fee} stroops exceeds the maximum allowed fee of ${maxFee} stroops.`);
+  }
 }
 
 /** Maximum value of a Stellar id memo: an unsigned 64-bit integer. */

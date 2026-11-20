@@ -277,6 +277,9 @@ importers:
       '@stellar-starter-kit/types':
         specifier: workspace:*
         version: link:../types
+      '@stellar-starter-kit/utils':
+        specifier: workspace:*
+        version: link:../utils
       '@stellar/stellar-sdk':
         specifier: ^14.5.0
         version: 14.6.1

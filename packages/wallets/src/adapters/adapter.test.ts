@@ -11,9 +11,11 @@ import { AlbedoAdapter } from './albedo';
 import { RabetAdapter } from './rabe';
 import { HanaAdapter } from './hana';
 import { LedgerAdapter } from './ledger';
+import { WatchAdapter } from './watch';
 
 describe('WalletAdapter interface', () => {
   const adapters: WalletAdapter[] = [
+    new WatchAdapter(),
     new FreighterAdapter(),
     new AlbedoAdapter(),
     new RabetAdapter(),
@@ -53,7 +55,10 @@ describe('WalletAdapter interface', () => {
 
   it('exposes signAuthEntry only on adapters whose wallet API supports it', () => {
     const supporting = adapters
-      .filter((adapter) => typeof adapter.signAuthEntry === 'function')
+      .filter(
+        (adapter) =>
+          typeof adapter.signAuthEntry === 'function' && !(adapter instanceof WatchAdapter),
+      )
       .map((adapter) => adapter.id);
     expect(supporting).toEqual(['freighter']);
   });

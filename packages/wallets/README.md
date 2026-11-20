@@ -28,13 +28,15 @@ Calling `useWallet()` outside a `WalletProvider` throws
 
 ## Supported wallets
 
-Every adapter can connect and sign a transaction envelope. Soroban
+Most adapters can connect and sign a transaction envelope. Soroban
 authorization entries need a wallet whose SDK exposes that operation, so only
 Freighter implements `signAuthEntry`; the others raise `NotSupportedError`
-instead of returning an unsigned entry.
+instead of returning an unsigned entry. `WatchAdapter` is read-only: it needs
+no extension and rejects both signing methods.
 
 | Adapter            | `WalletType` | Connect | Disconnect | `signTransaction` | `signAuthEntry` |
 | ------------------ | ------------ | ------- | ---------- | ----------------- | --------------- |
+| `WatchAdapter`     | `watch`      | Yes     | No         | No                | No              |
 | `FreighterAdapter` | `freighter`  | Yes     | No         | Yes               | Yes             |
 | `AlbedoAdapter`    | `albedo`     | Yes     | No         | Yes               | No              |
 | `RabetAdapter`     | `rabe`       | Yes     | Yes        | Yes               | No              |
@@ -44,20 +46,39 @@ instead of returning an unsigned entry.
 An auth-entry flow that targets a wallet without this capability is a
 follow-up feature, not something the dashboard should attempt today.
 
+### Watching an address
+
+To inspect a public address without a wallet extension, pass it as the second
+argument to `connect()`, or use `WatchAdapter.watch()` directly. The address is
+validated as a `G...` account or `C...` contract StrKey before the session is
+created.
+
+```tsx
+const { connect, readOnly } = useWallet();
+await connect('watch', 'GABC...'); // validates the address
+// readOnly === true: disable write buttons while watching
+```
+
+The watched session is restored on page load like any other wallet, and
+signing through it throws `NotSupportedError` with a clear message.
+
 ## Capability matrix
 
 `WALLET_CAPABILITIES` publishes the same information as data, so a component
 can decide what to render instead of showing a button that will fail with
 `NotSupportedError`.
 
-| Key         | Adapter            | `signAuthEntry` | `hardware` | `deepLink` |
-| ----------- | ------------------ | --------------- | ---------- | ---------- |
-| `freighter` | `FreighterAdapter` | Yes             | No         | No         |
-| `albedo`    | `AlbedoAdapter`    | No              | No         | Yes        |
-| `rabe`      | `RabetAdapter`     | No              | No         | No         |
-| `hana`      | `HanaAdapter`      | No              | No         | No         |
-| `ledger`    | `LedgerAdapter`    | No              | Yes        | No         |
+| Key         | Adapter            | `readOnly` | `signAuthEntry` | `hardware` | `deepLink` |
+| ----------- | ------------------ | ---------- | --------------- | ---------- | ---------- |
+| `watch`     | `WatchAdapter`     | Yes        | No              | No         | No         |
+| `freighter` | `FreighterAdapter` | No         | Yes             | No         | No         |
+| `albedo`    | `AlbedoAdapter`    | No         | No              | No         | Yes        |
+| `rabe`      | `RabetAdapter`     | No         | No              | No         | No         |
+| `hana`      | `HanaAdapter`      | No         | No              | No         | No         |
+| `ledger`    | `LedgerAdapter`    | No         | No              | Yes        | No         |
 
+- **`readOnly`** — the adapter can only observe and never signs; disable write
+  buttons (`readOnly` on `useWallet()`) while it is active.
 - **`signAuthEntry`** — the adapter implements Soroban auth-entry signing.
 - **`hardware`** — the wallet is a device (Ledger), not an extension or web
   wallet; Ledger also requires WebHID.
