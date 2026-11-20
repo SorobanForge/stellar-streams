@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Alert } from '@stellar-starter-kit/ui';
 
 export type NotificationKind = 'error' | 'success';
 
@@ -20,7 +20,8 @@ interface NotificationBannerProps {
 
 /**
  * Animated error/success banner. Wraps framer-motion so pages can load it
- * with `next/dynamic` and keep framer-motion out of their initial bundle.
+ * with `next/dynamic` and keep framer-motion out of their initial bundle; the
+ * colours, icon and ARIA role come from the shared `Alert` primitive.
  */
 export default function NotificationBanner({
   kind,
@@ -37,29 +38,11 @@ export default function NotificationBanner({
           initial={{ opacity: 0, y: offset }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: offset }}
-          className={`flex items-start gap-3 rounded-xl border p-4 text-sm ${className ?? ''} ${
-            kind === 'error'
-              ? 'border-rose-500/20 bg-rose-500/5 text-rose-300'
-              : 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300'
-          }`}
+          className={className}
         >
-          {kind === 'error' ? (
-            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-rose-400" />
-          ) : (
-            <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-400" />
-          )}
-          <div>
-            {title && (
-              <h4
-                className={`font-semibold ${
-                  kind === 'error' ? 'text-rose-200' : 'text-emerald-200'
-                }`}
-              >
-                {title}
-              </h4>
-            )}
-            <p className={title ? 'mt-1 leading-relaxed font-light' : 'font-light'}>{message}</p>
-          </div>
+          <Alert tone={kind} title={title}>
+            {message}
+          </Alert>
         </motion.div>
       )}
     </AnimatePresence>

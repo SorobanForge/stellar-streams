@@ -32,6 +32,8 @@ export const WALLET_PROVIDER_OPTIONS: readonly WalletProviderOption[] = [
 // Node's ESM resolver rejects extensionless relative imports.
 export * from './WalletProvider.js';
 export * from './adapters/index.js';
+export { WALLET_CAPABILITIES, getWalletCapabilities } from './capabilities.js';
+export type { WalletCapabilities } from './capabilities.js';
 export {
   NotSupportedError,
   WalletCancelledError,
