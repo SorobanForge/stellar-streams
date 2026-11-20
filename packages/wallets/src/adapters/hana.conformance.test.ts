@@ -17,21 +17,24 @@ runAdapterConformanceSuite({
     (globalThis as unknown as { window: Record<string, unknown> }).window = {};
   },
   setupUserRejection: () => {
-    const win = (globalThis as unknown as { window: Record<string, any> }).window;
-    if (win.hanaWallet) {
-      win.hanaWallet.sign = vi.fn().mockRejectedValue(new Error('User rejected'));
+    const win = (globalThis as unknown as { window: Record<string, unknown> }).window;
+    const wallet = win.hanaWallet as Record<string, unknown> | undefined;
+    if (wallet) {
+      wallet.sign = vi.fn().mockRejectedValue(new Error('User rejected'));
     }
   },
   setupMalformedXdr: () => {
-    const win = (globalThis as unknown as { window: Record<string, any> }).window;
-    if (win.hanaWallet) {
-      win.hanaWallet.sign = vi.fn().mockRejectedValue(new Error('Malformed XDR'));
+    const win = (globalThis as unknown as { window: Record<string, unknown> }).window;
+    const wallet = win.hanaWallet as Record<string, unknown> | undefined;
+    if (wallet) {
+      wallet.sign = vi.fn().mockRejectedValue(new Error('Malformed XDR'));
     }
   },
   setupNetworkMismatch: () => {
-    const win = (globalThis as unknown as { window: Record<string, any> }).window;
-    if (win.hanaWallet) {
-      win.hanaWallet.sign = vi.fn().mockRejectedValue(new Error('Network mismatch'));
+    const win = (globalThis as unknown as { window: Record<string, unknown> }).window;
+    const wallet = win.hanaWallet as Record<string, unknown> | undefined;
+    if (wallet) {
+      wallet.sign = vi.fn().mockRejectedValue(new Error('Network mismatch'));
     }
   },
 });
