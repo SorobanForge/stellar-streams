@@ -96,3 +96,9 @@ export function runAdapterConformanceSuite(factory: ConformanceAdapterFactory) {
     }
   });
 }
+
+describe('conformance module', () => {
+  it('exports runAdapterConformanceSuite', () => {
+    expect(typeof runAdapterConformanceSuite).toBe('function');
+  });
+});
