@@ -433,6 +433,14 @@ export interface UseStreamsResult {
   error: string | null;
   /** Re-run the listing, e.g. after creating or cancelling a stream. */
   refresh: () => Promise<void>;
+  /** Next cursor to fetch, if available. */
+  cursor?: string;
+  /** Whether there is a next page to fetch. */
+  hasMore: boolean;
+  /** Fetch the next page of streams using cursor. */
+  loadMore: () => Promise<void>;
+  /** Whether a loadMore call is in flight. */
+  loadingMore: boolean;
 }
 
 /**
@@ -476,7 +484,10 @@ export function useStreams(
   address: string | null | undefined,
 ): UseStreamsResult {
   const [streams, setStreams] = useState<Stream[]>([]);
+  const [cursor, setCursor] = useState<string | undefined>(undefined);
+  const [hasMore, setHasMore] = useState<boolean>(false);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
   /** Monotonic token: only the latest request may commit state. */
@@ -495,6 +506,9 @@ export function useStreams(
     const request = ++requestId.current;
     abortRef.current?.abort();
     abortRef.current = null;
+
+    setCursor(undefined);
+    setHasMore(false);
 
     if (!client || !address) {
       setStreams([]);
@@ -521,18 +535,53 @@ export function useStreams(
     try {
       const found = await listStreams.call(client, { address, signal: controller.signal });
       if (!mounted.current || request !== requestId.current || controller.signal.aborted) return;
-      setStreams(Array.isArray(found) ? found : found.streams);
+      const fetchedStreams = Array.isArray(found) ? found : found.streams;
+      const nextCursor = Array.isArray(found) ? undefined : found.cursor;
+      setStreams(fetchedStreams);
+      setCursor(nextCursor);
+      setHasMore(Boolean(nextCursor && nextCursor.length > 0));
     } catch (err) {
       // An aborted request is not an error: the component unmounted or the
       // address changed while it was in flight.
       if (!mounted.current || request !== requestId.current || controller.signal.aborted) return;
       setStreams([]);
+      setCursor(undefined);
+      setHasMore(false);
       setError(err instanceof Error ? err.message : 'Failed to load streams');
     } finally {
       if (mounted.current && request === requestId.current) setLoading(false);
       if (abortRef.current === controller) abortRef.current = null;
     }
   }, [client, address]);
+
+  const loadMore = useCallback(async () => {
+    if (!client || !address || !cursor || loadingMore || loading) return;
+    const request = requestId.current;
+
+    const listStreams = (client as StreamsClient & StreamsLister).listStreams;
+    if (typeof listStreams !== 'function') return;
+
+    setLoadingMore(true);
+    try {
+      const found = await listStreams.call(client, { address, cursor });
+      if (!mounted.current || request !== requestId.current) return;
+      const nextStreams = Array.isArray(found) ? found : found.streams;
+      const nextCursor = Array.isArray(found) ? undefined : found.cursor;
+
+      setStreams((prev) => {
+        const existingIds = new Set(prev.map((s) => s.id));
+        const newItems = nextStreams.filter((s) => !existingIds.has(s.id));
+        return [...prev, ...newItems];
+      });
+      setCursor(nextCursor);
+      setHasMore(Boolean(nextCursor && nextCursor.length > 0 && nextStreams.length > 0));
+    } catch (err) {
+      if (!mounted.current || request !== requestId.current) return;
+      setError(err instanceof Error ? err.message : 'Failed to load more streams');
+    } finally {
+      if (mounted.current && request === requestId.current) setLoadingMore(false);
+    }
+  }, [client, address, cursor, loadingMore, loading]);
 
   useEffect(() => {
     void refresh();
@@ -545,5 +594,5 @@ export function useStreams(
     };
   }, [refresh]);
 
-  return { streams, loading, error, refresh };
+  return { streams, loading, loadingMore, hasMore, cursor, error, refresh, loadMore };
 }

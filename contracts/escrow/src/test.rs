@@ -790,6 +790,133 @@ fn test_milestone_release_after_deadline_rejected() {
 }
 
 #[test]
+fn test_milestone_release_at_exactly_deadline_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    token.mint(&payer, 1000);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+    client.set_milestones(&1, &payer, &vec![&env, 400, 600]);
+    client.fund_escrow(&1);
+
+    // The release window is inclusive of the deadline itself.
+    advance_time(&env, 1000);
+    client.release_milestone(&1, &0, &arbiter);
+
+    assert_eq!(token.balance(&payee), 400);
+    assert!(client.is_milestone_released(&1, &0));
+    assert_eq!(client.get_escrow(&1).unwrap().status, EscrowStatus::Funded);
+
+    // ...and the boundary is the same for the final milestone, which then
+    // finalizes the escrow.
+    client.release_milestone(&1, &1, &payer);
+    assert_eq!(token.balance(&payee), 1000);
+    assert_eq!(client.get_escrow(&1).unwrap().status, EscrowStatus::Released);
+}
+
+#[test]
+fn test_milestone_release_one_second_after_deadline_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    token.mint(&payer, 1000);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+    client.set_milestones(&1, &payer, &vec![&env, 400, 600]);
+    client.fund_escrow(&1);
+
+    // One second past the deadline the remaining balance belongs to the refund
+    // path, so no milestone may still be released.
+    advance_time(&env, 1001);
+    assert_eq!(
+        client.try_release_milestone(&1, &0, &arbiter),
+        Err(Ok(EscrowError::DeadlineExpired))
+    );
+
+    assert_eq!(token.balance(&payee), 0);
+    assert!(!client.is_milestone_released(&1, &0));
+    assert!(client.get_milestones(&1).is_some());
+    assert_eq!(client.get_escrow(&1).unwrap().status, EscrowStatus::Funded);
+}
+
+#[test]
+fn test_refund_after_deadline_pays_only_unreleased_milestones() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    token.mint(&payer, 1000);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+    client.set_milestones(&1, &payer, &vec![&env, 400, 600]);
+    client.fund_escrow(&1);
+
+    // Release the first milestone in the last second of the window.
+    advance_time(&env, 1000);
+    client.release_milestone(&1, &0, &arbiter);
+    assert_eq!(token.balance(&payee), 400);
+
+    // After the deadline the payer gets exactly the unreleased milestone back,
+    // never the part that already vested and was paid out.
+    advance_time(&env, 1);
+    client.refund_escrow(&1, &payee);
+
+    // `env.events().all()` only holds the latest invocation's events, so the
+    // refund's event has to be read before any token or escrow read call.
+    assert_eq!(
+        env.events().all().filter_by_contract(&client.address),
+        [EscrowRefunded { id: 1, caller: payee.clone(), payer: payer.clone(), amount: 600 }
+            .to_xdr(&env, &client.address)],
+    );
+
+    assert_eq!(token.balance(&payer), 600);
+    assert_eq!(token.balance(&payee), 400);
+    assert_eq!(token.balance(&client.address), 0);
+    assert_eq!(client.get_escrow(&1).unwrap().status, EscrowStatus::Refunded);
+}
+
+#[test]
+fn test_refund_after_every_milestone_released_is_already_finalized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    token.mint(&payer, 1000);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+    client.set_milestones(&1, &payer, &vec![&env, 400, 600]);
+    client.fund_escrow(&1);
+
+    advance_time(&env, 1000);
+    client.release_milestone(&1, &0, &arbiter);
+    client.release_milestone(&1, &1, &arbiter);
+    assert_eq!(client.get_escrow(&1).unwrap().status, EscrowStatus::Released);
+    assert_eq!(token.balance(&payee), 1000);
+
+    // Nothing is left to refund, and the finalized escrow cannot be reopened.
+    advance_time(&env, 1);
+    assert_eq!(client.try_refund_escrow(&1, &payee), Err(Ok(EscrowError::AlreadyFinalized)));
+    assert_eq!(token.balance(&payer), 0);
+    assert_eq!(token.balance(&payee), 1000);
+    assert_eq!(token.balance(&client.address), 0);
+}
+
+#[test]
 fn test_milestone_schedule_must_sum_to_escrow_amount() {
     let env = Env::default();
     env.mock_all_auths();
