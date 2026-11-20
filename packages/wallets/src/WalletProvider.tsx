@@ -5,7 +5,7 @@ import type { WalletAdapter } from './adapters/adapter.js';
 import { isUserRejection, NotSupportedError, toSigningError } from './errors.js';
 import { getWalletCapabilities, type WalletCapabilities } from './capabilities.js';
 
-export type WalletType = 'freighter' | 'albedo' | 'rabe' | 'hana' | 'ledger';
+export type WalletType = 'freighter' | 'albedo' | 'rabe' | 'hana' | 'ledger' | 'walletconnect';
 
 export interface WalletContextType {
   activeAddress: string | null;
