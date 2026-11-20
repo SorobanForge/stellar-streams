@@ -16,15 +16,15 @@ runAdapterConformanceSuite({
     (globalThis as unknown as { window: Record<string, unknown> }).window = {};
   },
   setupUserRejection: () => {
-    const win = (globalThis as unknown as { window: any }).window;
+    const win = (globalThis as unknown as { window: Record<string, any> }).window;
     win.hanaWallet.send = vi.fn().mockRejectedValue(new Error('User rejected'));
   },
   setupMalformedXdr: () => {
-    const win = (globalThis as unknown as { window: any }).window;
+    const win = (globalThis as unknown as { window: Record<string, any> }).window;
     win.hanaWallet.send = vi.fn().mockRejectedValue(new Error('Malformed XDR'));
   },
   setupNetworkMismatch: () => {
-    const win = (globalThis as unknown as { window: any }).window;
+    const win = (globalThis as unknown as { window: Record<string, any> }).window;
     win.hanaWallet.send = vi.fn().mockRejectedValue(new Error('Network mismatch'));
   },
 });

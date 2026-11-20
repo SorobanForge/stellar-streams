@@ -4,7 +4,7 @@ export function isTransportFailure(error: unknown): boolean {
   const status = (error as { status?: number; statusCode?: number }).status ?? (error as { statusCode?: number }).statusCode;
   
   if (status && status >= 500 && status < 600) return true;
-  if (message.includes('timeout') || message.includes('network') || message.includes('ECONNRESET') || message.includes('ETIMEDOUT') || message.includes('fetch failed')) {
+  if (message.includes('timeout') || message.includes('network') || message.includes('econnreset') || message.includes('etimedout') || message.includes('fetch failed')) {
     return true;
   }
   return false;

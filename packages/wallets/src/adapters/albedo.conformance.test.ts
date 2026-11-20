@@ -14,7 +14,7 @@ runAdapterConformanceSuite({
   name: 'AlbedoAdapter',
   createAdapter: () => new AlbedoAdapter(),
   setupAvailable: () => {
-    vi.mocked(albedo.publicKey).mockResolvedValue({ pubkey: 'GB_ALBEDO', signature: '', signed_message: '' } as any);
+    vi.mocked(albedo.publicKey).mockResolvedValue({ pubkey: 'GB_ALBEDO', signature: '', signed_message: '' } as unknown as Parameters<typeof albedo.publicKey>[0] extends never ? any : any);
   },
   setupUnavailable: () => {
     vi.mocked(albedo.publicKey).mockRejectedValue(new Error('Unavailable'));
