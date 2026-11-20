@@ -716,7 +716,8 @@ impl StreamContract {
             return Ok(());
         };
         let now = env.ledger().timestamp();
-        let paused_duration = now.saturating_sub(paused_at);
+        let paused_duration =
+            now.min(stream.end_time).saturating_sub(paused_at.max(stream.start_time));
         stream.total_paused = stream.total_paused.saturating_add(paused_duration);
         stream.paused_at = None;
         env.storage().persistent().set(&key, &stream);
@@ -832,7 +833,7 @@ pub(crate) fn vested_amount(stream: &Stream, now: u64) -> i128 {
     let capped_now = if now > stream.end_time { stream.end_time } else { now };
     let elapsed_secs = capped_now.saturating_sub(stream.start_time);
     let active_pause_secs = match stream.paused_at {
-        Some(p) if now > p => (now.min(stream.end_time)).saturating_sub(p),
+        Some(p) if now > p => now.min(stream.end_time).saturating_sub(p.max(stream.start_time)),
         _ => 0,
     };
     let effective_elapsed =
