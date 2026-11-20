@@ -6,20 +6,31 @@ runAdapterConformanceSuite({
   name: 'LedgerAdapter',
   createAdapter: () => new LedgerAdapter(),
   setupAvailable: () => {
-    // Ledger WebHID or mock setup
+    vi.stubGlobal('navigator', {
+      hid: {
+        requestDevice: vi.fn().mockResolvedValue([{}]),
+        getDevices: vi.fn().mockResolvedValue([{}]),
+      },
+    });
   },
   setupUnavailable: () => {
-    // Simulate WebHID absence
+    vi.stubGlobal('navigator', {
+      hid: {
+        requestDevice: vi.fn().mockResolvedValue([]),
+        getDevices: vi.fn().mockResolvedValue([]),
+      },
+    });
   },
   setupUserRejection: () => {
-    // User rejection on device
+    vi.stubGlobal('navigator', {
+      hid: {
+        requestDevice: vi.fn().mockRejectedValue(new Error('User rejected')) ,
+        getDevices: vi.fn().mockResolvedValue([{}]),
+      },
+    });
   },
-  setupMalformedXdr: () => {
-    // Malformed XDR rejection
-  },
-  setupNetworkMismatch: () => {
-    // Network mismatch rejection
-  },
+  setupMalformedXdr: () => {},
+  setupNetworkMismatch: () => {},
   setupDisconnect: () => {
     return { disconnectSpy: vi.fn() };
   },

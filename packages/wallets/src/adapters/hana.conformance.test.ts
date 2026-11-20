@@ -8,7 +8,8 @@ runAdapterConformanceSuite({
   setupAvailable: () => {
     (globalThis as unknown as { window: Record<string, unknown> }).window = {
       hanaWallet: {
-        send: vi.fn().mockResolvedValue({ publicKey: 'GB_HANA' }),
+        connect: vi.fn().mockResolvedValue({ publicKey: 'GB_HANA' }),
+        sign: vi.fn().mockResolvedValue('signed-hana-xdr'),
       },
     };
   },
@@ -17,14 +18,20 @@ runAdapterConformanceSuite({
   },
   setupUserRejection: () => {
     const win = (globalThis as unknown as { window: Record<string, any> }).window;
-    win.hanaWallet.send = vi.fn().mockRejectedValue(new Error('User rejected'));
+    if (win.hanaWallet) {
+      win.hanaWallet.sign = vi.fn().mockRejectedValue(new Error('User rejected'));
+    }
   },
   setupMalformedXdr: () => {
     const win = (globalThis as unknown as { window: Record<string, any> }).window;
-    win.hanaWallet.send = vi.fn().mockRejectedValue(new Error('Malformed XDR'));
+    if (win.hanaWallet) {
+      win.hanaWallet.sign = vi.fn().mockRejectedValue(new Error('Malformed XDR'));
+    }
   },
   setupNetworkMismatch: () => {
     const win = (globalThis as unknown as { window: Record<string, any> }).window;
-    win.hanaWallet.send = vi.fn().mockRejectedValue(new Error('Network mismatch'));
+    if (win.hanaWallet) {
+      win.hanaWallet.sign = vi.fn().mockRejectedValue(new Error('Network mismatch'));
+    }
   },
 });
