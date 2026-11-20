@@ -24,7 +24,7 @@ runAdapterConformanceSuite({
   setupUserRejection: () => {
     vi.stubGlobal('navigator', {
       hid: {
-        requestDevice: vi.fn().mockRejectedValue(new Error('User rejected')) ,
+        requestDevice: vi.fn().mockRejectedValue(new Error('User rejected')),
         getDevices: vi.fn().mockResolvedValue([{}]),
       },
     });
