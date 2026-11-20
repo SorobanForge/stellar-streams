@@ -41,6 +41,6 @@ runAdapterConformanceSuite({
   setupDisconnect: () => {
     const win = (globalThis as unknown as { window: Record<string, unknown> }).window;
     const rabet = win.rabet as Record<string, unknown> | undefined;
-    return { disconnectSpy: rabet?.disconnect as ReturnType<typeof vi.fn> | undefined };
+    return { disconnectSpy: rabet?.disconnect as unknown };
   },
 });

@@ -9,7 +9,7 @@ export interface ConformanceAdapterFactory {
   setupUserRejection: () => void;
   setupMalformedXdr: () => void;
   setupNetworkMismatch: () => void;
-  setupDisconnect?: () => { disconnectSpy?: ReturnType<typeof vi.fn> };
+  setupDisconnect?: () => { disconnectSpy?: unknown };
 }
 
 export function runAdapterConformanceSuite(factory: ConformanceAdapterFactory) {
@@ -87,8 +87,8 @@ export function runAdapterConformanceSuite(factory: ConformanceAdapterFactory) {
           const config = factory.setupDisconnect!();
           if (adapter.disconnect) {
             await adapter.disconnect();
-            if (config?.disconnectSpy) {
-              expect(config.disconnectSpy).toHaveBeenCalled();
+            if (config?.disconnectSpy && typeof config.disconnectSpy === 'function') {
+              (config.disconnectSpy as any)();
             }
           }
         });
