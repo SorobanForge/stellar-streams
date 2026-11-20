@@ -434,6 +434,49 @@ export function assetContractId(
   return resolved.contractId(networkPassphrase);
 }
 
+/**
+ * The contract interface version this SDK is built against.
+ *
+ * Must match `CONTRACT_VERSION` in `contracts/version/src/lib.rs`, which is the
+ * value every contract's `version()` view returns; it is the one place the
+ * number is written in TypeScript. Bump it in the same release that bumps the
+ * contract interface, then compare deployments against it with
+ * {@link describeVersionMismatch}.
+ */
+export const SUPPORTED_CONTRACT_VERSION = 1;
+
+/**
+ * Compare a contract's reported interface version with the version this SDK was
+ * built against, so a stale dashboard or a mismatched deployment fails loudly
+ * instead of half-working.
+ *
+ * @param onChainVersion - The `u32` reported by
+ *   {@link StreamsClient.getVersion} / {@link EscrowClient.getVersion}.
+ * @param supportedVersion - The version to compare against; defaults to
+ *   {@link SUPPORTED_CONTRACT_VERSION}.
+ * @returns A message explaining the difference, or `null` when the two agree.
+ * @example
+ * ```typescript
+ * import { describeVersionMismatch } from '@stellar-starter-kit/sdk';
+ *
+ * const problem = describeVersionMismatch(await client.getVersion());
+ * if (problem) console.error(problem);
+ * ```
+ */
+export function describeVersionMismatch(
+  onChainVersion: number,
+  supportedVersion: number = SUPPORTED_CONTRACT_VERSION,
+): string | null {
+  if (onChainVersion === supportedVersion) return null;
+  const direction = onChainVersion > supportedVersion ? 'newer' : 'older';
+  return (
+    `The contract reports interface version ${onChainVersion}, which is ${direction} than the ` +
+    `version this SDK is built against (${supportedVersion}). Calls may fail or decode ` +
+    `unexpected values. Upgrade the SDK, or point the client at a version ${supportedVersion} ` +
+    'deployment.'
+  );
+}
+
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_POLL_TIMEOUT_MS = 30_000;
 /** Base fee used for write transactions when the caller does not pass `fee`. */
@@ -651,7 +694,12 @@ export type EscrowErrorCode =
   | 'INVALID_STATE_TRANSITION'
   | 'DEADLINE_NOT_REACHED'
   | 'DEADLINE_EXPIRED'
-  | 'ALREADY_FINALIZED';
+  | 'ALREADY_FINALIZED'
+  | 'INVALID_DEADLINE'
+  | 'MILESTONE_SCHEDULE_NOT_FOUND'
+  | 'MILESTONE_INDEX_OUT_OF_RANGE'
+  | 'MILESTONE_ALREADY_RELEASED'
+  | 'MILESTONE_SCHEDULE_INVALID';
 
 /** Events requested per `getEvents` call when {@link StreamsClient.listStreams} pages. */
 export const DEFAULT_EVENT_PAGE_SIZE = 100;
@@ -745,6 +793,11 @@ const ESCROW_ERROR_CODES: Record<number, EscrowErrorCode> = {
   6: 'DEADLINE_NOT_REACHED',
   7: 'DEADLINE_EXPIRED',
   8: 'ALREADY_FINALIZED',
+  9: 'INVALID_DEADLINE',
+  10: 'MILESTONE_SCHEDULE_NOT_FOUND',
+  11: 'MILESTONE_INDEX_OUT_OF_RANGE',
+  12: 'MILESTONE_ALREADY_RELEASED',
+  13: 'MILESTONE_SCHEDULE_INVALID',
 };
 
 /** The escrow counterpart of `StreamsError`; raised for `EscrowClient` failures. */
@@ -760,6 +813,16 @@ export class EscrowError extends Error {
     this.contractCode = contractCode;
     this.code = contractCode === undefined ? undefined : ESCROW_ERROR_CODES[contractCode];
   }
+}
+
+/** Arguments for {@link EscrowClient.releaseMilestone}. */
+export interface ReleaseMilestoneParams {
+  /** Escrow id as `bigint`, `number`, or decimal string. */
+  id: bigint | number | string;
+  /** Zero-based index of the milestone to release. */
+  index: number;
+  /** Payer or arbiter authorizing the release. */
+  caller: string;
 }
 
 /**
@@ -914,6 +977,30 @@ abstract class SorobanClient {
    */
   invalidateAccount(): void {
     this.account = null;
+  }
+
+  /**
+   * The deployed contract's interface version, read from its `version()` view.
+   *
+   * `stream`, `splits` and `escrow` all report the shared `CONTRACT_VERSION`
+   * constant, so `StreamsClient` and `EscrowClient` answer with the same number
+   * for one deployment. Compare the result with {@link SUPPORTED_CONTRACT_VERSION}
+   * — {@link describeVersionMismatch} turns the comparison into a message —
+   * before trusting a deployment a dashboard was configured with.
+   *
+   * @returns The contract's `u32` interface version.
+   * @throws StreamsError / EscrowError when the simulation fails.
+   * @example
+   * ```typescript
+   * import { describeVersionMismatch } from '@stellar-starter-kit/sdk';
+   *
+   * const onChain = await client.getVersion();
+   * const problem = describeVersionMismatch(onChain);
+   * if (problem) throw new Error(problem);
+   * ```
+   */
+  async getVersion(): Promise<number> {
+    return (await this.simulate('version')) as number;
   }
 
   /** Simulates a read-only call on the client's contract and returns the decoded result. */
@@ -1836,6 +1923,15 @@ export class EscrowClient extends SorobanClient {
     return raw === null ? null : normalizeEscrow(raw);
   }
 
+  /** Whether the zero-based milestone index has already been released. */
+  async isMilestoneReleased(id: bigint | number | string, index: number): Promise<boolean> {
+    return (await this.simulate(
+      'is_milestone_released',
+      nativeToScVal(BigInt(id), { type: 'u64' }),
+      nativeToScVal(index, { type: 'u32' }),
+    )) as boolean;
+  }
+
   /**
    * Create an escrow in the `created` (unfunded) state. `payer` must sign for
    * it; `id` is chosen by the caller and must not exist yet.
@@ -1877,6 +1973,22 @@ export class EscrowClient extends SorobanClient {
     return this.invoke(
       'release_escrow',
       [nativeToScVal(BigInt(id), { type: 'u64' }), addressToScVal(caller)],
+      opts,
+    );
+  }
+
+  /** Release one zero-based milestone to the payee. `caller` must be the payer or arbiter. */
+  async releaseMilestone<O extends WriteOptions = WriteOptions>(
+    params: ReleaseMilestoneParams,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    return this.invoke(
+      'release_milestone',
+      [
+        nativeToScVal(BigInt(params.id), { type: 'u64' }),
+        nativeToScVal(params.index, { type: 'u32' }),
+        addressToScVal(params.caller),
+      ],
       opts,
     );
   }
