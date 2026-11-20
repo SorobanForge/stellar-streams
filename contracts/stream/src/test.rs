@@ -3,7 +3,10 @@
 use super::*;
 use proptest::prelude::*;
 use soroban_sdk::{
-    testutils::{Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke},
+    testutils::{
+        storage::{Instance as _, Persistent as _},
+        Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke,
+    },
     Env, Event, IntoVal, String, Val, Vec,
 };
 
@@ -1867,4 +1870,202 @@ fn test_transfer_recipient_unknown_stream() {
         client.try_transfer_recipient(&99, &caller, &new_recipient),
         Err(Ok(StreamError::StreamNotFound)),
     );
+}
+
+// ---------------------------------------------------------------------------
+// Issue #303: the instance TTL is extended once per batch.
+// ---------------------------------------------------------------------------
+
+/// A full [`MAX_BATCH`] batch extends the instance once and every stream entry
+/// individually, and its write footprint is exactly one entry per stream plus a
+/// fixed overhead that does not grow with the batch.
+#[test]
+fn test_create_streams_bumps_instance_once_and_every_entry() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, _, client) = setup(&env);
+    token.mint(&sender, MAX_BATCH as i128 * 100);
+
+    let entries = batch(&env, MAX_BATCH, 100);
+    let ids = client.create_streams(&sender, &token.id, &entries);
+    let used = env.cost_estimate().resources();
+
+    // One entry per stream, plus the instance, the sender's and the contract's
+    // token balances and the sender's auth nonce.
+    assert_eq!(used.write_entries, MAX_BATCH + 4, "write entries");
+
+    env.as_contract(&client.address, || {
+        // Every stream entry got its own bump, so none can outlive its budget.
+        for id in ids.iter() {
+            let ttl = env.storage().persistent().get_ttl(&DataKey::Stream(id));
+            assert_eq!(ttl, LEDGER_BUMP_LIMIT, "stream {id} ttl");
+        }
+        // The instance is still extended to the full limit by the single bump.
+        assert_eq!(env.storage().instance().get_ttl(), LEDGER_BUMP_LIMIT);
+    });
+}
+
+/// Creating the same streams one by one writes the fixed overhead again for
+/// every stream, which is what batching (and the single instance bump) saves.
+#[test]
+fn test_individual_create_stream_writes_more_entries_than_a_batch() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, MAX_BATCH as i128 * 100);
+
+    let mut individual_writes = 0;
+    for _ in 0..MAX_BATCH {
+        create(&env, &client, &sender, &recipient, &token.id, 100, 0, 1000, 0);
+        individual_writes += env.cost_estimate().resources().write_entries;
+    }
+
+    // Stream, instance, two balances and the auth nonce, every single time.
+    assert_eq!(individual_writes, MAX_BATCH * 5);
+    assert!(individual_writes > MAX_BATCH + 4);
+}
+
+// ---------------------------------------------------------------------------
+// Issue #301: pause and resume accrual around the cliff.
+// ---------------------------------------------------------------------------
+
+/// A 1000-token stream over [0, 1000) with its cliff at 400.
+fn create_with_cliff(
+    env: &Env,
+) -> (TestToken<'_>, Address, Address, StreamContractClient<'_>, u64) {
+    let (token, sender, recipient, client) = setup(env);
+    token.mint(&sender, 1000);
+    let id = create(env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 400);
+    (token, sender, recipient, client, id)
+}
+
+#[test]
+fn test_pause_before_cliff_resume_after_cliff_vests_only_unpaused_seconds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_, _, _, client, id) = create_with_cliff(&env);
+
+    // Pause at t=200, well before the cliff at t=400.
+    advance_time(&env, 200);
+    assert_eq!(client.vested(&id), 0);
+    client.pause(&id);
+
+    // Still before the cliff: nothing vests.
+    advance_time(&env, 199); // t=399
+    assert_eq!(client.vested(&id), 0);
+
+    // The cliff passes while paused: only the 200 unpaused seconds count.
+    advance_time(&env, 1); // t=400
+    assert_eq!(client.vested(&id), 200);
+    advance_time(&env, 200); // t=600
+    assert_eq!(client.vested(&id), 200);
+
+    // Resume after the cliff: the 400 paused seconds are folded out.
+    client.resume(&id);
+    assert_eq!(client.get_stream(&id).unwrap().total_paused, 400);
+    assert_eq!(client.vested(&id), 200);
+    assert_eq!(client.claimable(&id), 200);
+
+    // Accrual resumes at the normal rate from the resume point.
+    advance_time(&env, 100); // t=700
+    assert_eq!(client.vested(&id), 300);
+
+    // At (and after) the end, the paused seconds stay unvested.
+    advance_time(&env, 300); // t=1000
+    assert_eq!(client.vested(&id), 600);
+    advance_time(&env, 500);
+    assert_eq!(client.vested(&id), 600);
+}
+
+#[test]
+fn test_pause_and_resume_both_before_cliff_shifts_nothing_until_cliff() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_, _, _, client, id) = create_with_cliff(&env);
+
+    advance_time(&env, 100);
+    client.pause(&id);
+    advance_time(&env, 150); // t=250
+    client.resume(&id);
+    assert_eq!(client.vested(&id), 0);
+
+    // The cliff is a wall-clock time and is not moved by the pause.
+    advance_time(&env, 149); // t=399
+    assert_eq!(client.vested(&id), 0);
+    advance_time(&env, 1); // t=400: 400 elapsed - 150 paused
+    assert_eq!(client.vested(&id), 250);
+}
+
+#[test]
+fn test_vested_is_monotonic_across_pause_resume_and_pause_spanning_end() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_, _, _, client, id) = create_with_cliff(&env);
+
+    // Advances `step` seconds in 10-second ticks, asserting `vested` never
+    // decreases, and returns the last value seen.
+    fn check(env: &Env, client: &StreamContractClient, id: u64, mut last: i128, step: u64) -> i128 {
+        for _ in 0..step / 10 {
+            advance_time(env, 10);
+            let vested = client.vested(&id);
+            assert!(vested >= last, "vested went from {last} to {vested}");
+            last = vested;
+        }
+        last
+    }
+
+    let mut last = 0;
+    // Pause before the cliff, resume after it.
+    last = check(&env, &client, id, last, 200); // t=200
+    client.pause(&id);
+    last = check(&env, &client, id, last, 400); // t=600
+    client.resume(&id);
+    assert_eq!(client.vested(&id), last);
+
+    // Pause again, and let the pause run past the end date.
+    last = check(&env, &client, id, last, 200); // t=800
+    client.pause(&id);
+    let at_pause = client.vested(&id);
+    assert_eq!(at_pause, 400);
+    last = check(&env, &client, id, last, 400); // t=1200, past end_time=1000
+    assert_eq!(client.vested(&id), at_pause);
+
+    // Resuming after the end must not take back anything already vested.
+    client.resume(&id);
+    assert_eq!(client.vested(&id), at_pause);
+    assert_eq!(client.claimable(&id), at_pause);
+    assert_eq!(client.get_stream(&id).unwrap().total_paused, 400 + 200);
+    check(&env, &client, id, last, 300);
+    assert_eq!(client.vested(&id), at_pause);
+}
+
+#[test]
+fn test_claimable_respects_fee_after_resume() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, _, recipient, client, id) = create_with_cliff(&env);
+
+    let admin = account(&env);
+    let treasury = account(&env);
+    client.initialize(&admin, &treasury, &100); // 1%
+
+    advance_time(&env, 200);
+    client.pause(&id);
+    advance_time(&env, 400); // t=600
+    client.resume(&id);
+    advance_time(&env, 300); // t=900: 900 elapsed - 400 paused = 500
+
+    // `claimable` is the gross amount; the fee comes out of it on withdrawal.
+    assert_eq!(client.claimable(&id), 500);
+    assert_eq!(client.withdraw(&id), 495);
+    assert_eq!(token.balance(&recipient), 495);
+    assert_eq!(token.balance(&treasury), 5);
+    assert_eq!(client.claimable(&id), 0);
+
+    // The fee keeps applying to accrual after the resume, up to the end.
+    advance_time(&env, 100); // t=1000: 600 vested in total
+    assert_eq!(client.claimable(&id), 100);
+    assert_eq!(client.withdraw(&id), 99);
+    assert_eq!(token.balance(&recipient), 594);
+    assert_eq!(token.balance(&treasury), 6);
 }
