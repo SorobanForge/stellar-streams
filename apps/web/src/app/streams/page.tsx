@@ -34,7 +34,6 @@ import {
 import { getStreamMetrics, type Stream } from '@stellar-starter-kit/types';
 import {
   formatAddress,
-  formatTokenAmount,
   parseTokenAmount,
   computeClaimable,
   computeProtocolFee,
@@ -305,10 +304,14 @@ export function StreamsDashboard({
     }
   };
 
-  const formatAmount = (raw: bigint | string) =>
-    streamToken
-      ? `${formatTokenAmount(raw, streamToken.decimals)} ${streamToken.symbol}`
-      : `${raw.toString()} (base units)`;
+  // Amounts use the token's own decimals and symbol, read alongside the stream.
+  // A failed SEP-41 metadata read shows the raw base-unit value instead of
+  // assuming 7 decimals, and never blanks the view.
+  const formatAmount = (raw: bigint | string) => {
+    const formatted = formatStreamAmount(raw, streamToken);
+    if (formatted.isFallback) return `${formatted.value} (base units)`;
+    return `${formatted.value} ${formatted.symbol}`;
+  };
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   const streamMetrics = stream ? getStreamMetrics(stream, nowSeconds) : null;
