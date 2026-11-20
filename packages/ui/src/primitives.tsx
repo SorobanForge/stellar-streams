@@ -434,7 +434,12 @@ export function TabsTrigger({
           ? enabledTabs.length - 1
           : (currentIndex + (key === 'ArrowRight' ? 1 : -1) + enabledTabs.length) %
             enabledTabs.length;
-    enabledTabs[nextIndex]?.focus();
+    const nextTab = enabledTabs[nextIndex];
+    if (!nextTab) return;
+
+    nextTab.focus();
+    const nextValue = nextTab.getAttribute('data-value');
+    if (nextValue !== null) context.select(nextValue);
   }
 
   return (
@@ -447,6 +452,7 @@ export function TabsTrigger({
       aria-selected={selected}
       tabIndex={selected ? 0 : -1}
       disabled={disabled}
+      data-value={value}
       data-state={selected ? 'active' : 'inactive'}
       onClick={(event) => {
         onClick?.(event);
@@ -454,7 +460,6 @@ export function TabsTrigger({
       }}
       onFocus={(event) => {
         onFocus?.(event);
-        if (!event.defaultPrevented && !disabled) context.select(value);
       }}
       onKeyDown={handleKeyDown}
       className={cn(

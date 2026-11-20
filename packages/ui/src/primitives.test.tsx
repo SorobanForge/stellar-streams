@@ -237,8 +237,11 @@ describe('Tabs', () => {
       </Tabs>,
     );
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Completed' }));
+    const completedTab = screen.getByRole('tab', { name: 'Completed' });
+    fireEvent.focus(completedTab);
+    fireEvent.click(completedTab);
     expect(onValueChange).toHaveBeenCalledWith('completed');
+    expect(onValueChange).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('tabpanel').textContent).toBe('Active streams');
 
     rerender(
