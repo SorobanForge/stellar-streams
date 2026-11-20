@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { StreamsClient } from '@stellar-starter-kit/sdk';
 import type { Stream } from '@stellar-starter-kit/types';
-import { useStream, type StreamId } from './index';
+import { useStream, useStreamConfig, type StreamId } from './index';
 
 /** The read `useStream` performs, as the stub implements it. */
 type GetStream = (id: StreamId) => Promise<Stream | null>;
@@ -37,6 +37,52 @@ function makeStream(id: string, totalAmount = '100'): Stream {
 function makeClient(getStream: GetStream): StreamsClient {
   return { getStream, claimable: vi.fn().mockResolvedValue(0n) } as unknown as StreamsClient;
 }
+
+describe('useStreamConfig', () => {
+  it('loads the protocol config on mount', async () => {
+    const config = { admin: 'GADMIN', feeRate: 30 };
+    const getConfig = vi.fn().mockResolvedValue(config);
+    const client = { getConfig } as unknown as StreamsClient;
+
+    const { result } = renderHook(() => useStreamConfig(client, { retryDelayMs: 1 }));
+
+    await waitFor(() => expect(result.current.config).toEqual(config));
+
+    expect(result.current.loading).toBe(false);
+    expect(result.current.error).toBeNull();
+    expect(getConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats an uninitialised contract as a null config without an error', async () => {
+    const getConfig = vi.fn().mockResolvedValue(null);
+    const client = { getConfig } as unknown as StreamsClient;
+
+    const { result } = renderHook(() => useStreamConfig(client, { retryDelayMs: 1 }));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.config).toBeNull();
+    expect(result.current.error).toBeNull();
+  });
+
+  it('retries a transient failure and recovers without surfacing an error', async () => {
+    const config = { admin: 'GADMIN', feeRate: 30 };
+    const getConfig = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('rpc hiccup'))
+      .mockResolvedValueOnce(config);
+    const client = { getConfig } as unknown as StreamsClient;
+
+    const { result } = renderHook(() =>
+      useStreamConfig(client, { retries: 2, retryDelayMs: 1, maxRetryDelayMs: 2 }),
+    );
+
+    await waitFor(() => expect(result.current.config).toEqual(config));
+
+    expect(getConfig).toHaveBeenCalledTimes(2);
+    expect(result.current.error).toBeNull();
+  });
+});
 
 describe('useStream', () => {
   it('loads the stream and its claimable balance on mount', async () => {
