@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Address, Keypair, scValToNative, xdr } from '@stellar/stellar-sdk';
+import { Address, Keypair, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
 import type { EscrowStatus } from '@stellar-starter-kit/types';
 import { EscrowError } from './index';
@@ -203,5 +203,50 @@ describe('EscrowClient writes', () => {
       'Simulation of release_escrow failed: ESCROW_NOT_FOUND (contract error #1) — HostError: Error(Contract, #1)',
     );
     expect(rpc.sendTransaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('EscrowClient.getMilestones', () => {
+  let rpc: ReturnType<typeof fakeTransport>;
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Index argument of an `is_milestone_released` simulation. */
+  function milestoneIndex(tx: unknown): number {
+    return Number(scValToNative(callArgs(tx)[1]!));
+  }
+
+  it('returns the amounts with a released flag per milestone', async () => {
+    rpc = fakeTransport();
+    rpc.simulateTransaction.mockImplementation(async (tx) => {
+      const { method } = invokedCall(tx);
+      if (method === 'get_milestones') {
+        return simulationSuccess(
+          xdr.ScVal.scvVec([250n, 250n, 500n].map((v) => nativeToScVal(v, { type: 'i128' }))),
+        );
+      }
+      if (method === 'is_milestone_released') {
+        expect(scValToNative(callArgs(tx)[0]!)).toBe(7n);
+        return simulationSuccess(xdr.ScVal.scvBool(milestoneIndex(tx) === 0));
+      }
+      throw new Error(`Unexpected simulation of ${method}`);
+    });
+
+    await expect(makeEscrowClient({ transport: rpc }).getMilestones(7)).resolves.toEqual({
+      amounts: ['250', '250', '500'],
+      released: [true, false, false],
+    });
+    // One schedule read plus one flag read per milestone.
+    expect(rpc.simulateTransaction).toHaveBeenCalledTimes(4);
+  });
+
+  it('returns null for an escrow without a schedule', async () => {
+    rpc = fakeTransport();
+    rpc.simulateTransaction.mockResolvedValue(simulationSuccess(xdr.ScVal.scvVoid()));
+
+    await expect(makeEscrowClient({ transport: rpc }).getMilestones(7)).resolves.toBeNull();
+    expect(rpc.simulateTransaction).toHaveBeenCalledTimes(1);
   });
 });
