@@ -12,6 +12,7 @@ import {
   Ban,
   Search,
   Wallet,
+  Download,
 } from 'lucide-react';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
@@ -50,6 +51,7 @@ import {
   getStreamCliffSeconds,
   validateStreamInput,
 } from '../../lib/stream-validation';
+import { downloadCsv, exportStreamsToCsv, getStreamsCsvFilename } from '../../lib/stream-csv';
 
 // framer-motion stays out of the initial route bundle; the banner only loads
 // when an error/success message is shown.
@@ -73,6 +75,7 @@ function streamTimeline(stream: Stream, nowSeconds: number): string {
 
 export interface StreamsDashboardProps {
   contractId?: string;
+  initialStreams?: Stream[];
   config?: EnvironmentConfig;
 }
 
@@ -83,23 +86,39 @@ export interface StreamsDashboardProps {
  */
 export default function StreamsDashboardPage({
   contractId,
+  initialStreams,
   config: propConfig,
 }: StreamsDashboardProps = {}) {
   const config = propConfig ?? environmentConfig;
   if (!config) {
     return <ConfigurationError errors={environmentErrors} />;
   }
-  return <StreamsDashboard config={config} contractId={contractId} />;
+  return (
+    <StreamsDashboard
+      config={config}
+      contractId={contractId}
+      initialStreams={initialStreams}
+    />
+  );
 }
 
 export function StreamsDashboard({
   config,
   contractId: overrideContractId,
+  initialStreams,
 }: {
   config: EnvironmentConfig;
   contractId?: string;
+  initialStreams?: Stream[];
 }) {
-  const { sorobanRpcUrl, networkPassphrase, streamContractId, tokenContractId, expertUrl } = config;
+  const {
+    sorobanRpcUrl,
+    networkPassphrase,
+    streamContractId,
+    tokenContractId,
+    expertUrl,
+    network,
+  } = config;
   const activeContractId =
     overrideContractId !== undefined
       ? overrideContractId
@@ -146,6 +165,15 @@ export function StreamsDashboard({
     hasMore,
     loadMore,
   } = useStreams(client, activeAddress);
+
+  const loadedStreams = initialStreams ?? listedStreams;
+
+  const handleExportCsv = useCallback(() => {
+    if (!loadedStreams.length || !activeAddress) return;
+    const csv = exportStreamsToCsv(loadedStreams);
+    const filename = getStreamsCsvFilename(network, activeAddress);
+    downloadCsv(filename, csv);
+  }, [loadedStreams, activeAddress, network]);
 
   const notify = useCallback((kind: 'success' | 'error', message: string) => {
     if (kind === 'success') {
@@ -611,17 +639,27 @@ export function StreamsDashboard({
           </div>
         </div>
 
-        {/* Listed Streams & Pagination Section */}
+        {/* Listed Streams & Export Section */}
         <div className="mt-12 space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h2 className="text-xl font-bold text-white">Streams</h2>
               <p className="mt-1 text-sm text-slate-400">
                 {isConnected
-                  ? `${listedStreams.length} stream${listedStreams.length === 1 ? '' : 's'} loaded`
-                  : 'Connect a wallet to view your streams'}
+                  ? `${loadedStreams.length} stream${loadedStreams.length === 1 ? '' : 's'} loaded`
+                  : 'Connect a wallet to view and export streams'}
               </p>
             </div>
+            <Button
+              type="button"
+              onClick={handleExportCsv}
+              disabled={loadedStreams.length === 0 || !isConnected}
+              variant="secondary"
+              className="inline-flex items-center gap-2"
+              aria-label="Export CSV"
+            >
+              <Download className="h-4 w-4" /> Export CSV
+            </Button>
           </div>
 
           {listingLoading && (
@@ -631,13 +669,13 @@ export function StreamsDashboard({
             </div>
           )}
 
-          {!listingLoading && isConnected && listedStreams.length === 0 && (
+          {!listingLoading && isConnected && loadedStreams.length === 0 && (
             <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-8 text-center">
               <p className="text-sm text-slate-400">No streams found for this address.</p>
             </div>
           )}
 
-          {!listingLoading && listedStreams.length > 0 && (
+          {!listingLoading && loadedStreams.length > 0 && (
             <>
               <div className="overflow-x-auto rounded-2xl border border-slate-900 bg-slate-950/40">
                 <table className="w-full text-left font-mono text-xs">
@@ -652,7 +690,7 @@ export function StreamsDashboard({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-900 text-slate-300">
-                    {listedStreams.map((item) => (
+                    {loadedStreams.map((item) => (
                       <tr key={item.id} className="transition-colors hover:bg-slate-900/20">
                         <td className="px-4 py-3 font-semibold text-white">#{item.id}</td>
                         <td className="px-4 py-3">{formatAddress(item.recipient, 6)}</td>
