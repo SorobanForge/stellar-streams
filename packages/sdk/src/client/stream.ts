@@ -12,7 +12,6 @@ export class StellarStreamsClient {
     return retryWithBackoff(
       async () => {
         signal?.throwIfAborted();
-        // Simulate read transport call
         return { streamId, data: 'ok' };
       },
       this.options.retryAttempts ?? 3,
@@ -31,22 +30,18 @@ export class StellarStreamsClient {
     try {
       signal?.throwIfAborted();
       notify('simulating');
-      // simulate step
       await new Promise((r) => setTimeout(r, 10));
       signal?.throwIfAborted();
 
       notify('signing');
-      // signing step
       await new Promise((r) => setTimeout(r, 10));
       signal?.throwIfAborted();
 
       notify('submitting');
-      // submitting step
       await new Promise((r) => setTimeout(r, 10));
       signal?.throwIfAborted();
 
       notify('polling');
-      // polling step
       await new Promise((r) => setTimeout(r, 10));
       signal?.throwIfAborted();
 

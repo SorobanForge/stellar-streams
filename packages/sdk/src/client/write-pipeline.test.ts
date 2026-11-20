@@ -56,7 +56,6 @@ describe('write-pipeline cancellation and status changes', () => {
     const statuses: string[] = [];
     const cb = (status: string) => statuses.push(status);
 
-    // Simulate status callback tracking
     cb('simulating');
     cb('signing');
     cb('submitting');
