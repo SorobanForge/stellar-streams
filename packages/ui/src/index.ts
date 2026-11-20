@@ -13,6 +13,8 @@ export type {
   StatusBadgeProps,
   StatusBadgeStatus,
 } from './primitives';
+export { Popover, Tooltip } from './overlays';
+export type { OverlayAlign, OverlaySide, PopoverProps, TooltipProps } from './overlays';
 export { Header } from './components/Header';
 export { Footer } from './components/Footer';
 export { Logo } from './components/Logo';
