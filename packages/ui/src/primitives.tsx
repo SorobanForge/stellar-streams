@@ -322,3 +322,174 @@ export function Alert({
     </div>
   );
 }
+
+interface TabsContextValue {
+  id: string;
+  value: string | undefined;
+  select: (value: string) => void;
+}
+
+const TabsContext = React.createContext<TabsContextValue | null>(null);
+
+function useTabsContext(componentName: string) {
+  const context = React.useContext(TabsContext);
+  if (!context) {
+    throw new Error(`${componentName} must be used within a Tabs component.`);
+  }
+  return context;
+}
+
+function getTabId(id: string, value: string) {
+  return `${id}-tab-${encodeURIComponent(value)}`;
+}
+
+function getTabPanelId(id: string, value: string) {
+  return `${id}-panel-${encodeURIComponent(value)}`;
+}
+
+export interface TabsProps extends React.HTMLAttributes<HTMLDivElement> {
+  /** Selected tab value. Provide this with onValueChange for controlled state. */
+  value?: string;
+  /** Initially selected tab value when uncontrolled. */
+  defaultValue?: string;
+  onValueChange?: (value: string) => void;
+}
+
+/** Accessible tab group with controlled and uncontrolled selection. */
+export function Tabs({ value, defaultValue, onValueChange, className, ...props }: TabsProps) {
+  const id = React.useId();
+  const [uncontrolledValue, setUncontrolledValue] = React.useState(defaultValue);
+  const selectedValue = value !== undefined ? value : uncontrolledValue;
+  const select = React.useCallback(
+    (nextValue: string) => {
+      if (value === undefined) {
+        setUncontrolledValue(nextValue);
+      }
+      onValueChange?.(nextValue);
+    },
+    [onValueChange, value],
+  );
+
+  return (
+    <TabsContext.Provider value={{ id, value: selectedValue, select }}>
+      <div {...props} className={className} />
+    </TabsContext.Provider>
+  );
+}
+
+export type TabsListProps = React.HTMLAttributes<HTMLDivElement>;
+
+export function TabsList({ className, ...props }: TabsListProps) {
+  useTabsContext('TabsList');
+  return (
+    <div
+      {...props}
+      role="tablist"
+      aria-orientation="horizontal"
+      className={cn(
+        'inline-flex items-center gap-1 rounded-xl border border-slate-900 bg-slate-950/60 p-1',
+        className,
+      )}
+    />
+  );
+}
+
+export interface TabsTriggerProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  value: string;
+}
+
+export function TabsTrigger({
+  value,
+  disabled,
+  onClick,
+  onFocus,
+  onKeyDown,
+  className,
+  ...props
+}: TabsTriggerProps) {
+  const context = useTabsContext('TabsTrigger');
+  const selected = context.value === value;
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    onKeyDown?.(event);
+    if (event.defaultPrevented) return;
+
+    const key = event.key;
+    if (key !== 'ArrowLeft' && key !== 'ArrowRight' && key !== 'Home' && key !== 'End') return;
+
+    const tabList = event.currentTarget.closest('[role="tablist"]');
+    if (!tabList) return;
+
+    const enabledTabs = Array.from(
+      tabList.querySelectorAll<HTMLButtonElement>('[role="tab"]:not(:disabled)'),
+    );
+    const currentIndex = enabledTabs.indexOf(event.currentTarget);
+    if (currentIndex < 0 || enabledTabs.length === 0) return;
+
+    event.preventDefault();
+    const nextIndex =
+      key === 'Home'
+        ? 0
+        : key === 'End'
+          ? enabledTabs.length - 1
+          : (currentIndex + (key === 'ArrowRight' ? 1 : -1) + enabledTabs.length) %
+            enabledTabs.length;
+    const nextTab = enabledTabs[nextIndex];
+    if (!nextTab) return;
+
+    nextTab.focus();
+    const nextValue = nextTab.getAttribute('data-value');
+    if (nextValue !== null) context.select(nextValue);
+  }
+
+  return (
+    <button
+      {...props}
+      type="button"
+      role="tab"
+      id={getTabId(context.id, value)}
+      aria-controls={getTabPanelId(context.id, value)}
+      aria-selected={selected}
+      tabIndex={selected ? 0 : -1}
+      disabled={disabled}
+      data-value={value}
+      data-state={selected ? 'active' : 'inactive'}
+      onClick={(event) => {
+        onClick?.(event);
+        if (!event.defaultPrevented && !disabled) context.select(value);
+      }}
+      onFocus={(event) => {
+        onFocus?.(event);
+      }}
+      onKeyDown={handleKeyDown}
+      className={cn(
+        'rounded-lg px-4 py-2 text-sm font-semibold text-slate-400 transition hover:text-white focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-40 data-[state=active]:bg-purple-600/20 data-[state=active]:text-white data-[state=active]:shadow',
+        className,
+      )}
+    />
+  );
+}
+
+export interface TabsContentProps extends React.HTMLAttributes<HTMLDivElement> {
+  value: string;
+}
+
+export function TabsContent({ value, className, ...props }: TabsContentProps) {
+  const context = useTabsContext('TabsContent');
+  const selected = context.value === value;
+
+  return (
+    <div
+      {...props}
+      role="tabpanel"
+      id={getTabPanelId(context.id, value)}
+      aria-labelledby={getTabId(context.id, value)}
+      tabIndex={0}
+      hidden={!selected}
+      className={cn(
+        'mt-4 rounded-xl border border-slate-900 bg-slate-950/40 p-5 text-sm text-slate-300',
+        className,
+      )}
+    />
+  );
+}

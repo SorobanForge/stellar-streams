@@ -13,7 +13,15 @@ import {
   TriangleAlert,
   Wallet,
 } from 'lucide-react';
-import { cn, Footer, Header } from '@stellar-starter-kit/ui';
+import {
+  cn,
+  Footer,
+  Header,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@stellar-starter-kit/ui';
 import {
   formatAddress,
   formatBps,
@@ -315,6 +323,27 @@ export default function UiGallery() {
                 />
               </label>
             </div>
+          </GallerySection>
+
+          {/* -------------------------------------------------- Tabs */}
+          <GallerySection
+            title="Tabs"
+            description="Accessible tab groups switch panels with click, Left/Right Arrow, Home, and End."
+          >
+            <Tabs defaultValue="active">
+              <TabsList aria-label="Stream status">
+                <TabsTrigger value="active">Active</TabsTrigger>
+                <TabsTrigger value="completed">Completed</TabsTrigger>
+              </TabsList>
+              <TabsContent value="active">
+                <h3 className="font-semibold text-white">Active streams</h3>
+                <p className="mt-1 text-slate-400">Streams currently sending payments.</p>
+              </TabsContent>
+              <TabsContent value="completed">
+                <h3 className="font-semibold text-white">Completed streams</h3>
+                <p className="mt-1 text-slate-400">Streams that have finished their schedule.</p>
+              </TabsContent>
+            </Tabs>
           </GallerySection>
 
           {/* -------------------------------------------------- Badges */}
