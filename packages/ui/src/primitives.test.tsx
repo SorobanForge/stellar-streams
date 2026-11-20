@@ -10,6 +10,10 @@ import {
   ProgressBar,
   Skeleton,
   StatusBadge,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
   type AlertTone,
 } from './primitives';
 import { cn } from './utils';
@@ -182,5 +186,71 @@ describe('Alert', () => {
   it('omits the dismiss button when no handler is supplied', () => {
     render(<Alert tone="info">Nothing to dismiss.</Alert>);
     expect(screen.queryByRole('button')).toBeNull();
+  });
+});
+
+describe('Tabs', () => {
+  it('moves focus and selection with arrow keys, wrapping around enabled tabs', () => {
+    render(
+      <Tabs defaultValue="active">
+        <TabsList aria-label="Stream status">
+          <TabsTrigger value="active">Active</TabsTrigger>
+          <TabsTrigger value="paused" disabled>
+            Paused
+          </TabsTrigger>
+          <TabsTrigger value="completed">Completed</TabsTrigger>
+        </TabsList>
+        <TabsContent value="active">Active streams</TabsContent>
+        <TabsContent value="paused">Paused streams</TabsContent>
+        <TabsContent value="completed">Completed streams</TabsContent>
+      </Tabs>,
+    );
+
+    const activeTab = screen.getByRole('tab', { name: 'Active' });
+    const completedTab = screen.getByRole('tab', { name: 'Completed' });
+    expect(activeTab.getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tabpanel').textContent).toBe('Active streams');
+
+    fireEvent.keyDown(activeTab, { key: 'ArrowRight' });
+
+    expect(document.activeElement).toBe(completedTab);
+    expect(completedTab.getAttribute('aria-selected')).toBe('true');
+    expect(activeTab.getAttribute('aria-selected')).toBe('false');
+    expect(screen.getByRole('tabpanel').textContent).toBe('Completed streams');
+
+    fireEvent.keyDown(completedTab, { key: 'ArrowRight' });
+
+    expect(document.activeElement).toBe(activeTab);
+    expect(activeTab.getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('supports controlled selection and reports requested values', () => {
+    const onValueChange = vi.fn();
+    const { rerender } = render(
+      <Tabs value="active" onValueChange={onValueChange}>
+        <TabsList aria-label="Stream status">
+          <TabsTrigger value="active">Active</TabsTrigger>
+          <TabsTrigger value="completed">Completed</TabsTrigger>
+        </TabsList>
+        <TabsContent value="active">Active streams</TabsContent>
+        <TabsContent value="completed">Completed streams</TabsContent>
+      </Tabs>,
+    );
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Completed' }));
+    expect(onValueChange).toHaveBeenCalledWith('completed');
+    expect(screen.getByRole('tabpanel').textContent).toBe('Active streams');
+
+    rerender(
+      <Tabs value="completed" onValueChange={onValueChange}>
+        <TabsList aria-label="Stream status">
+          <TabsTrigger value="active">Active</TabsTrigger>
+          <TabsTrigger value="completed">Completed</TabsTrigger>
+        </TabsList>
+        <TabsContent value="active">Active streams</TabsContent>
+        <TabsContent value="completed">Completed streams</TabsContent>
+      </Tabs>,
+    );
+    expect(screen.getByRole('tabpanel').textContent).toBe('Completed streams');
   });
 });
