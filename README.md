@@ -114,9 +114,12 @@ The flagship contract locks tokens up front and releases them linearly.
 | `create_stream(sender, recipient, token, amount, start, end, cliff)` | Lock tokens and open a stream. Returns the stream id.                     |
 | `create_streams(sender, token, entries)`                             | Lock a whole batch atomically. Returns the new ids, in input order.       |
 | `withdraw(id)`                                                       | Recipient claims the vested, unclaimed balance.                           |
+| `preview_withdraw(id)`                                               | Gross claimable, protocol fee and net a `withdraw` would pay right now.   |
 | `cancel(id)`                                                         | Sender cancels; unvested funds are refunded, vested funds stay claimable. |
 | `transfer_recipient(id, caller, new_recipient)`                      | Recipient hands the unwithdrawn balance off to a new address.             |
-| `claimable(id)` / `vested(id)`                                       | View helpers.                                                             |
+| `set_metadata(id, sender, label, reference)`                         | Sender replaces the stream's label and invoice/grant reference.           |
+| `pause(id)` / `resume(id)`                                           | Sender freezes and unfreezes accrual (one pause lasts at most 30 days).   |
+| `claimable(id)` / `vested(id)` / `unvested(id)`                      | View helpers.                                                             |
 | `get_stream(id)` / `get_config()` / `next_stream_id()`               | Read helpers.                                                             |
 
 Safety properties enforced on-chain: `end > start`, `start ≤ cliff ≤ end`, `amount > 0`,
