@@ -186,6 +186,14 @@ The web app also supports a default token override:
 NEXT_PUBLIC_TOKEN_CONTRACT_ID=
 ```
 
+## Testing without a network
+
+Every RPC call goes through the `StreamsTransport` interface, so a test can
+inject an in-memory fake instead of pointing a client at a public node.
+[Testing the SDK without a network](sdk-testing.md) lists the seven methods a
+fake has to answer, gives a copy-pasteable implementation, and covers driving
+RPC failover with `transportFactory` and two fakes.
+
 ## Source notes
 
 - This guide is based on the actual SDK in `packages/sdk/src/index.ts`.
