@@ -94,11 +94,7 @@ export default function StreamsDashboardPage({
     return <ConfigurationError errors={environmentErrors} />;
   }
   return (
-    <StreamsDashboard
-      config={config}
-      contractId={contractId}
-      initialStreams={initialStreams}
-    />
+    <StreamsDashboard config={config} contractId={contractId} initialStreams={initialStreams} />
   );
 }
 
