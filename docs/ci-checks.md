@@ -14,7 +14,7 @@ and `pnpm install --frozen-lockfile` rather than a plain `pnpm install`.
 | :------------------------- | :----------------- | :-------------------------------------------------------------------------------------------------- | :----------------------------------------- |
 | Lint Codebase              | `ci.yml`           | ESLint for every package and app, then Prettier's formatting check (Markdown included)              | `pnpm run lint && pnpm run format:check`   |
 | Run TypeScript Checks      | `ci.yml`           | `tsc --noEmit` for every workspace that has a `typecheck` script                                    | `pnpm run typecheck`                       |
-| Run Unit Tests             | `ci.yml`           | Vitest suites for the packages and `apps/web`                                                       | `pnpm run test`                            |
+| Run Unit Tests             | `ci.yml`           | Vitest suites for the packages and `apps/web`, including the axe sweep of `/ui`                     | `pnpm run test`                            |
 | Test Soroban Contracts     | `ci.yml`           | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` (which regenerates `test_snapshots/`) | see [Contracts](#test-soroban-contracts)   |
 | Verify Production Build    | `ci.yml`           | `turbo run build`, then `scripts/check-package-entries.mjs`                                         | `pnpm run build && pnpm run test:exports`  |
 | Check Documentation Links  | `docs.yml`         | lychee over every committed Markdown file, including `#fragment` anchors                            | `lychee --config .lychee.toml './**/*.md'` |
@@ -89,6 +89,20 @@ debugging.
 `turbo run test`, which is `vitest run` per workspace. Focus a suite while
 iterating with `pnpm --filter @stellar-starter-kit/sdk test`, then run the full
 command before pushing.
+
+The `apps/web` suite includes an axe sweep of the component gallery
+(`apps/web/src/app/ui/page.a11y.test.tsx`). It renders the whole gallery —
+header and footer included — and fails with the axe rule id plus every offending
+node. Run just that sweep with:
+
+```bash
+pnpm --filter @stellar-starter-kit/web exec vitest run src/app/ui/page.a11y.test.tsx
+```
+
+Rules that cannot run under jsdom are disabled in `ALLOWED_RULES` in that file,
+each with the reason the exception is unavoidable (currently only
+`color-contrast`, which needs a layout engine and canvas). Everything else must
+be fixed in the markup rather than allowlisted.
 
 ### Test Soroban Contracts
 
