@@ -1,5 +1,6 @@
 // Export Stellar wallets package utilities
 export const WALLET_PROVIDERS = {
+  WATCH: 'watch',
   FREIGHTER: 'freighter',
   ALBEDO: 'albedo',
   RABE: 'rabe',

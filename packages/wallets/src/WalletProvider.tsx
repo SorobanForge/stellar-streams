@@ -7,12 +7,13 @@ import {
   HanaAdapter,
   LedgerAdapter,
   RabetAdapter,
+  WatchAdapter,
   type WalletAdapter,
 } from './adapters/index.js';
 import { isUserRejection, NotSupportedError, toSigningError } from './errors.js';
 import { getWalletCapabilities, type WalletCapabilities } from './capabilities.js';
 
-export type WalletType = 'freighter' | 'albedo' | 'rabe' | 'hana' | 'ledger';
+export type WalletType = 'watch' | 'freighter' | 'albedo' | 'rabe' | 'hana' | 'ledger';
 
 export interface WalletContextType {
   activeAddress: string | null;
@@ -23,12 +24,17 @@ export interface WalletContextType {
    * auth-entry signature) instead of waiting for the call to fail.
    */
   capabilities: WalletCapabilities | null;
+  /**
+   * True when the active wallet can only observe and never sign (the watch
+   * address adapter). Write buttons should be disabled while this is true.
+   */
+  readOnly: boolean;
   isConnected: boolean;
   isConnecting: boolean;
   isRestoring: boolean;
   network: string;
   error: string | null;
-  connect: (provider: WalletType) => Promise<void>;
+  connect: (provider: WalletType, address?: string) => Promise<void>;
   disconnect: () => void;
   signTransaction: (
     xdr: string,
@@ -52,6 +58,9 @@ const LOCAL_STORAGE_KEY_ADDRESS = 'stellar_starter_kit_wallet_address';
 
 /** One adapter per supported wallet, keyed by provider id. */
 const ADAPTERS: Record<WalletType, WalletAdapter> = {
+  // Read-only: no extension required, never signs. Write buttons are disabled
+  // while it is active via `readOnly`.
+  watch: new WatchAdapter(),
   freighter: new FreighterAdapter(),
   albedo: new AlbedoAdapter(),
   rabe: new RabetAdapter(),
@@ -75,12 +84,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const adapterFor = useCallback((provider: WalletType): WalletAdapter => ADAPTERS[provider], []);
 
   const connect = useCallback(
-    async (provider: WalletType) => {
+    async (provider: WalletType, address?: string) => {
       setIsConnecting(true);
       setError(null);
       try {
         const adapter = adapterFor(provider);
-        const publicKey = await adapter.connect();
+        const publicKey = await adapter.connect(address);
 
         if (!publicKey) {
           throw new Error('Failed to retrieve public key from wallet.');
@@ -146,6 +155,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         }
         if (!(await adapter.isAvailable().catch(() => false))) {
           throw new Error(`${adapter.name} wallet extension is not available.`);
+        }
+        // A fresh WatchAdapter has no in-memory address to confirm. There is
+        // no extension to revoke a watch session, so re-watch the persisted
+        // address (which re-validates the StrKey) before checking it.
+        if (savedProvider === 'watch') {
+          await (adapter as WatchAdapter).watch(savedAddress);
         }
         const currentKey = await adapter.getPublicKey();
 
@@ -232,12 +247,15 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   // the adapter that actually signs.
   const capabilities = getWalletCapabilities(activeProvider);
 
+  const readOnly = capabilities?.readOnly ?? false;
+
   return (
     <WalletContext.Provider
       value={{
         activeAddress,
         activeProvider,
         capabilities,
+        readOnly,
         isConnected: !!activeAddress,
         isConnecting,
         isRestoring,

@@ -42,12 +42,16 @@ vi.mock('@ledgerhq/hw-app-str', () => ({
   },
 }));
 
+/** A valid Stellar account address used by the watch-address tests. */
+const WATCH_ADDRESS = 'GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H';
+
 // Helper component to access useWallet hooks in tests
 function TestComponent() {
   const {
     activeAddress,
     activeProvider,
     capabilities,
+    readOnly,
     isConnected,
     isConnecting,
     isRestoring,
@@ -69,6 +73,7 @@ function TestComponent() {
       <div data-testid="capabilities">
         {capabilities ? `${capabilities.wallet}:${capabilities.signAuthEntry}` : 'null'}
       </div>
+      <div data-testid="read-only">{readOnly ? 'true' : 'false'}</div>
       <div data-testid="connected">{isConnected ? 'true' : 'false'}</div>
       <div data-testid="connecting">{isConnecting ? 'true' : 'false'}</div>
       <div data-testid="restoring">{isRestoring ? 'true' : 'false'}</div>
@@ -77,6 +82,7 @@ function TestComponent() {
       <div data-testid="sign-error-name">{signErrorName}</div>
       <div data-testid="auth-result">{authResult}</div>
       <div data-testid="auth-error">{authError}</div>
+      <button onClick={() => connect('watch', WATCH_ADDRESS).catch(() => {})}>Watch Address</button>
       <button onClick={() => connect('freighter').catch(() => {})}>Connect Freighter</button>
       <button onClick={() => connect('albedo').catch(() => {})}>Connect Albedo</button>
       <button onClick={() => connect('rabe').catch(() => {})}>Connect Rabet</button>
@@ -177,6 +183,43 @@ describe('WalletProvider', () => {
     expect(screen.getByTestId('restoring').textContent).toBe('false');
   });
 
+  it('restores a watched address without an extension and marks the session read-only', async () => {
+    localStorage.setItem('stellar_starter_kit_wallet_provider', 'watch');
+    localStorage.setItem('stellar_starter_kit_wallet_address', WATCH_ADDRESS);
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('connected').textContent).toBe('true');
+    });
+
+    expect(screen.getByTestId('address').textContent).toBe(WATCH_ADDRESS);
+    expect(screen.getByTestId('provider').textContent).toBe('watch');
+    expect(screen.getByTestId('capabilities').textContent).toBe('watch:false');
+    expect(screen.getByTestId('read-only').textContent).toBe('true');
+    expect(screen.getByTestId('restoring').textContent).toBe('false');
+  });
+
+  it('clears a stored watch address that is no longer a valid StrKey', async () => {
+    localStorage.setItem('stellar_starter_kit_wallet_provider', 'watch');
+    localStorage.setItem('stellar_starter_kit_wallet_address', 'not-an-address');
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('connected').textContent).toBe('false');
+    });
+    expect(localStorage.getItem('stellar_starter_kit_wallet_address')).toBeNull();
+  });
+
   it('should clear the stored session when the extension is missing', async () => {
     vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: false });
 
@@ -260,6 +303,32 @@ describe('WalletProvider', () => {
     expect(screen.getByTestId('capabilities').textContent).toBe('freighter:true');
     expect(localStorage.getItem('stellar_starter_kit_wallet_provider')).toBe('freighter');
     expect(localStorage.getItem('stellar_starter_kit_wallet_address')).toBe('GB_FREIGHTER');
+  });
+
+  it('watches an address and refuses to sign through the provider', async () => {
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Watch Address').click();
+    });
+
+    expect(screen.getByTestId('address').textContent).toBe(WATCH_ADDRESS);
+    expect(screen.getByTestId('provider').textContent).toBe('watch');
+    expect(screen.getByTestId('read-only').textContent).toBe('true');
+    expect(screen.getByTestId('connected').textContent).toBe('true');
+
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+    // The provider normalizes adapter errors for the UI but keeps the
+    // adapter's clear message (and the original error on `cause`).
+    expect(screen.getByTestId('sign-error').textContent).toBe(
+      'Watch address does not support signTransaction.',
+    );
   });
 
   it('should connect to Albedo successfully', async () => {
