@@ -3,8 +3,11 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { Stream } from '@stellar-starter-kit/types';
 import StreamsDashboard from './page';
+import * as streamCsv from '../../lib/stream-csv';
 import * as hooks from '@stellar-starter-kit/hooks';
 import * as wallets from '@stellar-starter-kit/wallets';
+
+const mockActiveAddress = 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFDAGORAc3LM2T2NY2424';
 
 function fakeStream(id: string, address: string): Stream {
   return {
@@ -26,7 +29,7 @@ function fakeStream(id: string, address: string): Stream {
 // Mock dependencies
 vi.mock('@stellar-starter-kit/wallets', () => ({
   useWallet: vi.fn(() => ({
-    activeAddress: 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFDAGORAc3LM2T2NY2424',
+    activeAddress: mockActiveAddress,
     isConnected: true,
     isConnecting: false,
     connect: vi.fn(),
@@ -66,7 +69,7 @@ describe('StreamsDashboard Contract Configuration', () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
     vi.mocked(wallets.useWallet).mockReturnValue({
-      activeAddress: 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFDAGORAc3LM2T2NY2424',
+      activeAddress: mockActiveAddress,
       isConnected: true,
       isConnecting: false,
       connect: vi.fn(),
@@ -199,11 +202,98 @@ describe('StreamsDashboard Contract Configuration', () => {
   });
 });
 
+describe('StreamsDashboard Export CSV', () => {
+  const sampleStream: Stream = {
+    id: '101',
+    sender: mockActiveAddress,
+    recipient: 'GC2B262OCPB4IA7CBZ77GLL7CQK7747754S727772656372657424242',
+    token: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC',
+    totalAmount: '5000000000', // 500 XLM
+    withdrawn: '1000000000', // 100 XLM
+    startTime: 1700000000,
+    endTime: 1705000000,
+    cliffTime: 1701000000,
+    cancelled: false,
+    label: 'Q4 Payroll',
+    reference: 'PAY-101',
+  };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.mocked(wallets.useWallet).mockReturnValue({
+      activeAddress: mockActiveAddress,
+      isConnected: true,
+      isConnecting: false,
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      signTransaction: vi.fn(),
+    } as unknown as ReturnType<typeof wallets.useWallet>);
+    vi.mocked(hooks.useStreams).mockReturnValue({
+      streams: [],
+      loading: false,
+      loadingMore: false,
+      hasMore: false,
+      loadMore: vi.fn(),
+      error: null,
+      refresh: vi.fn(),
+    });
+  });
+
+  it('renders Export CSV button as disabled when there are no loaded streams', () => {
+    render(<StreamsDashboard initialStreams={[]} />);
+
+    const exportBtn = screen.getByRole('button', { name: /export csv/i });
+    expect(exportBtn).toBeDefined();
+    expect(exportBtn.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('enables Export CSV button when streams are loaded and triggers download on click', () => {
+    const downloadSpy = vi.spyOn(streamCsv, 'downloadCsv').mockImplementation(() => {});
+
+    render(<StreamsDashboard initialStreams={[sampleStream]} />);
+
+    const exportBtn = screen.getByRole('button', { name: /export csv/i });
+    expect(exportBtn.hasAttribute('disabled')).toBe(false);
+
+    fireEvent.click(exportBtn);
+
+    expect(downloadSpy).toHaveBeenCalledTimes(1);
+    const [filename, csvContent] = downloadSpy.mock.calls[0];
+
+    // Assert file name includes network and connected address
+    expect(filename).toContain('testnet');
+    expect(filename).toContain(mockActiveAddress);
+    expect(filename).toMatch(/^streams-testnet-GBRPY.*\.csv$/);
+
+    // Assert header row and data row
+    const lines = csvContent.split('\r\n');
+    expect(lines[0]).toBe(
+      'id,sender,recipient,token,totalAmountRaw,totalAmountFormatted,withdrawnRaw,withdrawnFormatted,startTime,endTime,cliffTime,cancelled,label,reference',
+    );
+
+    const dataCols = lines[1].split(',');
+    expect(dataCols[0]).toBe('101');
+    expect(dataCols[1]).toBe(mockActiveAddress);
+    expect(dataCols[4]).toBe('5000000000'); // raw stroops
+    expect(dataCols[5]).toBe('500'); // formatted amount
+    expect(dataCols[6]).toBe('1000000000'); // raw withdrawn
+    expect(dataCols[7]).toBe('100'); // formatted withdrawn
+  });
+
+  it('renders stream details in the table', () => {
+    render(<StreamsDashboard initialStreams={[sampleStream]} />);
+
+    expect(screen.getByText('#101')).toBeDefined();
+    expect(screen.getByText('500 XLM')).toBeDefined();
+    expect(screen.getByText('100 XLM')).toBeDefined();
+  });
+});
+
 describe('StreamsDashboard Pagination', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.mocked(wallets.useWallet).mockReturnValue({
-      activeAddress: 'GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFDAGORAc3LM2T2NY2424',
+      activeAddress: mockActiveAddress,
       isConnected: true,
       isConnecting: false,
       connect: vi.fn(),
