@@ -2,8 +2,6 @@ import { describe, vi } from 'vitest';
 import { HanaAdapter } from './hana';
 import { runAdapterConformanceSuite } from './conformance.test';
 
-const originalWindow = (globalThis as { window?: unknown }).window;
-
 runAdapterConformanceSuite({
   name: 'HanaAdapter',
   createAdapter: () => new HanaAdapter(),
