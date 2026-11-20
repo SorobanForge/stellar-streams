@@ -203,3 +203,4 @@ try {
 - [Contract Reference](../../docs/contracts.md)
 - [Deployments](../../docs/deployments.md)
 - [Development Guide](../../docs/development-guide.md)
+- [Testing Guide](../../docs/sdk-testing.md) — run a client against an injected fake transport, with no network
