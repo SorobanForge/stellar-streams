@@ -29,6 +29,8 @@ const rawStream = {
   label: '',
   reference: '',
   cancelled: false,
+  paused_at: null,
+  total_paused: 0n,
 };
 const rawConfig = { admin: 'GADMIN', treasury: 'GTREASURY', fee_bps: 100 };
 const rawEscrow = {
@@ -67,6 +69,8 @@ function makeStream(overrides: Partial<Stream> = {}): Stream {
     label: '',
     reference: '',
     cancelled: false,
+    pausedAt: null,
+    totalPaused: 0,
     ...overrides,
   };
 }
@@ -185,8 +189,32 @@ describe('domain normalizers', () => {
         label: '',
         reference: '',
         cancelled: false,
+        paused_at: null,
+        total_paused: 0n,
       }),
     ).toMatchObject({ id: '9007199254740993', totalAmount: '9007199254740993', startTime: 1 });
+  });
+
+  it('normalizes a running stream with pause fields set to not paused', () => {
+    expect(normalizeStream({ ...rawStream, paused_at: null, total_paused: 0n })).toMatchObject({
+      pausedAt: null,
+      totalPaused: 0,
+    });
+  });
+
+  it('normalizes a paused stream and its accumulated paused time', () => {
+    expect(normalizeStream({ ...rawStream, paused_at: 1_234n, total_paused: 56n })).toMatchObject({
+      pausedAt: 1_234,
+      totalPaused: 56,
+    });
+  });
+
+  it('treats a stream from a non-paused deployment (no pause fields) as not paused', () => {
+    const { paused_at: _p, total_paused: _t, ...legacy } = rawStream;
+    expect(normalizeStream(legacy as typeof rawStream)).toMatchObject({
+      pausedAt: null,
+      totalPaused: 0,
+    });
   });
 
   it('normalizes split field names and id', () => {
@@ -267,6 +295,8 @@ describe('contract response guards', () => {
   it.each([
     ['stream', isStream, { ...rawStream, recipient: undefined }],
     ['stream', isStream, { ...rawStream, cancelled: 'false' }],
+    ['stream', isStream, { ...rawStream, paused_at: 'now' }],
+    ['stream', isStream, { ...rawStream, total_paused: '0' }],
     ['config', isConfig, { ...rawConfig, fee_bps: '100' }],
     ['config', isConfig, { admin: 'GADMIN', fee_bps: 100 }],
     ['escrow', isEscrow, { ...rawEscrow, amount: '100' }],

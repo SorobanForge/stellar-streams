@@ -16,7 +16,7 @@
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsc --project tsconfig.build.json",
+    "build": "node init && tsc --project tsconfig.build.json",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/record-rpc-fixtures.ts --check && vitest run",
