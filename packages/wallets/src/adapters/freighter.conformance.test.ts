@@ -17,11 +17,11 @@ runAdapterConformanceSuite({
   name: 'FreighterAdapter',
   createAdapter: () => new FreighterAdapter(),
   setupAvailable: () => {
-    vi.mocked(isConnected).mockResolvedValue({ isConnected: true } as unknown as any);
-    vi.mocked(requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER' } as unknown as any);
+    vi.mocked(isConnected).mockResolvedValue({ isConnected: true, error: undefined });
+    vi.mocked(requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER', error: undefined });
   },
   setupUnavailable: () => {
-    vi.mocked(isConnected).mockResolvedValue({ isConnected: false } as unknown as any);
+    vi.mocked(isConnected).mockResolvedValue({ isConnected: false, error: undefined });
   },
   setupUserRejection: () => {
     vi.mocked(signTransaction).mockRejectedValue(new Error('User rejected'));
