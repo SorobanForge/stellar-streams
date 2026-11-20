@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { render, act, screen, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { WalletProvider, useWallet } from './WalletProvider';
 import * as freighter from '@stellar/freighter-api';
 import albedo from '@albedo-link/intent';
@@ -42,11 +42,25 @@ vi.mock('@ledgerhq/hw-app-str', () => ({
   },
 }));
 
+// The provider loads each adapter with `import()` the first time a provider is
+// used, so without this the first click in each test would spend its time on
+// Vitest's on-demand transform of that module rather than on the provider.
+beforeAll(async () => {
+  await Promise.all([
+    import('./adapters/freighter.js'),
+    import('./adapters/albedo.js'),
+    import('./adapters/rabe.js'),
+    import('./adapters/hana.js'),
+    import('./adapters/ledger.js'),
+  ]);
+});
+
 // Helper component to access useWallet hooks in tests
 function TestComponent() {
   const {
     activeAddress,
     activeProvider,
+    capabilities,
     isConnected,
     isConnecting,
     isRestoring,
@@ -65,6 +79,9 @@ function TestComponent() {
     <div>
       <div data-testid="address">{activeAddress || 'null'}</div>
       <div data-testid="provider">{activeProvider || 'null'}</div>
+      <div data-testid="capabilities">
+        {capabilities ? `${capabilities.wallet}:${capabilities.signAuthEntry}` : 'null'}
+      </div>
       <div data-testid="connected">{isConnected ? 'true' : 'false'}</div>
       <div data-testid="connecting">{isConnecting ? 'true' : 'false'}</div>
       <div data-testid="restoring">{isRestoring ? 'true' : 'false'}</div>
@@ -131,6 +148,7 @@ describe('WalletProvider', () => {
 
     expect(screen.getByTestId('address').textContent).toBe('null');
     expect(screen.getByTestId('provider').textContent).toBe('null');
+    expect(screen.getByTestId('capabilities').textContent).toBe('null');
     expect(screen.getByTestId('connected').textContent).toBe('false');
     expect(screen.getByTestId('restoring').textContent).toBe('false');
   });
@@ -252,6 +270,7 @@ describe('WalletProvider', () => {
     expect(screen.getByTestId('address').textContent).toBe('GB_FREIGHTER');
     expect(screen.getByTestId('provider').textContent).toBe('freighter');
     expect(screen.getByTestId('connected').textContent).toBe('true');
+    expect(screen.getByTestId('capabilities').textContent).toBe('freighter:true');
     expect(localStorage.getItem('stellar_starter_kit_wallet_provider')).toBe('freighter');
     expect(localStorage.getItem('stellar_starter_kit_wallet_address')).toBe('GB_FREIGHTER');
   });

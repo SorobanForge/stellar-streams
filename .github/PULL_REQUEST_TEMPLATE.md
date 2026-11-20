@@ -19,9 +19,12 @@ Please delete options that are not relevant.
 
 Please describe the tests that you ran to verify your changes. Provide instructions so we can reproduce. Please also list any relevant details for your test configuration.
 
+Every workflow job and the command that reproduces it locally is listed in the [CI checks reference](../docs/ci-checks.md).
+
 - [ ] Test A: Unit tests run via `pnpm test`
-- [ ] Test B: Lint check run via `pnpm lint`
-- [ ] Test C: Manual validation (describe steps)
+- [ ] Test B: Lint and formatting run via `pnpm lint` and `pnpm format:check`
+- [ ] Test C: Typecheck run via `pnpm typecheck`
+- [ ] Test D: Manual validation (describe steps)
 
 ## Checklist
 
@@ -32,5 +35,6 @@ Please describe the tests that you ran to verify your changes. Provide instructi
 - [ ] My changes generate no new warnings
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] New and existing unit tests pass locally with my changes
+- [ ] CI requirements from [docs/ci-checks.md](../docs/ci-checks.md) were reviewed (contracts, build, and the scan jobs included)
 - [ ] Any dependent changes have been merged and published in downstream modules
 - [ ] My commits follow the Conventional Commits specification

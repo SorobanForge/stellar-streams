@@ -52,7 +52,7 @@ const { hash } = await client.createStream({
   sender: walletAddress,
   recipient: recipientAddress,
   token: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC', // SAC or custom token
-  amount: '1000000000', // Smallest unit according to token decimals
+  amount: '1000000000', // Smallest unit according to token decimals (a bigint works too)
   startTime: now,
   endTime: now + 30 * 86_400,
   cliffTime: now + 7 * 86_400,
@@ -203,3 +203,4 @@ try {
 - [Contract Reference](../../docs/contracts.md)
 - [Deployments](../../docs/deployments.md)
 - [Development Guide](../../docs/development-guide.md)
+- [Testing Guide](../../docs/sdk-testing.md) — run a client against an injected fake transport, with no network
