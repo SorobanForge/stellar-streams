@@ -1,5 +1,5 @@
 import { describe, vi } from 'vitest';
-import { RabetAdapter } from './rabe';
+import { RabetAdapter } from './rabet';
 import { runAdapterConformanceSuite } from './conformance.test';
 
 runAdapterConformanceSuite({
