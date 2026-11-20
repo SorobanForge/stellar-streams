@@ -88,7 +88,7 @@ export function runAdapterConformanceSuite(factory: ConformanceAdapterFactory) {
           if (adapter.disconnect) {
             await adapter.disconnect();
             if (config?.disconnectSpy && typeof config.disconnectSpy === 'function') {
-              (config.disconnectSpy as any)();
+              (config.disconnectSpy as () => void)();
             }
           }
         });
