@@ -8,7 +8,7 @@ import {
 } from './adapter';
 import { FreighterAdapter } from './freighter';
 import { AlbedoAdapter } from './albedo';
-import { RabetAdapter } from './rabe';
+import { RabetAdapter } from './rabet';
 import { HanaAdapter } from './hana';
 import { LedgerAdapter } from './ledger';
 
@@ -48,7 +48,7 @@ describe('WalletAdapter interface', () => {
     const supporting = adapters
       .filter((adapter) => typeof adapter.disconnect === 'function')
       .map((adapter) => adapter.id);
-    expect(supporting).toEqual(['rabe', 'ledger']);
+    expect(supporting).toEqual(['rabet', 'ledger']);
   });
 
   it('exposes signAuthEntry only on adapters whose wallet API supports it', () => {
