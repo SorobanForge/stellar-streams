@@ -322,3 +322,122 @@ export function Alert({
     </div>
   );
 }
+
+export interface ModalProps extends Omit<
+  React.HTMLAttributes<HTMLDivElement>,
+  'title' | 'role' | 'aria-modal' | 'aria-labelledby'
+> {
+  /** Whether the dialog is visible. */
+  open: boolean;
+  /** Called with false when the user presses Escape. */
+  onOpenChange: (open: boolean) => void;
+  /** Required accessible name for the dialog. */
+  title: string;
+}
+
+/** Accessible modal dialog with focus trapping and trigger focus restoration. */
+export function Modal({ open, onOpenChange, title, children, className, ...props }: ModalProps) {
+  const dialogRef = React.useRef<HTMLDivElement>(null);
+  const onOpenChangeRef = React.useRef(onOpenChange);
+  const titleId = `modal-title-${React.useId()}`;
+
+  React.useEffect(() => {
+    onOpenChangeRef.current = onOpenChange;
+  }, [onOpenChange]);
+
+  React.useEffect(() => {
+    if (!open) return;
+
+    const activeDialog = dialogRef.current;
+    if (!activeDialog) return;
+    const dialog: HTMLDivElement = activeDialog;
+
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const getFocusableElements = () =>
+      Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'a[href], area[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [contenteditable="true"], [tabindex]',
+        ),
+      ).filter(
+        (element) =>
+          element.tabIndex >= 0 && !element.closest('[hidden], [inert], [aria-hidden="true"]'),
+      );
+    const focusFirstElement = () => (getFocusableElements()[0] ?? dialog).focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented) return;
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onOpenChangeRef.current(false);
+        return;
+      }
+
+      if (event.key !== 'Tab') return;
+
+      const focusableElements = getFocusableElements();
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+
+      if (!firstElement || !lastElement) {
+        event.preventDefault();
+        dialog.focus();
+      } else if (
+        event.shiftKey &&
+        (document.activeElement === firstElement || !dialog.contains(document.activeElement))
+      ) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (
+        !event.shiftKey &&
+        (document.activeElement === lastElement || !dialog.contains(document.activeElement))
+      ) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    }
+
+    function handleFocusIn(event: FocusEvent) {
+      if (event.target instanceof Node && !dialog.contains(event.target)) {
+        focusFirstElement();
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('focusin', handleFocusIn);
+    focusFirstElement();
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('focusin', handleFocusIn);
+      if (previouslyFocused?.isConnected) previouslyFocused.focus();
+    };
+  }, [open]);
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4">
+      <div
+        {...props}
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        className={cn(
+          'w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-200 shadow-2xl',
+          className,
+        )}
+      >
+        <h2 id={titleId} className="text-lg font-semibold text-white">
+          {title}
+        </h2>
+        <div className="mt-4">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+export const Dialog = Modal;
