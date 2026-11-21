@@ -6,6 +6,7 @@ import {
   Alert,
   Button,
   Card,
+  FormField,
   Modal,
   Input,
   ProgressBar,
@@ -50,6 +51,62 @@ describe('Input', () => {
     expect(screen.getByText('Must be a valid address.').textContent).toBe(
       'Must be a valid address.',
     );
+  });
+});
+
+describe('FormField', () => {
+  it('associates the label with the rendered input via htmlFor/id', () => {
+    render(
+      <FormField label="Email">
+        {(id) => <Input id={id} />}
+      </FormField>,
+    );
+
+    const input = screen.getByRole('textbox', { name: 'Email' });
+    expect(input.id).toBeTruthy();
+    expect(screen.getByText('Email').closest('label')?.htmlFor).toBe(input.id);
+  });
+
+  it('wires aria-describedby to the hint text', () => {
+    render(
+      <FormField label="Username" hint="Letters and numbers only.">
+        {(id, describedBy) => <Input id={id} aria-describedby={describedBy} />}
+      </FormField>,
+    );
+
+    const input = screen.getByRole('textbox', { name: 'Username' });
+    const hint = screen.getByText('Letters and numbers only.');
+    expect(input.getAttribute('aria-describedby')).toBe(hint.id);
+    expect(input.getAttribute('aria-describedby')).toBeTruthy();
+  });
+
+  it('wires aria-describedby to the error and announces it', () => {
+    render(
+      <FormField label="Amount" hint="In tokens." error="Amount is required.">
+        {(id, describedBy) => <Input id={id} aria-describedby={describedBy} aria-invalid />}
+      </FormField>,
+    );
+
+    const input = screen.getByRole('textbox', { name: 'Amount' });
+    const error = screen.getByText('Amount is required.');
+    expect(error.getAttribute('role')).toBe('alert');
+    const describedBy = input.getAttribute('aria-describedby') ?? '';
+    expect(describedBy.split(' ')).toContain(error.id);
+    expect(describedBy.split(' ')).toContain(screen.getByText('In tokens.').id);
+  });
+
+  it('works with a native select child', () => {
+    render(
+      <FormField label="Currency">
+        {(id, describedBy) => (
+          <select id={id} aria-describedby={describedBy}>
+            <option>USD</option>
+          </select>
+        )}
+      </FormField>,
+    );
+
+    expect(screen.getByRole('combobox', { name: 'Currency' })).toBeTruthy();
   });
 });
 
