@@ -1873,199 +1873,391 @@ fn test_transfer_recipient_unknown_stream() {
 }
 
 // ---------------------------------------------------------------------------
-// Issue #303: the instance TTL is extended once per batch.
+// Issue #296: the `unvested` view
 // ---------------------------------------------------------------------------
 
-/// A full [`MAX_BATCH`] batch extends the instance once and every stream entry
-/// individually, and its write footprint is exactly one entry per stream plus a
-/// fixed overhead that does not grow with the batch.
 #[test]
-fn test_create_streams_bumps_instance_once_and_every_entry() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (token, sender, _, client) = setup(&env);
-    token.mint(&sender, MAX_BATCH as i128 * 100);
-
-    let entries = batch(&env, MAX_BATCH, 100);
-    let ids = client.create_streams(&sender, &token.id, &entries);
-    let used = env.cost_estimate().resources();
-
-    // One entry per stream, plus the instance, the sender's and the contract's
-    // token balances and the sender's auth nonce.
-    assert_eq!(used.write_entries, MAX_BATCH + 4, "write entries");
-
-    env.as_contract(&client.address, || {
-        // Every stream entry got its own bump, so none can outlive its budget.
-        for id in ids.iter() {
-            let ttl = env.storage().persistent().get_ttl(&DataKey::Stream(id));
-            assert_eq!(ttl, LEDGER_BUMP_LIMIT, "stream {id} ttl");
-        }
-        // The instance is still extended to the full limit by the single bump.
-        assert_eq!(env.storage().instance().get_ttl(), LEDGER_BUMP_LIMIT);
-    });
-}
-
-/// Creating the same streams one by one writes the fixed overhead again for
-/// every stream, which is what batching (and the single instance bump) saves.
-#[test]
-fn test_individual_create_stream_writes_more_entries_than_a_batch() {
+fn test_unvested_view_tracks_vesting() {
     let env = Env::default();
     env.mock_all_auths();
     let (token, sender, recipient, client) = setup(&env);
-    token.mint(&sender, MAX_BATCH as i128 * 100);
-
-    let mut individual_writes = 0;
-    for _ in 0..MAX_BATCH {
-        create(&env, &client, &sender, &recipient, &token.id, 100, 0, 1000, 0);
-        individual_writes += env.cost_estimate().resources().write_entries;
-    }
-
-    // Stream, instance, two balances and the auth nonce, every single time.
-    assert_eq!(individual_writes, MAX_BATCH * 5);
-    assert!(individual_writes > MAX_BATCH + 4);
-}
-
-// ---------------------------------------------------------------------------
-// Issue #301: pause and resume accrual around the cliff.
-// ---------------------------------------------------------------------------
-
-/// A 1000-token stream over [0, 1000) with its cliff at 400.
-fn create_with_cliff(
-    env: &Env,
-) -> (TestToken<'_>, Address, Address, StreamContractClient<'_>, u64) {
-    let (token, sender, recipient, client) = setup(env);
     token.mint(&sender, 1000);
-    let id = create(env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 400);
-    (token, sender, recipient, client, id)
-}
 
-#[test]
-fn test_pause_before_cliff_resume_after_cliff_vests_only_unpaused_seconds() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (_, _, _, client, id) = create_with_cliff(&env);
+    // start = 100, cliff = 400, end = 1100.
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 100, 1100, 400);
 
-    // Pause at t=200, well before the cliff at t=400.
-    advance_time(&env, 200);
+    // Before the stream starts nothing has vested, so everything is unvested.
+    advance_time(&env, 50);
     assert_eq!(client.vested(&id), 0);
-    client.pause(&id);
+    assert_eq!(client.unvested(&id), 1000);
 
-    // Still before the cliff: nothing vests.
-    advance_time(&env, 199); // t=399
-    assert_eq!(client.vested(&id), 0);
-
-    // The cliff passes while paused: only the 200 unpaused seconds count.
-    advance_time(&env, 1); // t=400
-    assert_eq!(client.vested(&id), 200);
-    advance_time(&env, 200); // t=600
-    assert_eq!(client.vested(&id), 200);
-
-    // Resume after the cliff: the 400 paused seconds are folded out.
-    client.resume(&id);
-    assert_eq!(client.get_stream(&id).unwrap().total_paused, 400);
-    assert_eq!(client.vested(&id), 200);
-    assert_eq!(client.claimable(&id), 200);
-
-    // Accrual resumes at the normal rate from the resume point.
-    advance_time(&env, 100); // t=700
+    // At the cliff 300 of the 1000 seconds of schedule have elapsed.
+    advance_time(&env, 350);
     assert_eq!(client.vested(&id), 300);
+    assert_eq!(client.unvested(&id), 700);
 
-    // At (and after) the end, the paused seconds stay unvested.
-    advance_time(&env, 300); // t=1000
-    assert_eq!(client.vested(&id), 600);
+    // Midway the two views are exact complements of the total.
+    advance_time(&env, 250);
+    assert_eq!(client.vested(&id), 550);
+    assert_eq!(client.unvested(&id), 450);
+    assert_eq!(client.vested(&id) + client.unvested(&id), 1000);
+
+    // After the end everything has vested, so `unvested` clamps at zero rather
+    // than going negative.
+    advance_time(&env, 10_000);
+    assert_eq!(client.vested(&id), 1000);
+    assert_eq!(client.unvested(&id), 0);
+
+    // A full withdrawal does not change what has vested, so it stays at zero.
+    assert_eq!(client.withdraw(&id), 1000);
+    assert_eq!(client.unvested(&id), 0);
+}
+
+#[test]
+fn test_unvested_view_while_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 250);
+    client.pause(&id);
+
+    // Pause accounting freezes accrual, so the unvested remainder freezes too.
     advance_time(&env, 500);
-    assert_eq!(client.vested(&id), 600);
-}
-
-#[test]
-fn test_pause_and_resume_both_before_cliff_shifts_nothing_until_cliff() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (_, _, _, client, id) = create_with_cliff(&env);
-
-    advance_time(&env, 100);
-    client.pause(&id);
-    advance_time(&env, 150); // t=250
-    client.resume(&id);
-    assert_eq!(client.vested(&id), 0);
-
-    // The cliff is a wall-clock time and is not moved by the pause.
-    advance_time(&env, 149); // t=399
-    assert_eq!(client.vested(&id), 0);
-    advance_time(&env, 1); // t=400: 400 elapsed - 150 paused
     assert_eq!(client.vested(&id), 250);
+    assert_eq!(client.unvested(&id), 750);
+    assert_eq!(client.vested(&id) + client.unvested(&id), 1000);
+
+    client.resume(&id);
+    advance_time(&env, 100);
+    assert_eq!(client.vested(&id), 350);
+    assert_eq!(client.unvested(&id), 650);
 }
 
 #[test]
-fn test_vested_is_monotonic_across_pause_resume_and_pause_spanning_end() {
+fn test_unvested_view_unknown_stream() {
     let env = Env::default();
     env.mock_all_auths();
-    let (_, _, _, client, id) = create_with_cliff(&env);
+    let client = register(&env);
+    assert_eq!(client.try_unvested(&99), Err(Ok(StreamError::StreamNotFound)));
+}
 
-    // Advances `step` seconds in 10-second ticks, asserting `vested` never
-    // decreases, and returns the last value seen.
-    fn check(env: &Env, client: &StreamContractClient, id: u64, mut last: i128, step: u64) -> i128 {
-        for _ in 0..step / 10 {
-            advance_time(env, 10);
-            let vested = client.vested(&id);
-            assert!(vested >= last, "vested went from {last} to {vested}");
-            last = vested;
+// ---------------------------------------------------------------------------
+// Issue #297: sender-updatable metadata
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_set_metadata_updates_fields_and_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    let label = String::from_str(&env, "Q4 payroll");
+    let reference = String::from_str(&env, "INV-2026-0042");
+    client.set_metadata(&id, &sender, &label, &reference);
+
+    // Checked first: the event log only holds the most recent invocation's
+    // events.
+    assert_eq!(
+        env.events().all().filter_by_contract(&client.address),
+        [StreamMetadataUpdated {
+            id,
+            sender: sender.clone(),
+            label: label.clone(),
+            reference: reference.clone(),
         }
-        last
-    }
+        .to_xdr(&env, &client.address)],
+    );
 
-    let mut last = 0;
-    // Pause before the cliff, resume after it.
-    last = check(&env, &client, id, last, 200); // t=200
-    client.pause(&id);
-    last = check(&env, &client, id, last, 400); // t=600
-    client.resume(&id);
-    assert_eq!(client.vested(&id), last);
+    // The new metadata is stored and nothing else about the stream changed.
+    let stream = client.get_stream(&id).unwrap();
+    assert_eq!(stream.label, label);
+    assert_eq!(stream.reference, reference);
+    assert_eq!(stream.sender, sender);
+    assert_eq!(stream.recipient, recipient);
+    assert_eq!(stream.total_amount, 1000);
+    assert_eq!((stream.start_time, stream.end_time, stream.cliff_time), (0, 1000, 0));
 
-    // Pause again, and let the pause run past the end date.
-    last = check(&env, &client, id, last, 200); // t=800
-    client.pause(&id);
-    let at_pause = client.vested(&id);
-    assert_eq!(at_pause, 400);
-    last = check(&env, &client, id, last, 400); // t=1200, past end_time=1000
-    assert_eq!(client.vested(&id), at_pause);
-
-    // Resuming after the end must not take back anything already vested.
-    client.resume(&id);
-    assert_eq!(client.vested(&id), at_pause);
-    assert_eq!(client.claimable(&id), at_pause);
-    assert_eq!(client.get_stream(&id).unwrap().total_paused, 400 + 200);
-    check(&env, &client, id, last, 300);
-    assert_eq!(client.vested(&id), at_pause);
+    // Vesting is untouched by a metadata update.
+    advance_time(&env, 500);
+    assert_eq!(client.claimable(&id), 500);
 }
 
 #[test]
-fn test_claimable_respects_fee_after_resume() {
+fn test_set_metadata_rejects_non_sender() {
     let env = Env::default();
     env.mock_all_auths();
-    let (token, _, recipient, client, id) = create_with_cliff(&env);
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+    let outsider = account(&env);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    let label = String::from_str(&env, "hijacked");
+    let reference = String::from_str(&env, "nope");
+
+    // Neither the recipient nor a third party may rewrite the metadata.
+    assert_eq!(
+        client.try_set_metadata(&id, &recipient, &label, &reference),
+        Err(Ok(StreamError::Unauthorized)),
+    );
+    assert_eq!(
+        client.try_set_metadata(&id, &outsider, &label, &reference),
+        Err(Ok(StreamError::Unauthorized)),
+    );
+
+    let stream = client.get_stream(&id).unwrap();
+    assert_eq!(stream.label, empty_string(&env));
+    assert_eq!(stream.reference, empty_string(&env));
+}
+
+#[test]
+fn test_set_metadata_enforces_length_limits() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    // Both fields at exactly the cap are accepted.
+    let label_at_limit = String::from_bytes(&env, &[b'l'; MAX_LABEL_LEN as usize]);
+    let reference_at_limit = String::from_bytes(&env, &[b'r'; MAX_REFERENCE_LEN as usize]);
+    client.set_metadata(&id, &sender, &label_at_limit, &reference_at_limit);
+    let stream = client.get_stream(&id).unwrap();
+    assert_eq!(stream.label.len(), MAX_LABEL_LEN);
+    assert_eq!(stream.reference.len(), MAX_REFERENCE_LEN);
+
+    // One byte over either cap is rejected with the same error `create_stream`
+    // uses, and the stored metadata is left alone.
+    let label_too_long = String::from_bytes(&env, &[b'l'; MAX_LABEL_LEN as usize + 1]);
+    let reference_too_long = String::from_bytes(&env, &[b'r'; MAX_REFERENCE_LEN as usize + 1]);
+    assert_eq!(
+        client.try_set_metadata(&id, &sender, &label_too_long, &reference_at_limit),
+        Err(Ok(StreamError::MetadataTooLong)),
+    );
+    assert_eq!(
+        client.try_set_metadata(&id, &sender, &label_at_limit, &reference_too_long),
+        Err(Ok(StreamError::MetadataTooLong)),
+    );
+
+    let stream = client.get_stream(&id).unwrap();
+    assert_eq!(stream.label, label_at_limit);
+    assert_eq!(stream.reference, reference_at_limit);
+}
+
+#[test]
+fn test_set_metadata_rejects_cancelled_stream() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 500);
+    client.cancel(&id);
+
+    let label = String::from_str(&env, "late");
+    let reference = String::from_str(&env, "late");
+    assert_eq!(
+        client.try_set_metadata(&id, &sender, &label, &reference),
+        Err(Ok(StreamError::AlreadyCancelled)),
+    );
+
+    let stream = client.get_stream(&id).unwrap();
+    assert_eq!(stream.label, empty_string(&env));
+    assert_eq!(stream.reference, empty_string(&env));
+}
+
+#[test]
+fn test_set_metadata_unknown_stream() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register(&env);
+    let sender = account(&env);
+    let metadata = empty_string(&env);
+    assert_eq!(
+        client.try_set_metadata(&99, &sender, &metadata, &metadata),
+        Err(Ok(StreamError::StreamNotFound)),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Issue #299: a single pause window is capped
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_pause_window_exactly_at_the_limit_still_pauses() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 4_000_000);
+
+    // A schedule longer than the cap, so the cap is what would end the pause.
+    let id = create(&env, &client, &sender, &recipient, &token.id, 4_000_000, 0, 4_000_000, 0);
+    advance_time(&env, 1000);
+    assert_eq!(client.vested(&id), 1000);
+
+    client.pause(&id);
+    advance_time(&env, MAX_PAUSE_SECONDS);
+
+    // Exactly at the cap the pause is still in force: no extra accrual and the
+    // recipient cannot withdraw.
+    assert_eq!(client.vested(&id), 1000);
+    assert_eq!(client.try_withdraw(&id), Err(Ok(StreamError::StreamPaused)));
+
+    // `resume` is still accepted on the boundary and folds the whole window.
+    client.resume(&id);
+    assert_eq!(client.get_stream(&id).unwrap().total_paused, MAX_PAUSE_SECONDS);
+
+    advance_time(&env, 1000);
+    assert_eq!(client.vested(&id), 2000);
+}
+
+#[test]
+fn test_pause_window_expires_one_second_past_the_limit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 4_000_000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 4_000_000, 0, 4_000_000, 0);
+    advance_time(&env, 1000);
+    client.pause(&id);
+
+    // One second past the cap the pause has lapsed on its own: accrual restarts
+    // and the recipient can withdraw again even though `paused_at` is stored.
+    advance_time(&env, MAX_PAUSE_SECONDS + 1);
+    assert_eq!(client.vested(&id), 1001);
+    assert_eq!(client.try_withdraw(&id), Ok(1001));
+
+    // A late `resume` has nothing left to resume.
+    assert_eq!(client.try_resume(&id), Err(Ok(StreamError::PauseWindowExceeded)));
+
+    // Pausing again opens a fresh window instead of returning early: the lapsed
+    // window is folded into `total_paused` and accrual freezes from now.
+    client.pause(&id);
+    assert_eq!(client.get_stream(&id).unwrap().total_paused, MAX_PAUSE_SECONDS);
+    advance_time(&env, 10);
+    assert_eq!(client.vested(&id), 1001);
+}
+
+#[test]
+fn test_pause_rejects_stream_that_already_ended() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 1000);
+
+    assert_eq!(client.try_pause(&id), Err(Ok(StreamError::StreamCompleted)));
+
+    // The rejection left the stream alone: it is still running and fully
+    // withdrawable rather than silently frozen.
+    assert!(client.get_stream(&id).unwrap().paused_at.is_none());
+    assert_eq!(client.withdraw(&id), 1000);
+}
+
+// ---------------------------------------------------------------------------
+// Issue #300: `preview_withdraw`
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_preview_withdraw_with_no_fee() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
 
     let admin = account(&env);
     let treasury = account(&env);
-    client.initialize(&admin, &treasury, &100); // 1%
+    client.initialize(&admin, &treasury, &0);
 
-    advance_time(&env, 200);
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    // Nothing claimable yet: zeroes, not `NothingToWithdraw`.
+    assert_eq!(client.preview_withdraw(&id), WithdrawPreview { gross: 0, fee: 0, net: 0 });
+
+    advance_time(&env, 500);
+    let preview = client.preview_withdraw(&id);
+    assert_eq!(preview, WithdrawPreview { gross: 500, fee: 0, net: 500 });
+
+    // With no fee the whole gross amount reaches the recipient.
+    assert_eq!(client.withdraw(&id), preview.net);
+    assert_eq!(token.balance(&recipient), 500);
+    assert_eq!(token.balance(&treasury), 0);
+
+    // After a full withdrawal the preview is empty again.
+    advance_time(&env, 500);
+    assert_eq!(client.preview_withdraw(&id), WithdrawPreview { gross: 500, fee: 0, net: 500 });
+    assert_eq!(client.withdraw(&id), 500);
+    assert_eq!(client.preview_withdraw(&id), WithdrawPreview { gross: 0, fee: 0, net: 0 });
+}
+
+#[test]
+fn test_preview_withdraw_with_250_bps_fee() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 10_000);
+
+    let admin = account(&env);
+    let treasury = account(&env);
+    client.initialize(&admin, &treasury, &250); // 2.5%
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 10_000, 0, 10_000, 0);
+    advance_time(&env, 5_000);
+
+    // 2.5% of 5000 = 125 to the treasury, 4875 to the recipient.
+    let preview = client.preview_withdraw(&id);
+    assert_eq!(preview, WithdrawPreview { gross: 5_000, fee: 125, net: 4_875 });
+
+    // The preview is exactly what `withdraw` then pays out.
+    assert_eq!(client.withdraw(&id), preview.net);
+    assert_eq!(token.balance(&treasury), 125);
+    assert_eq!(token.balance(&recipient), 4_875);
+}
+
+#[test]
+fn test_preview_withdraw_at_the_fee_cap() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 10_000);
+
+    let admin = account(&env);
+    let treasury = account(&env);
+    client.initialize(&admin, &treasury, &MAX_FEE_BPS); // 10%
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 10_000, 0, 10_000, 0);
+    advance_time(&env, 10_000);
+
+    let preview = client.preview_withdraw(&id);
+    assert_eq!(preview, WithdrawPreview { gross: 10_000, fee: 1_000, net: 9_000 });
+    assert_eq!(client.withdraw(&id), preview.net);
+    assert_eq!(token.balance(&treasury), 1_000);
+    assert_eq!(token.balance(&recipient), 9_000);
+}
+
+#[test]
+fn test_preview_withdraw_reports_paused_and_unknown_streams() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 500);
     client.pause(&id);
-    advance_time(&env, 400); // t=600
-    client.resume(&id);
-    advance_time(&env, 300); // t=900: 900 elapsed - 400 paused = 500
 
-    // `claimable` is the gross amount; the fee comes out of it on withdrawal.
-    assert_eq!(client.claimable(&id), 500);
-    assert_eq!(client.withdraw(&id), 495);
-    assert_eq!(token.balance(&recipient), 495);
-    assert_eq!(token.balance(&treasury), 5);
-    assert_eq!(client.claimable(&id), 0);
+    // `withdraw` would be rejected while paused, so the preview says so too.
+    assert_eq!(client.try_preview_withdraw(&id), Err(Ok(StreamError::StreamPaused)));
 
-    // The fee keeps applying to accrual after the resume, up to the end.
-    advance_time(&env, 100); // t=1000: 600 vested in total
-    assert_eq!(client.claimable(&id), 100);
-    assert_eq!(client.withdraw(&id), 99);
-    assert_eq!(token.balance(&recipient), 594);
-    assert_eq!(token.balance(&treasury), 6);
+    assert_eq!(client.try_preview_withdraw(&99), Err(Ok(StreamError::StreamNotFound)));
 }

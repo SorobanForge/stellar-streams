@@ -13,6 +13,7 @@ import {
   Search,
   Wallet,
   Download,
+  Inbox,
 } from 'lucide-react';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
@@ -646,16 +647,24 @@ export function StreamsDashboard({
                   : 'Connect a wallet to view and export streams'}
               </p>
             </div>
-            <Button
-              type="button"
-              onClick={handleExportCsv}
-              disabled={loadedStreams.length === 0 || !isConnected}
-              variant="secondary"
-              className="inline-flex items-center gap-2"
-              aria-label="Export CSV"
-            >
-              <Download className="h-4 w-4" /> Export CSV
-            </Button>
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                href="/streams/my"
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-900 hover:text-white"
+              >
+                <Inbox className="h-4 w-4" aria-hidden="true" /> My streams
+              </Link>
+              <Button
+                type="button"
+                onClick={handleExportCsv}
+                disabled={loadedStreams.length === 0 || !isConnected}
+                variant="secondary"
+                className="inline-flex items-center gap-2"
+                aria-label="Export CSV"
+              >
+                <Download className="h-4 w-4" /> Export CSV
+              </Button>
+            </div>
           </div>
 
           {listingLoading && (
