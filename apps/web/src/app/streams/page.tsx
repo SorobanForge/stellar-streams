@@ -12,6 +12,8 @@ import {
   Ban,
   Search,
   Wallet,
+  Download,
+  Inbox,
 } from 'lucide-react';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
@@ -44,11 +46,13 @@ import {
 import type { EnvironmentConfig } from '@stellar-starter-kit/config';
 import { environmentConfig, environmentErrors } from '../../lib/environment';
 import ConfigurationError from '../../components/ConfigurationError';
+import { REPO_URL } from '../../lib/constants';
 import {
   getStreamDurationSeconds,
   getStreamCliffSeconds,
   validateStreamInput,
 } from '../../lib/stream-validation';
+import { downloadCsv, exportStreamsToCsv, getStreamsCsvFilename } from '../../lib/stream-csv';
 
 // framer-motion stays out of the initial route bundle; the banner only loads
 // when an error/success message is shown.
@@ -70,24 +74,53 @@ function streamTimeline(stream: Stream, nowSeconds: number): string {
   return `Ends ${formatRelativeTime(stream.endTime, nowSeconds)}`;
 }
 
+export interface StreamsDashboardProps {
+  contractId?: string;
+  initialStreams?: Stream[];
+  config?: EnvironmentConfig;
+}
+
 /**
  * Route entry point: validates the environment once, then renders the
  * dashboard. A failed validation is shown instead of mounting the page, so no
  * client is ever built from the Testnet defaults by accident.
  */
-export default function StreamsDashboardPage() {
-  const config = environmentConfig;
+export default function StreamsDashboardPage({
+  contractId,
+  initialStreams,
+  config: propConfig,
+}: StreamsDashboardProps = {}) {
+  const config = propConfig ?? environmentConfig;
   if (!config) {
     return <ConfigurationError errors={environmentErrors} />;
   }
-  return <StreamsDashboard config={config} />;
+  return (
+    <StreamsDashboard config={config} contractId={contractId} initialStreams={initialStreams} />
+  );
 }
 
-function StreamsDashboard({ config }: { config: EnvironmentConfig }) {
-  const { sorobanRpcUrl, networkPassphrase, streamContractId, tokenContractId, expertUrl } = config;
-  // An unset stream contract is a valid environment (nothing is deployed yet),
-  // so it gets the in-page "not configured" state rather than a config error.
-  const contractId = streamContractId ?? '';
+export function StreamsDashboard({
+  config,
+  contractId: overrideContractId,
+  initialStreams,
+}: {
+  config: EnvironmentConfig;
+  contractId?: string;
+  initialStreams?: Stream[];
+}) {
+  const {
+    sorobanRpcUrl,
+    networkPassphrase,
+    streamContractId,
+    tokenContractId,
+    expertUrl,
+    network,
+  } = config;
+  const activeContractId =
+    overrideContractId !== undefined
+      ? overrideContractId
+      : (process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID ?? streamContractId ?? '');
+  const isContractConfigured = activeContractId.length > 0;
 
   const { activeAddress, isConnected, isConnecting, connect, disconnect, signTransaction } =
     useWallet();
@@ -113,13 +146,13 @@ function StreamsDashboard({ config }: { config: EnvironmentConfig }) {
   const client = useMemo(
     () =>
       new StreamsClient({
-        contractId,
+        contractId: activeContractId,
         rpcUrl: sorobanRpcUrl,
         networkPassphrase,
         publicKey: activeAddress ?? undefined,
         signTransaction: async (xdr: string) => signTransaction(xdr),
       }),
-    [activeAddress, signTransaction, contractId, sorobanRpcUrl, networkPassphrase],
+    [activeAddress, signTransaction, activeContractId, sorobanRpcUrl, networkPassphrase],
   );
 
   const {
@@ -129,6 +162,15 @@ function StreamsDashboard({ config }: { config: EnvironmentConfig }) {
     hasMore,
     loadMore,
   } = useStreams(client, activeAddress);
+
+  const loadedStreams = initialStreams ?? listedStreams;
+
+  const handleExportCsv = useCallback(() => {
+    if (!loadedStreams.length || !activeAddress) return;
+    const csv = exportStreamsToCsv(loadedStreams);
+    const filename = getStreamsCsvFilename(network, activeAddress);
+    downloadCsv(filename, csv);
+  }, [loadedStreams, activeAddress, network]);
 
   const notify = useCallback((kind: 'success' | 'error', message: string) => {
     if (kind === 'success') {
@@ -225,8 +267,8 @@ function StreamsDashboard({ config }: { config: EnvironmentConfig }) {
       notify('error', 'Connect a wallet to create a stream.');
       return;
     }
-    if (!contractId) {
-      notify('error', 'No stream contract configured. Set the stream contract id in your env.');
+    if (!isContractConfigured) {
+      notify('error', 'No stream contract configured. Set NEXT_PUBLIC_STREAM_CONTRACT_ID.');
       return;
     }
 
@@ -300,14 +342,24 @@ function StreamsDashboard({ config }: { config: EnvironmentConfig }) {
           </p>
         </div>
 
-        {!contractId && (
+        {!isContractConfigured && (
           <div className="mb-8 flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-200">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
             <div>
               <p className="font-semibold">Stream contract not configured</p>
               <p className="mt-1 font-light text-amber-200/80">
-                Deploy the <code className="font-mono">stream</code> contract and set its id in{' '}
-                <code className="font-mono">apps/web/.env.local</code> to enable the dashboard.
+                Deploy the <code className="font-mono">stream</code> contract and set{' '}
+                <code className="font-mono">NEXT_PUBLIC_STREAM_CONTRACT_ID</code> to enable the
+                dashboard. See{' '}
+                <a
+                  href={`${REPO_URL}/blob/main/docs/development-guide.md`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium underline hover:text-amber-100"
+                >
+                  docs/development-guide.md
+                </a>{' '}
+                for deployment instructions.
               </p>
             </div>
           </div>
@@ -371,64 +423,83 @@ function StreamsDashboard({ config }: { config: EnvironmentConfig }) {
               New stream
             </h2>
 
-            <Input
-              label="Recipient"
-              value={recipient}
-              onChange={(e) => setRecipient(e.target.value)}
-              placeholder="G..."
-              aria-invalid={Boolean(formErrors.recipient)}
-              error={formErrors.recipient}
-            />
-
-            <Input
-              label="Token contract"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="C..."
-              aria-invalid={Boolean(formErrors.token)}
-              error={formErrors.token}
-            />
-
-            <div className="grid grid-cols-2 gap-4">
+            <fieldset disabled={!isContractConfigured} className="space-y-6">
               <Input
-                label="Amount"
+                label="Recipient"
+                value={recipient}
+                onChange={(e) => setRecipient(e.target.value)}
+                placeholder="G..."
+                aria-invalid={Boolean(formErrors.recipient)}
+                error={formErrors.recipient}
+                disabled={!isContractConfigured}
+              />
+
+              <Input
+                label="Token contract"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="C..."
+                aria-invalid={Boolean(formErrors.token)}
+                error={formErrors.token}
+                disabled={!isContractConfigured}
+              />
+
+              <div className="grid grid-cols-2 gap-4">
+                <Input
+                  label="Amount"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  aria-invalid={Boolean(formErrors.amount)}
+                  error={formErrors.amount}
+                  disabled={!isContractConfigured}
+                />
+                <Input
+                  label="Duration (days)"
+                  type="number"
+                  min="1"
+                  value={durationDays}
+                  onChange={(e) => setDurationDays(e.target.value)}
+                  aria-invalid={Boolean(formErrors.durationDays)}
+                  error={formErrors.durationDays}
+                  disabled={!isContractConfigured}
+                />
+              </div>
+
+              <Input
+                label="Cliff (days, 0 = none)"
                 type="number"
                 min="0"
-                step="any"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                aria-invalid={Boolean(formErrors.amount)}
-                error={formErrors.amount}
+                value={cliffDays}
+                onChange={(e) => setCliffDays(e.target.value)}
+                aria-invalid={Boolean(formErrors.cliffDays)}
+                error={formErrors.cliffDays}
+                disabled={!isContractConfigured}
               />
-              <Input
-                label="Duration (days)"
-                type="number"
-                min="1"
-                value={durationDays}
-                onChange={(e) => setDurationDays(e.target.value)}
-                aria-invalid={Boolean(formErrors.durationDays)}
-                error={formErrors.durationDays}
-              />
-            </div>
 
-            <Input
-              label="Cliff (days, 0 = none)"
-              type="number"
-              min="0"
-              value={cliffDays}
-              onChange={(e) => setCliffDays(e.target.value)}
-              aria-invalid={Boolean(formErrors.cliffDays)}
-              error={formErrors.cliffDays}
-            />
-
-            <Button
-              type="submit"
-              disabled={busy || !isConnected || !contractId || !isFormValid}
-              loading={busy}
-              className="w-full"
-            >
-              {busy ? 'Creating stream' : 'Create stream'}
-            </Button>
+              <div className="space-y-2">
+                <Button
+                  type="submit"
+                  disabled={busy || !isConnected || !isContractConfigured || !isFormValid}
+                  loading={busy}
+                  className="w-full"
+                >
+                  {!isContractConfigured
+                    ? 'Stream contract not configured'
+                    : busy
+                      ? 'Creating stream'
+                      : 'Create stream'}
+                </Button>
+                {!isContractConfigured && (
+                  <p className="text-center text-xs text-amber-300/80">
+                    Set <code className="font-mono">NEXT_PUBLIC_STREAM_CONTRACT_ID</code> to enable
+                    stream creation.
+                  </p>
+                )}
+              </div>
+            </fieldset>
           </form>
 
           {/* Inspect */}
@@ -551,7 +622,7 @@ function StreamsDashboard({ config }: { config: EnvironmentConfig }) {
                       <Ban className="h-3.5 w-3.5 text-rose-400" /> Cancel
                     </button>
                     <a
-                      href={`${expertUrl}/contract/${contractId}`}
+                      href={`${expertUrl}/contract/${activeContractId}`}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex items-center gap-1.5 px-2 py-2 text-[10px] text-slate-500 transition hover:text-white"
@@ -565,16 +636,34 @@ function StreamsDashboard({ config }: { config: EnvironmentConfig }) {
           </div>
         </div>
 
-        {/* Listed Streams & Pagination Section */}
+        {/* Listed Streams & Export Section */}
         <div className="mt-12 space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
               <h2 className="text-xl font-bold text-white">Streams</h2>
               <p className="mt-1 text-sm text-slate-400">
                 {isConnected
-                  ? `${listedStreams.length} stream${listedStreams.length === 1 ? '' : 's'} loaded`
-                  : 'Connect a wallet to view your streams'}
+                  ? `${loadedStreams.length} stream${loadedStreams.length === 1 ? '' : 's'} loaded`
+                  : 'Connect a wallet to view and export streams'}
               </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                href="/streams/my"
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-900 hover:text-white"
+              >
+                <Inbox className="h-4 w-4" aria-hidden="true" /> My streams
+              </Link>
+              <Button
+                type="button"
+                onClick={handleExportCsv}
+                disabled={loadedStreams.length === 0 || !isConnected}
+                variant="secondary"
+                className="inline-flex items-center gap-2"
+                aria-label="Export CSV"
+              >
+                <Download className="h-4 w-4" /> Export CSV
+              </Button>
             </div>
           </div>
 
@@ -585,13 +674,13 @@ function StreamsDashboard({ config }: { config: EnvironmentConfig }) {
             </div>
           )}
 
-          {!listingLoading && isConnected && listedStreams.length === 0 && (
+          {!listingLoading && isConnected && loadedStreams.length === 0 && (
             <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-8 text-center">
               <p className="text-sm text-slate-400">No streams found for this address.</p>
             </div>
           )}
 
-          {!listingLoading && listedStreams.length > 0 && (
+          {!listingLoading && loadedStreams.length > 0 && (
             <>
               <div className="overflow-x-auto rounded-2xl border border-slate-900 bg-slate-950/40">
                 <table className="w-full text-left font-mono text-xs">
@@ -606,7 +695,7 @@ function StreamsDashboard({ config }: { config: EnvironmentConfig }) {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-900 text-slate-300">
-                    {listedStreams.map((item) => (
+                    {loadedStreams.map((item) => (
                       <tr key={item.id} className="transition-colors hover:bg-slate-900/20">
                         <td className="px-4 py-3 font-semibold text-white">#{item.id}</td>
                         <td className="px-4 py-3">{formatAddress(item.recipient, 6)}</td>
