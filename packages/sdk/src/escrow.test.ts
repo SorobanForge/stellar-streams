@@ -108,31 +108,21 @@ describe('EscrowClient reads', () => {
     });
   });
 
-  it('decodes next_escrow_id for fresh deployment and later values', async () => {
-    const client = makeEscrowClient({ transport: rpc });
+  it('reads whether a milestone is released', async () => {
+    rpc.simulateTransaction.mockResolvedValue(simulationSuccess(xdr.ScVal.scvBool(true)));
 
-    // Fresh deployment value of 1n
-    rpc.simulateTransaction.mockResolvedValueOnce(
-      simulationSuccess(nativeToScVal(1n, { type: 'u64' })),
+    await expect(makeEscrowClient({ transport: rpc }).isMilestoneReleased(7, 2)).resolves.toBe(
+      true,
     );
-    await expect(client.nextEscrowId()).resolves.toBe(1n);
 
-    // Later value
-    rpc.simulateTransaction.mockResolvedValueOnce(
-      simulationSuccess(nativeToScVal(42n, { type: 'u64' })),
-    );
-    await expect(client.nextEscrowId()).resolves.toBe(42n);
-
-    // Large bigint beyond JS safe integer
-    rpc.simulateTransaction.mockResolvedValueOnce(
-      simulationSuccess(nativeToScVal(9_007_199_254_740_993n, { type: 'u64' })),
-    );
-    await expect(client.nextEscrowId()).resolves.toBe(9_007_199_254_740_993n);
-
-    expect(invokedCall(rpc.simulateTransaction.mock.calls[0]![0])).toEqual({
+    const tx = rpc.simulateTransaction.mock.calls[0]![0];
+    expect(invokedCall(tx)).toEqual({
       contractId: CONTRACT_ID,
-      method: 'next_escrow_id',
+      method: 'is_milestone_released',
     });
+    const args = callArgs(tx);
+    expect(scValToNative(args[0]!)).toBe(7n);
+    expect(scValToNative(args[1]!)).toBe(2);
   });
 });
 
@@ -215,6 +205,44 @@ describe('EscrowClient writes', () => {
       expect(Address.fromScVal(args[1]!).toString()).toBe(ARBITER);
     },
   );
+
+  it('releases one milestone using the contract argument order', async () => {
+    await expect(
+      makeEscrowClient({ transport: rpc }).releaseMilestone({
+        id: 7,
+        index: 2,
+        caller: ARBITER,
+      }),
+    ).resolves.toEqual({ hash: 'abc123' });
+
+    const tx = rpc.prepareTransaction.mock.calls[0]![0];
+    expect(invokedCall(tx)).toEqual({
+      contractId: CONTRACT_ID,
+      method: 'release_milestone',
+    });
+    const args = callArgs(tx);
+    expect(scValToNative(args[0]!)).toBe(7n);
+    expect(scValToNative(args[1]!)).toBe(2);
+    expect(Address.fromScVal(args[2]!).toString()).toBe(ARBITER);
+  });
+
+  it.each([
+    [12, 'MILESTONE_ALREADY_RELEASED'],
+    [11, 'MILESTONE_INDEX_OUT_OF_RANGE'],
+  ] as const)('maps milestone release contract error #%i to %s', async (contractCode, code) => {
+    rpc.simulateTransaction.mockResolvedValue(
+      simulationError(`HostError: Error(Contract, #${contractCode})`),
+    );
+
+    const error = (await makeEscrowClient({ transport: rpc })
+      .releaseMilestone({ id: 7, index: contractCode === 11 ? 9 : 0, caller: ARBITER })
+      .catch((e: unknown) => e)) as EscrowError;
+
+    expect(error).toBeInstanceOf(EscrowError);
+    expect(error.code).toBe(code);
+    expect(error.contractCode).toBe(contractCode);
+    expect(rpc.sendTransaction).not.toHaveBeenCalled();
+  });
 
   it('maps a failed simulation through the escrow error codes', async () => {
     rpc.simulateTransaction.mockResolvedValue(simulationError('HostError: Error(Contract, #1)'));

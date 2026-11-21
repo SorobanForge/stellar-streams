@@ -25,7 +25,12 @@ import type {
   Stream,
   StreamConfig,
 } from '@stellar-starter-kit/types';
-import { normalizeConfig, normalizeEscrow, normalizeStream } from '@stellar-starter-kit/types';
+import {
+  ContractResponseError,
+  normalizeConfig,
+  normalizeEscrow,
+  normalizeStream,
+} from '@stellar-starter-kit/types';
 
 /**
  * A memo attached to a write transaction. Text memos are for exchange-style
@@ -56,6 +61,17 @@ export interface WriteOptions {
    * simulated CPU/memory cost, and any authorization entries the call needs.
    */
   simulateOnly?: boolean;
+}
+
+/**
+ * A stream's vested and claimable amounts read together, mirroring the
+ * contract's `VestingSummary` struct. Both are in the token's smallest unit.
+ */
+export interface VestingSummary {
+  /** Total amount vested so far, including what has already been withdrawn. */
+  vested: bigint;
+  /** Vested-but-unclaimed amount the recipient could withdraw right now. */
+  claimable: bigint;
 }
 
 /** The result of a submitted write. */
@@ -580,8 +596,9 @@ export type StreamErrorCode =
   | 'EMPTY_BATCH'
   | 'BATCH_TOO_LARGE'
   | 'BATCH_OVERFLOW'
-  | 'SAME_RECIPIENT'
-  | 'INVALID_STATE_TRANSITION';
+  | 'STREAM_PAUSED'
+  | 'NOT_PAUSED'
+  | 'SAME_RECIPIENT';
 
 /**
  * Stable identifiers for the splits contract's `SplitError` enum. They share
@@ -629,6 +646,8 @@ const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
   13: 'EMPTY_BATCH',
   14: 'BATCH_TOO_LARGE',
   15: 'BATCH_OVERFLOW',
+  16: 'STREAM_PAUSED',
+  17: 'NOT_PAUSED',
   20: 'SAME_RECIPIENT',
   22: 'SAME_RECIPIENT',
   23: 'INVALID_STATE_TRANSITION',
@@ -697,7 +716,12 @@ export type EscrowErrorCode =
   | 'INVALID_STATE_TRANSITION'
   | 'DEADLINE_NOT_REACHED'
   | 'DEADLINE_EXPIRED'
-  | 'ALREADY_FINALIZED';
+  | 'ALREADY_FINALIZED'
+  | 'INVALID_DEADLINE'
+  | 'MILESTONE_SCHEDULE_NOT_FOUND'
+  | 'MILESTONE_INDEX_OUT_OF_RANGE'
+  | 'MILESTONE_ALREADY_RELEASED'
+  | 'MILESTONE_SCHEDULE_INVALID';
 
 /** Events requested per `getEvents` call when {@link StreamsClient.listStreams} pages. */
 export const DEFAULT_EVENT_PAGE_SIZE = 100;
@@ -791,6 +815,11 @@ const ESCROW_ERROR_CODES: Record<number, EscrowErrorCode> = {
   6: 'DEADLINE_NOT_REACHED',
   7: 'DEADLINE_EXPIRED',
   8: 'ALREADY_FINALIZED',
+  9: 'INVALID_DEADLINE',
+  10: 'MILESTONE_SCHEDULE_NOT_FOUND',
+  11: 'MILESTONE_INDEX_OUT_OF_RANGE',
+  12: 'MILESTONE_ALREADY_RELEASED',
+  13: 'MILESTONE_SCHEDULE_INVALID',
 };
 
 /** The escrow counterpart of `StreamsError`; raised for `EscrowClient` failures. */
@@ -806,6 +835,16 @@ export class EscrowError extends Error {
     this.contractCode = contractCode;
     this.code = contractCode === undefined ? undefined : ESCROW_ERROR_CODES[contractCode];
   }
+}
+
+/** Arguments for {@link EscrowClient.releaseMilestone}. */
+export interface ReleaseMilestoneParams {
+  /** Escrow id as `bigint`, `number`, or decimal string. */
+  id: bigint | number | string;
+  /** Zero-based index of the milestone to release. */
+  index: number;
+  /** Payer or arbiter authorizing the release. */
+  caller: string;
 }
 
 /**
@@ -1414,6 +1453,26 @@ export class StreamsClient extends SorobanClient {
   }
 
   /**
+   * Read a stream's vested and claimable amounts in one call, from a single
+   * contract read — cheaper and consistent compared with calling
+   * {@link vested} and {@link claimable} back to back.
+   *
+   * @param id - Stream id as `bigint`, `number`, or decimal string.
+   * @returns `{ vested, claimable }` as `bigint` amounts in the token's smallest unit.
+   * @throws StreamsError when the simulation fails with a contract error, e.g.
+   *   `STREAM_NOT_FOUND` (contract error `#4`) for an unknown id.
+   * @example
+   * ```typescript
+   * const { vested, claimable } = await client.getVestingSummary(stream.id);
+   * console.log(`${claimable} of ${vested} vested is withdrawable now`);
+   * ```
+   */
+  async getVestingSummary(id: bigint | number | string): Promise<VestingSummary> {
+    const raw = await this.simulate('vesting_summary', nativeToScVal(BigInt(id), { type: 'u64' }));
+    return normalizeVestingSummary(raw);
+  }
+
+  /**
    * The id the next stream will receive.
    *
    * @returns The pending stream id, starting at `1n` on a fresh deployment.
@@ -1850,6 +1909,52 @@ export class StreamsClient extends SorobanClient {
   }
 
   /**
+   * Pause a stream so nothing further vests until it is resumed. Only the
+   * sender can authorize it; pausing an already-paused stream is a no-op.
+   *
+   * @param id - Stream id as `bigint`, `number`, or decimal string.
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns The hash of the confirmed transaction.
+   * @throws Error when no `publicKey` / `signTransaction` was configured.
+   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`
+   *   or `ALREADY_CANCELLED`.
+   * @example
+   * ```typescript
+   * await client.pause(stream.id);
+   * // withdraw() now fails with StreamsError code 'STREAM_PAUSED'.
+   * ```
+   */
+  async pause<O extends WriteOptions = WriteOptions>(
+    id: bigint | number | string,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    return this.invoke('pause', [nativeToScVal(BigInt(id), { type: 'u64' })], opts);
+  }
+
+  /**
+   * Resume a paused stream. Vesting picks up where it stopped; the time spent
+   * paused does not count toward the schedule. Only the sender can authorize
+   * it; resuming a stream that is not paused is a no-op.
+   *
+   * @param id - Stream id as `bigint`, `number`, or decimal string.
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns The hash of the confirmed transaction.
+   * @throws Error when no `publicKey` / `signTransaction` was configured.
+   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`
+   *   or `ALREADY_CANCELLED`.
+   * @example
+   * ```typescript
+   * await client.resume(stream.id);
+   * ```
+   */
+  async resume<O extends WriteOptions = WriteOptions>(
+    id: bigint | number | string,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    return this.invoke('resume', [nativeToScVal(BigInt(id), { type: 'u64' })], opts);
+  }
+
+  /**
    * Hand a stream off to `newRecipient`, e.g. after a key rotation or a sale.
    * The connected wallet signs as the contract's `caller` and must be the
    * stream's current recipient, otherwise the call fails with `UNAUTHORIZED`.
@@ -1904,6 +2009,15 @@ export class EscrowClient extends SorobanClient {
   async getEscrow(id: bigint | number | string): Promise<Escrow | null> {
     const raw = await this.simulate('get_escrow', nativeToScVal(BigInt(id), { type: 'u64' }));
     return raw === null ? null : normalizeEscrow(raw);
+  }
+
+  /** Whether the zero-based milestone index has already been released. */
+  async isMilestoneReleased(id: bigint | number | string, index: number): Promise<boolean> {
+    return (await this.simulate(
+      'is_milestone_released',
+      nativeToScVal(BigInt(id), { type: 'u64' }),
+      nativeToScVal(index, { type: 'u32' }),
+    )) as boolean;
   }
 
   /**
@@ -1968,6 +2082,22 @@ export class EscrowClient extends SorobanClient {
     );
   }
 
+  /** Release one zero-based milestone to the payee. `caller` must be the payer or arbiter. */
+  async releaseMilestone<O extends WriteOptions = WriteOptions>(
+    params: ReleaseMilestoneParams,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    return this.invoke(
+      'release_milestone',
+      [
+        nativeToScVal(BigInt(params.id), { type: 'u64' }),
+        nativeToScVal(params.index, { type: 'u32' }),
+        addressToScVal(params.caller),
+      ],
+      opts,
+    );
+  }
+
   /** Refund the funds to the payer. `caller` must be the payee or the arbiter. */
   async refundEscrow<O extends WriteOptions = WriteOptions>(
     id: bigint | number | string,
@@ -1996,6 +2126,21 @@ export class EscrowClient extends SorobanClient {
       opts,
     );
   }
+}
+
+/** Validate a decoded `VestingSummary` struct and keep both amounts as `bigint`. */
+function normalizeVestingSummary(raw: unknown): VestingSummary {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new ContractResponseError('vesting summary', '<response>', 'an object');
+  }
+  const { vested, claimable } = raw as Record<string, unknown>;
+  if (typeof vested !== 'bigint') {
+    throw new ContractResponseError('vesting summary', 'vested', 'a bigint');
+  }
+  if (typeof claimable !== 'bigint') {
+    throw new ContractResponseError('vesting summary', 'claimable', 'a bigint');
+  }
+  return { vested, claimable };
 }
 
 /** The configured endpoints, primary first, without duplicates or blanks. */
