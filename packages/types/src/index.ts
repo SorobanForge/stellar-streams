@@ -37,6 +37,10 @@ export interface Stream {
   /** Optional external reference (invoice or grant id); empty when none was set. */
   reference: string;
   cancelled: boolean;
+  /** Ledger timestamp at which the stream was paused, or `null` when it is not paused. */
+  pausedAt: number | null;
+  /** Cumulative seconds the stream has spent paused. */
+  totalPaused: number;
 }
 
 /** Raw values returned by the Soroban `stream` contract. */
@@ -53,6 +57,8 @@ export interface RawStream {
   label: string;
   reference: string;
   cancelled: boolean;
+  paused_at: bigint | null;
+  total_paused: bigint;
 }
 
 /** Error raised when a decoded contract response does not match its expected shape. */
@@ -89,7 +95,9 @@ export function isStream(value: unknown): value is RawStream {
     typeof value.cliff_time === 'bigint' &&
     typeof value.label === 'string' &&
     typeof value.reference === 'string' &&
-    typeof value.cancelled === 'boolean'
+    typeof value.cancelled === 'boolean' &&
+    (value.paused_at === null || typeof value.paused_at === 'bigint') &&
+    typeof value.total_paused === 'bigint'
   );
 }
 
@@ -107,6 +115,8 @@ function assertStream(value: unknown): asserts value is RawStream {
     ['label', (v) => typeof v === 'string', 'a string'],
     ['reference', (v) => typeof v === 'string', 'a string'],
     ['cancelled', (v) => typeof v === 'boolean', 'a boolean'],
+    ['paused_at', (v) => v === null || typeof v === 'bigint', 'a bigint or null'],
+    ['total_paused', (v) => typeof v === 'bigint', 'a bigint'],
   ];
   if (!isRecord(value)) throw new ContractResponseError('stream', '<response>', 'an object');
   for (const [field, check, expected] of fields) {
@@ -130,6 +140,8 @@ export function normalizeStream(raw: unknown): Stream {
     label: raw.label,
     reference: raw.reference,
     cancelled: raw.cancelled,
+    pausedAt: raw.paused_at === null ? null : Number(raw.paused_at),
+    totalPaused: Number(raw.total_paused),
   };
 }
 
@@ -374,11 +386,19 @@ function assertEscrow(value: unknown): asserts value is RawEscrow {
   }
 }
 
-/** Convert a generated snake_case escrow result into the domain shape. */
+const ESCROW_STATUSES: readonly EscrowStatus[] = [
+  'created',
+  'funded',
+  'released',
+  'refunded',
+  'cancelled',
+];
+
+/** Convert a generated snake_case escrow result into the domain shape after validating it. */
 export function normalizeEscrow(raw: unknown): Escrow {
   assertEscrow(raw);
-  const status = ESCROW_STATUSES[Number(raw.status)];
-  if (!status) throw new Error(`Unknown escrow status index: ${raw.status}`);
+  const status = ESCROW_STATUSES[raw.status];
+  if (status === undefined) throw new ContractResponseError('escrow', 'status', 'a known status');
   return {
     id: raw.id.toString(),
     payer: raw.payer,
@@ -391,74 +411,41 @@ export function normalizeEscrow(raw: unknown): Escrow {
   };
 }
 
-const ESCROW_STATUSES: readonly EscrowStatus[] = [
-  'created',
-  'funded',
-  'released',
-  'refunded',
-  'cancelled',
-];
-
-/** A single tranche of an escrow's milestone schedule. */
+/** A single escrow milestone and whether it has been released. */
 export interface EscrowMilestone {
   index: number;
-  /** Milestone amount in the token's smallest unit. */
   amount: bigint;
   released: boolean;
 }
 
-/** The full milestone schedule attached to an escrow. */
+/** A milestone schedule with the total amount already released. */
 export interface EscrowSchedule {
   milestones: EscrowMilestone[];
-  /** Sum of the amounts already released. */
   releasedAmount: bigint;
 }
 
-/**
- * Check that the `get_milestones` amounts and the `is_milestone_released` flags
- * describe the same schedule.
- */
+/** Check that milestone amounts and release flags are parallel arrays. */
 export function isEscrowSchedule(amounts: unknown, released: unknown): boolean {
   return (
     Array.isArray(amounts) &&
-    amounts.every((amount) => typeof amount === 'bigint') &&
     Array.isArray(released) &&
-    released.every((flag) => typeof flag === 'boolean') &&
-    amounts.length === released.length
+    amounts.length === released.length &&
+    amounts.every((amount) => typeof amount === 'bigint') &&
+    released.every((flag) => typeof flag === 'boolean')
   );
 }
 
-/**
- * Assert that the milestone amounts and released flags line up, so a partial
- * response never produces a silently inconsistent domain schedule.
- */
-export function assertEscrowSchedule(
-  amounts: unknown,
-  released: unknown,
-): asserts amounts is readonly bigint[] {
-  if (!Array.isArray(amounts) || !amounts.every((amount) => typeof amount === 'bigint')) {
-    throw new ContractResponseError('escrow', 'milestones', 'an array of bigint amounts');
-  }
-  if (!Array.isArray(released) || !released.every((flag) => typeof flag === 'boolean')) {
-    throw new ContractResponseError('escrow', 'released', 'an array of booleans');
-  }
-  if (amounts.length !== released.length) {
-    throw new ContractResponseError(
-      'escrow',
-      'milestones',
-      'the same number of amounts and released flags',
-    );
-  }
-}
-
-/** Convert raw milestone amounts and released flags into the domain schedule. */
+/** Convert parallel milestone arrays into a schedule with the released total. */
 export function normalizeEscrowSchedule(amounts: unknown, released: unknown): EscrowSchedule {
-  assertEscrowSchedule(amounts, released);
-  const flags = released as boolean[];
-  const milestones: EscrowMilestone[] = amounts.map((amount, index) => ({
+  if (!isEscrowSchedule(amounts, released)) {
+    throw new ContractResponseError('escrow', 'milestones', 'parallel bigint and boolean arrays');
+  }
+  const amountList = amounts as bigint[];
+  const releasedList = released as boolean[];
+  const milestones = amountList.map((amount, index) => ({
     index,
     amount,
-    released: flags[index],
+    released: releasedList[index] as boolean,
   }));
   const releasedAmount = milestones.reduce(
     (total, milestone) => (milestone.released ? total + milestone.amount : total),
@@ -467,18 +454,14 @@ export function normalizeEscrowSchedule(amounts: unknown, released: unknown): Es
   return { milestones, releasedAmount };
 }
 
-/**
- * Inputs for `create_escrow`. `id` is chosen by the caller (the escrow
- * contract does not allocate ids), and `amount` is a decimal string in the
- * token's smallest unit — scale it by the token's own `decimals()`, which is
- * 7 for XLM and SACs but not for every token.
- */
-export interface CreateEscrowParams {
-  id: string;
-  payer: string;
-  payee: string;
-  arbiter: string;
-  token: string;
-  amount: string;
-  deadline: string;
+/** Raw values returned by the Soroban `splits` contract's share configuration. */
+export function normalizeSplitConfig(raw: unknown): SplitConfig {
+  if (!isRecord(raw)) throw new ContractResponseError('splitConfig', '<response>', 'an object');
+  if (typeof raw.admin !== 'string') {
+    throw new ContractResponseError('splitConfig', 'admin', 'a string');
+  }
+  if (!isInteger(raw.total_shares)) {
+    throw new ContractResponseError('splitConfig', 'total_shares', 'an integer');
+  }
+  return { admin: raw.admin, totalShares: raw.total_shares };
 }
