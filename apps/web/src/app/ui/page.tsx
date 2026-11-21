@@ -3,7 +3,9 @@
 import React, { useState } from 'react';
 import {
   AlertCircle,
+  Check,
   CheckCircle2,
+  Copy,
   Droplets,
   ExternalLink,
   Info,
@@ -103,6 +105,32 @@ function GallerySection({
       <p className="mt-1 text-xs font-light text-slate-500">{description}</p>
       <div className="mt-6">{children}</div>
     </section>
+  );
+}
+
+const sampleContractAddress = 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
+
+function CopyValue({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  React.useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(value).catch(() => undefined);
+        setCopied(true);
+      }}
+      className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/50 px-2.5 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-900 hover:text-white focus-visible:ring-2 focus-visible:ring-cyan-400/70 focus-visible:outline-none"
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? 'Copied' : 'Copy address'}
+    </button>
   );
 }
 
@@ -347,6 +375,41 @@ export default function UiGallery() {
               </span>
               <span className="flex items-center gap-2 text-sm text-slate-400">
                 <span className="h-2 w-2 rounded-full bg-rose-500" /> Wallet not connected
+              </span>
+            </Row>
+          </GallerySection>
+
+          {/* -------------------------------------------------- Overlays */}
+          <GallerySection
+            title="Tooltip & popover"
+            description="Reveal and copy the full value behind a truncated contract address. The tooltip opens on hover or keyboard focus; the popover closes on Escape or an outside click."
+          >
+            <Row label="Tooltip">
+              <Tooltip content={sampleContractAddress} className="font-mono text-sm text-cyan-300">
+                {formatAddress(sampleContractAddress, 6)}
+              </Tooltip>
+              <span className="text-xs text-slate-500">Hover or Tab to the value.</span>
+            </Row>
+            <div className="border-t border-slate-900" />
+            <Row label="Popover">
+              <Popover label="Contract address" trigger="Show full address" align="start">
+                <p className="font-mono text-xs leading-relaxed break-all text-slate-200">
+                  {sampleContractAddress}
+                </p>
+                <CopyValue value={sampleContractAddress} />
+              </Popover>
+              <span className="text-xs text-slate-500">Escape or click outside to dismiss.</span>
+            </Row>
+            <div className="border-t border-slate-900" />
+            <Row label="Edge clamping">
+              <Popover label="Contract address" trigger="Open at edge" align="end" className="w-80">
+                <p className="font-mono text-xs leading-relaxed break-all text-slate-200">
+                  {sampleContractAddress}
+                </p>
+                <CopyValue value={sampleContractAddress} />
+              </Popover>
+              <span className="text-xs text-slate-500">
+                Clamped horizontally and vertically, so it stays on screen.
               </span>
             </Row>
           </GallerySection>
