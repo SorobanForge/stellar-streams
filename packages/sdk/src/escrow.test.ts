@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Address, Keypair, scValToNative, xdr } from '@stellar/stellar-sdk';
+import { Address, Keypair, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
 import type { EscrowStatus } from '@stellar-starter-kit/types';
 import { EscrowError } from './index';
