@@ -714,7 +714,12 @@ export type EscrowErrorCode =
   | 'INVALID_STATE_TRANSITION'
   | 'DEADLINE_NOT_REACHED'
   | 'DEADLINE_EXPIRED'
-  | 'ALREADY_FINALIZED';
+  | 'ALREADY_FINALIZED'
+  | 'INVALID_DEADLINE'
+  | 'MILESTONE_SCHEDULE_NOT_FOUND'
+  | 'MILESTONE_INDEX_OUT_OF_RANGE'
+  | 'MILESTONE_ALREADY_RELEASED'
+  | 'MILESTONE_SCHEDULE_INVALID';
 
 /** Events requested per `getEvents` call when {@link StreamsClient.listStreams} pages. */
 export const DEFAULT_EVENT_PAGE_SIZE = 100;
@@ -808,6 +813,11 @@ const ESCROW_ERROR_CODES: Record<number, EscrowErrorCode> = {
   6: 'DEADLINE_NOT_REACHED',
   7: 'DEADLINE_EXPIRED',
   8: 'ALREADY_FINALIZED',
+  9: 'INVALID_DEADLINE',
+  10: 'MILESTONE_SCHEDULE_NOT_FOUND',
+  11: 'MILESTONE_INDEX_OUT_OF_RANGE',
+  12: 'MILESTONE_ALREADY_RELEASED',
+  13: 'MILESTONE_SCHEDULE_INVALID',
 };
 
 /** The escrow counterpart of `StreamsError`; raised for `EscrowClient` failures. */
@@ -823,6 +833,16 @@ export class EscrowError extends Error {
     this.contractCode = contractCode;
     this.code = contractCode === undefined ? undefined : ESCROW_ERROR_CODES[contractCode];
   }
+}
+
+/** Arguments for {@link EscrowClient.releaseMilestone}. */
+export interface ReleaseMilestoneParams {
+  /** Escrow id as `bigint`, `number`, or decimal string. */
+  id: bigint | number | string;
+  /** Zero-based index of the milestone to release. */
+  index: number;
+  /** Payer or arbiter authorizing the release. */
+  caller: string;
 }
 
 /**
@@ -1989,6 +2009,15 @@ export class EscrowClient extends SorobanClient {
     return raw === null ? null : normalizeEscrow(raw);
   }
 
+  /** Whether the zero-based milestone index has already been released. */
+  async isMilestoneReleased(id: bigint | number | string, index: number): Promise<boolean> {
+    return (await this.simulate(
+      'is_milestone_released',
+      nativeToScVal(BigInt(id), { type: 'u64' }),
+      nativeToScVal(index, { type: 'u32' }),
+    )) as boolean;
+  }
+
   /**
    * Create an escrow in the `created` (unfunded) state. `payer` must sign for
    * it; `id` is chosen by the caller and must not exist yet.
@@ -2030,6 +2059,22 @@ export class EscrowClient extends SorobanClient {
     return this.invoke(
       'release_escrow',
       [nativeToScVal(BigInt(id), { type: 'u64' }), addressToScVal(caller)],
+      opts,
+    );
+  }
+
+  /** Release one zero-based milestone to the payee. `caller` must be the payer or arbiter. */
+  async releaseMilestone<O extends WriteOptions = WriteOptions>(
+    params: ReleaseMilestoneParams,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    return this.invoke(
+      'release_milestone',
+      [
+        nativeToScVal(BigInt(params.id), { type: 'u64' }),
+        nativeToScVal(params.index, { type: 'u32' }),
+        addressToScVal(params.caller),
+      ],
       opts,
     );
   }
