@@ -41,6 +41,7 @@ gh api \
       "Run TypeScript Checks",
       "Run Unit Tests",
       "Test Soroban Contracts",
+      "Check Generated Bindings",
       "Verify Production Build",
       "Check Documentation Links",
       "Scan PR for Malware",

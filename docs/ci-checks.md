@@ -1,6 +1,6 @@
 # CI Checks Reference
 
-Every pull request runs the same guard rails, and nine of them are **required
+Every pull request runs the same guard rails, and ten of them are **required
 status checks** on `main` ([`scripts/setup-branch-protection.sh`](../scripts/setup-branch-protection.sh)).
 This page lists each one, what it actually runs, how to reproduce it locally
 before pushing, and the known cases where a red check does not mean broken code.
@@ -10,17 +10,18 @@ and `pnpm install --frozen-lockfile` rather than a plain `pnpm install`.
 
 ## Required checks
 
-| Check                      | Workflow           | What it runs                                                                                        | Reproduce locally                          |
-| :------------------------- | :----------------- | :-------------------------------------------------------------------------------------------------- | :----------------------------------------- |
-| Lint Codebase              | `ci.yml`           | ESLint for every package and app, then Prettier's formatting check (Markdown included)              | `pnpm run lint && pnpm run format:check`   |
-| Run TypeScript Checks      | `ci.yml`           | `tsc --noEmit` for every workspace that has a `typecheck` script                                    | `pnpm run typecheck`                       |
-| Run Unit Tests             | `ci.yml`           | Vitest suites for the packages and `apps/web`, including the axe sweep of `/ui`                     | `pnpm run test`                            |
-| Test Soroban Contracts     | `ci.yml`           | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` (which regenerates `test_snapshots/`) | see [Contracts](#test-soroban-contracts)   |
-| Verify Production Build    | `ci.yml`           | `turbo run build`, then `scripts/check-package-entries.mjs`                                         | `pnpm run build && pnpm run test:exports`  |
-| Check Documentation Links  | `docs.yml`         | lychee over every committed Markdown file, including `#fragment` anchors                            | `lychee --config .lychee.toml './**/*.md'` |
-| Scan PR for Malware        | `malware-scan.yml` | ClamAV over `git ls-files`, with a current signature database                                       | see [Malware scan](#scan-pr-for-malware)   |
-| Check Supply-Chain Changes | `malware-scan.yml` | `scripts/check-pr-supply-chain.mjs` over the PR diff                                                | `node scripts/check-pr-supply-chain.mjs`   |
-| Scan PR for Secrets        | `secret-scan.yml`  | gitleaks on the PR's own commits, with `.gitleaks.toml`                                             | see [Secret scan](#scan-pr-for-secrets)    |
+| Check                      | Workflow           | What it runs                                                                                                                               | Reproduce locally                          |
+| :------------------------- | :----------------- | :----------------------------------------------------------------------------------------------------------------------------------------- | :----------------------------------------- |
+| Lint Codebase              | `ci.yml`           | ESLint for every package and app, then Prettier's formatting check (Markdown included)                                                     | `pnpm run lint && pnpm run format:check`   |
+| Run TypeScript Checks      | `ci.yml`           | `tsc --noEmit` for every workspace that has a `typecheck` script                                                                           | `pnpm run typecheck`                       |
+| Run Unit Tests             | `ci.yml`           | Vitest suites for the packages and `apps/web`                                                                                              | `pnpm run test`                            |
+| Test Soroban Contracts     | `ci.yml`           | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test` (which regenerates `test_snapshots/`)                                        | see [Contracts](#test-soroban-contracts)   |
+| Check Generated Bindings   | `ci.yml`           | Regenerates the committed contract clients with a pinned Stellar CLI and fails on any diff (skipped when no contract-related files change) | `pnpm run generate:bindings`               |
+| Verify Production Build    | `ci.yml`           | `turbo run build`, then `scripts/check-package-entries.mjs`                                                                                | `pnpm run build && pnpm run test:exports`  |
+| Check Documentation Links  | `docs.yml`         | lychee over every committed Markdown file, including `#fragment` anchors                                                                   | `lychee --config .lychee.toml './**/*.md'` |
+| Scan PR for Malware        | `malware-scan.yml` | ClamAV over `git ls-files`, with a current signature database                                                                              | see [Malware scan](#scan-pr-for-malware)   |
+| Check Supply-Chain Changes | `malware-scan.yml` | `scripts/check-pr-supply-chain.mjs` over the PR diff                                                                                       | `node scripts/check-pr-supply-chain.mjs`   |
+| Scan PR for Secrets        | `secret-scan.yml`  | gitleaks on the PR's own commits, with `.gitleaks.toml`                                                                                    | see [Secret scan](#scan-pr-for-secrets)    |
 
 The job names in the **Check** column are the exact status-check contexts. A
 renamed workflow job silently drops out of branch protection until
@@ -127,6 +128,37 @@ git status --short contracts/*/test_snapshots
 An empty output means the committed snapshots match what the tests generate. See
 the [development guide](development-guide.md#test-snapshots) for stale and
 orphaned snapshots.
+
+### Check Generated Bindings
+
+The committed clients under `packages/contracts/src/generated/` must match the
+contract source; otherwise the shipped bindings disagree with the deployed WASM.
+When a PR changes `contracts/`, the generated bindings, or the binding
+generator, this job:
+
+1. installs the pinned Stellar CLI (`STELLAR_CLI_VERSION` in `ci.yml`),
+2. runs `pnpm generate:bindings`, which builds the WASM and regenerates all
+   three clients,
+3. stages `packages/contracts/src/generated/` and fails with a `Stale generated
+bindings` annotation listing the changed files if regeneration produced a
+   diff.
+
+On PRs that touch nothing contract-related the job is reported as **skipped**
+instead of paying for a multi-minute Rust build; a skipped required check does
+not block the merge.
+
+Reproduce locally with the [Stellar CLI](https://github.com/stellar/stellar-cli/releases)
+on your `PATH`:
+
+```bash
+pnpm generate:bindings
+git status --short packages/contracts/src/generated
+```
+
+A non-empty status means the bindings are stale: commit the regenerated files
+with the contract change. CI pins the CLI version because each generated
+`package.json` embeds the CLI's own `@stellar/stellar-sdk` version, so
+regenerating with a different version adds diff noise unrelated to the contract.
 
 ### Verify Production Build
 
