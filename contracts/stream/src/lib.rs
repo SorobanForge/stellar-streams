@@ -45,6 +45,12 @@ pub const MAX_PAUSE_SECONDS: u64 = 2_592_000;
 /// and leaves room for [`StreamCreated`] to grow without silently pushing a
 /// maximum batch over a network limit. Larger payroll runs are submitted as
 /// multiple batches.
+///
+/// A full batch writes `MAX_BATCH + 4` ledger entries in total: one per stream,
+/// plus the contract instance (whose TTL is extended once per call, see issue
+/// #303), the sender's and the contract's token balances, and the sender's
+/// auth nonce. The same 14 streams created by individual `create_stream` calls
+/// write 5 entries each (70 in total).
 pub const MAX_BATCH: u32 = 14;
 
 #[contracterror]
@@ -433,6 +439,13 @@ impl StreamContract {
         // Reserve the whole id range once, mirroring `create_stream`'s
         // allocate-then-store order.
         env.storage().instance().set(&DataKey::NextId, &after_batch);
+        // Issue #303: the instance is one ledger entry no matter how many
+        // streams the batch creates, so its TTL is extended exactly once per
+        // call, here, rather than once per stream inside the loop below. Every
+        // stream entry still gets its own `extend_ttl`, so no entry outlives its
+        // budget. Bumping the instance per stream cost a `MAX_BATCH` batch
+        // ~80k extra CPU instructions for no change in footprint;
+        // `test_create_streams_bumps_instance_once_and_every_entry` pins this.
         env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
 
         let token_client = token::Client::new(&env, &token);
