@@ -41,9 +41,9 @@ export function Footer() {
           </div>
 
           <div>
-            <h5 className="mb-4 text-xs font-bold tracking-wide text-slate-500 uppercase">
+            <h2 className="mb-4 text-xs font-bold tracking-wide text-slate-500 uppercase">
               Resources
-            </h5>
+            </h2>
             <ul className="space-y-2 text-sm text-slate-400">
               <li>
                 <a
@@ -79,9 +79,9 @@ export function Footer() {
           </div>
 
           <div>
-            <h5 className="mb-4 text-xs font-bold tracking-wide text-slate-500 uppercase">
+            <h2 className="mb-4 text-xs font-bold tracking-wide text-slate-500 uppercase">
               Developers
-            </h5>
+            </h2>
             <ul className="space-y-2 text-sm text-slate-400">
               <li>
                 <a
