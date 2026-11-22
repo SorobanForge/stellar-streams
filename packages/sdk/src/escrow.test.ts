@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Address, Keypair, scValToNative, xdr } from '@stellar/stellar-sdk';
+import { Address, Keypair, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
 import type { EscrowStatus } from '@stellar-starter-kit/types';
 import { EscrowError } from './index';
@@ -124,6 +124,62 @@ describe('EscrowClient reads', () => {
     expect(scValToNative(args[0]!)).toBe(7n);
     expect(scValToNative(args[1]!)).toBe(2);
   });
+
+  it('returns null when an escrow has no milestone schedule', async () => {
+    rpc.simulateTransaction.mockResolvedValue(simulationSuccess(xdr.ScVal.scvVoid()));
+
+    await expect(makeEscrowClient({ transport: rpc }).getMilestones(7)).resolves.toBeNull();
+    expect(invokedCall(rpc.simulateTransaction.mock.calls[0]![0])).toEqual({
+      contractId: CONTRACT_ID,
+      method: 'get_milestones',
+    });
+  });
+
+  it('reads a milestone schedule together with its released flags', async () => {
+    rpc.simulateTransaction.mockImplementation(
+      async (tx: Parameters<ReturnType<typeof fakeTransport>['simulateTransaction']>[0]) => {
+        const { method } = invokedCall(tx);
+        if (method === 'get_milestones') {
+          return simulationSuccess(nativeToScVal([400n, 600n], { type: ['i128'] }));
+        }
+        expect(method).toBe('is_milestone_released');
+        const index = scValToNative(callArgs(tx)[1]!);
+        return simulationSuccess(xdr.ScVal.scvBool(index === 0));
+      },
+    );
+
+    await expect(makeEscrowClient({ transport: rpc }).getMilestones(7)).resolves.toEqual({
+      milestones: [
+        { index: 0, amount: 400n, released: true },
+        { index: 1, amount: 600n, released: false },
+      ],
+      releasedAmount: 400n,
+    });
+  });
+
+  it('rejects a milestone schedule that is not a bigint array', async () => {
+    rpc.simulateTransaction.mockResolvedValue(
+      simulationSuccess(xdr.ScVal.scvString('not-a-schedule')),
+    );
+
+    await expect(makeEscrowClient({ transport: rpc }).getMilestones(7)).rejects.toThrow(
+      'field "milestones" must be an array of bigint amounts',
+    );
+  });
+
+  it('reads the remaining amount of an escrow', async () => {
+    rpc.simulateTransaction.mockResolvedValue(
+      simulationSuccess(nativeToScVal(600n, { type: 'i128' })),
+    );
+
+    await expect(makeEscrowClient({ transport: rpc }).getRemainingAmount(7)).resolves.toBe(600n);
+    const tx = rpc.simulateTransaction.mock.calls[0]![0];
+    expect(invokedCall(tx)).toEqual({
+      contractId: CONTRACT_ID,
+      method: 'remaining_amount',
+    });
+    expect(scValToNative(callArgs(tx)[0]!)).toBe(7n);
+  });
 });
 
 describe('EscrowClient writes', () => {
@@ -153,7 +209,6 @@ describe('EscrowClient writes', () => {
 
   it('passes every create_escrow parameter through in contract order', async () => {
     await makeEscrowClient({ transport: rpc }).createEscrow({
-      id: '5',
       payer: PUBLIC_KEY,
       payee: PAYEE,
       arbiter: ARBITER,
@@ -163,19 +218,17 @@ describe('EscrowClient writes', () => {
     });
 
     const args = callArgs(rpc.prepareTransaction.mock.calls[0]![0]);
-    expect(scValToNative(args[0]!)).toBe(5n);
-    expect(Address.fromScVal(args[1]!).toString()).toBe(PUBLIC_KEY);
-    expect(Address.fromScVal(args[2]!).toString()).toBe(PAYEE);
-    expect(Address.fromScVal(args[3]!).toString()).toBe(ARBITER);
-    expect(Address.fromScVal(args[4]!).toString()).toBe(CONTRACT_ID);
-    expect(scValToNative(args[5]!)).toBe(500_000_000n);
-    expect(scValToNative(args[6]!)).toBe(2_000n);
+    expect(Address.fromScVal(args[0]!).toString()).toBe(PUBLIC_KEY);
+    expect(Address.fromScVal(args[1]!).toString()).toBe(PAYEE);
+    expect(Address.fromScVal(args[2]!).toString()).toBe(ARBITER);
+    expect(Address.fromScVal(args[3]!).toString()).toBe(CONTRACT_ID);
+    expect(scValToNative(args[4]!)).toBe(500_000_000n);
+    expect(scValToNative(args[5]!)).toBe(2_000n);
   });
 
   it('rejects a token that is not a contract id before touching the RPC', async () => {
     await expect(
       makeEscrowClient({ transport: rpc }).createEscrow({
-        id: '5',
         payer: PUBLIC_KEY,
         payee: PAYEE,
         arbiter: ARBITER,
@@ -205,6 +258,75 @@ describe('EscrowClient writes', () => {
       expect(Address.fromScVal(args[1]!).toString()).toBe(ARBITER);
     },
   );
+
+  it('creates an escrow and attaches its milestone schedule in one flow', async () => {
+    rpc.getTransaction.mockResolvedValue(
+      txResponse(GetTransactionStatus.SUCCESS, {
+        returnValue: nativeToScVal(42n, { type: 'u64' }),
+      }),
+    );
+
+    await expect(
+      makeEscrowClient({ transport: rpc }).createMilestoneEscrow({
+        payer: PUBLIC_KEY,
+        payee: PAYEE,
+        arbiter: ARBITER,
+        token: CONTRACT_ID,
+        amount: '1000',
+        deadline: '2000',
+        milestoneAmounts: [400n, 600n],
+      }),
+    ).resolves.toEqual({ id: 42n, hash: 'abc123' });
+
+    expect(rpc.prepareTransaction.mock.calls.map(([tx]) => invokedCall(tx).method)).toEqual([
+      'create_escrow',
+      'set_milestones',
+    ]);
+    const scheduleArgs = callArgs(rpc.prepareTransaction.mock.calls[1]![0]);
+    expect(scValToNative(scheduleArgs[0]!)).toBe(42n);
+    expect(Address.fromScVal(scheduleArgs[1]!).toString()).toBe(PUBLIC_KEY);
+    expect(scValToNative(scheduleArgs[2]!)).toEqual([400n, 600n]);
+  });
+
+  it.each([
+    [[400n], 'at least two amounts are required'],
+    [[400n, 0n], 'every amount must be positive'],
+    [[400n, 700n], 'the amounts must sum to the escrow amount'],
+  ] as const)('rejects an invalid milestone schedule %#', async (milestoneAmounts, message) => {
+    await expect(
+      makeEscrowClient({ transport: rpc }).createMilestoneEscrow({
+        payer: PUBLIC_KEY,
+        payee: PAYEE,
+        arbiter: ARBITER,
+        token: CONTRACT_ID,
+        amount: '1000',
+        deadline: '2000',
+        milestoneAmounts,
+      }),
+    ).rejects.toThrow(message);
+
+    expect(rpc.calls()).toBe(0);
+  });
+
+  it('attaches a milestone schedule in contract argument order', async () => {
+    await expect(
+      makeEscrowClient({ transport: rpc }).setMilestones({
+        id: 7,
+        caller: PUBLIC_KEY,
+        amounts: [400n, 600n],
+      }),
+    ).resolves.toEqual({ hash: 'abc123' });
+
+    const tx = rpc.prepareTransaction.mock.calls[0]![0];
+    expect(invokedCall(tx)).toEqual({
+      contractId: CONTRACT_ID,
+      method: 'set_milestones',
+    });
+    const args = callArgs(tx);
+    expect(scValToNative(args[0]!)).toBe(7n);
+    expect(Address.fromScVal(args[1]!).toString()).toBe(PUBLIC_KEY);
+    expect(scValToNative(args[2]!)).toEqual([400n, 600n]);
+  });
 
   it('releases one milestone using the contract argument order', async () => {
     await expect(

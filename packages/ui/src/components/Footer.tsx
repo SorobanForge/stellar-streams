@@ -11,7 +11,7 @@ const NETWORK_LABEL = (process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? 'testnet').toU
 export function Footer() {
   return (
     <footer
-      className="relative z-10 border-t border-slate-900 bg-[#04040a] py-16"
+      className="border-border bg-background relative z-10 border-t py-16"
       aria-label="Footer"
     >
       <div className="mx-auto max-w-7xl px-6 lg:px-8">
@@ -21,18 +21,18 @@ export function Footer() {
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-tr from-purple-600 to-cyan-500 text-white">
                 <Logo size={16} />
               </div>
-              <span className="font-extrabold tracking-wider text-white">Stellar Streams</span>
+              <span className="text-foreground font-extrabold tracking-wider">Stellar Streams</span>
             </div>
-            <p className="max-w-sm text-sm leading-relaxed font-light text-slate-400">
+            <p className="text-muted-foreground max-w-sm text-sm leading-relaxed font-light">
               Open-source protocol for continuous payment streams, vesting schedules, and payment
               splits on Stellar and Soroban.
             </p>
-            <div className="mt-6 flex items-center gap-4 text-slate-500">
+            <div className="text-muted-foreground mt-6 flex items-center gap-4">
               <a
                 href={REPO_URL}
                 target="_blank"
                 rel="noreferrer"
-                className="transition-colors hover:text-white"
+                className="hover:text-foreground transition-colors"
                 aria-label="GitHub Repository"
               >
                 <Github className="h-5 w-5" />
@@ -41,16 +41,16 @@ export function Footer() {
           </div>
 
           <div>
-            <h5 className="mb-4 text-xs font-bold tracking-wide text-slate-500 uppercase">
+            <h5 className="text-muted-foreground mb-4 text-xs font-bold tracking-wide uppercase">
               Resources
             </h5>
-            <ul className="space-y-2 text-sm text-slate-400">
+            <ul className="text-muted-foreground space-y-2 text-sm">
               <li>
                 <a
                   href="https://stellar.org"
                   target="_blank"
                   rel="noreferrer"
-                  className="transition-colors hover:text-white"
+                  className="hover:text-foreground transition-colors"
                 >
                   Stellar Foundation
                 </a>
@@ -60,18 +60,18 @@ export function Footer() {
                   href="https://soroban.stellar.org"
                   target="_blank"
                   rel="noreferrer"
-                  className="transition-colors hover:text-white"
+                  className="hover:text-foreground transition-colors"
                 >
                   Soroban Docs
                 </a>
               </li>
               <li>
-                <a href="/docs" className="transition-colors hover:text-white">
+                <a href="/docs" className="hover:text-foreground transition-colors">
                   Documentation
                 </a>
               </li>
               <li>
-                <a href="/streams" className="transition-colors hover:text-white">
+                <a href="/streams" className="hover:text-foreground transition-colors">
                   Streams App
                 </a>
               </li>
@@ -79,16 +79,16 @@ export function Footer() {
           </div>
 
           <div>
-            <h5 className="mb-4 text-xs font-bold tracking-wide text-slate-500 uppercase">
+            <h5 className="text-muted-foreground mb-4 text-xs font-bold tracking-wide uppercase">
               Developers
             </h5>
-            <ul className="space-y-2 text-sm text-slate-400">
+            <ul className="text-muted-foreground space-y-2 text-sm">
               <li>
                 <a
                   href={`${REPO_URL}/blob/main/CONTRIBUTING.md`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="transition-colors hover:text-white"
+                  className="hover:text-foreground transition-colors"
                 >
                   Contributing
                 </a>
@@ -98,7 +98,7 @@ export function Footer() {
                   href={`${REPO_URL}/blob/main/SECURITY.md`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="transition-colors hover:text-white"
+                  className="hover:text-foreground transition-colors"
                 >
                   Security Policy
                 </a>
@@ -108,13 +108,13 @@ export function Footer() {
                   href={`${REPO_URL}/blob/main/LICENSE`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="transition-colors hover:text-white"
+                  className="hover:text-foreground transition-colors"
                 >
                   MIT License
                 </a>
               </li>
               <li>
-                <a href="/#roadmap" className="transition-colors hover:text-white">
+                <a href="/#roadmap" className="hover:text-foreground transition-colors">
                   Roadmap
                 </a>
               </li>
@@ -122,10 +122,10 @@ export function Footer() {
           </div>
         </div>
 
-        <div className="flex flex-col items-center justify-between gap-4 border-t border-slate-900 pt-8 text-xs text-slate-500 md:flex-row">
+        <div className="border-border text-muted-foreground flex flex-col items-center justify-between gap-4 border-t pt-8 text-xs md:flex-row">
           <div>&copy; {new Date().getFullYear()} Stellar Streams. MIT licensed.</div>
           <div className="flex items-center gap-2">
-            <span className="rounded border border-slate-800 px-2 py-0.5 font-mono text-[11px]">
+            <span className="border-border rounded border px-2 py-0.5 font-mono text-[11px]">
               {NETWORK_LABEL} · contract v{CONTRACT_VERSION}
             </span>
             <span>Maintained by SorobanForge and the community</span>

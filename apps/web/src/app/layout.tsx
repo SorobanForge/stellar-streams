@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { WalletProvider } from '@stellar-starter-kit/wallets';
+import { ThemeProvider } from '../components/theme/ThemeProvider';
+import { THEME_INIT_SCRIPT } from '../lib/theme';
 
 export const metadata: Metadata = {
   title: 'Stellar Streams',
@@ -14,9 +16,18 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    // The inline script sets `class` and `data-theme` on <html> before React
+    // hydrates, so the server markup cannot match that attribute — the
+    // mismatch is intentional and suppressed here.
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Must run before first paint to avoid a flash of the wrong theme. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="antialiased">
-        <WalletProvider>{children}</WalletProvider>
+        <ThemeProvider>
+          <WalletProvider>{children}</WalletProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

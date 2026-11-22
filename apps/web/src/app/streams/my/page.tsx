@@ -5,21 +5,14 @@ import Link from 'next/link';
 import { AlertCircle, ArrowLeft, Inbox, Loader2, RefreshCw, Wallet, Waves } from 'lucide-react';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { DEFAULT_EVENT_LOOKBACK_LEDGERS, StreamsClient } from '@stellar-starter-kit/sdk';
-import {
-  Alert,
-  Button,
-  Footer,
-  Header,
-  ProgressBar,
-  Skeleton,
-  StatusBadge,
-} from '@stellar-starter-kit/ui';
+import { Alert, Button, Footer, ProgressBar, Skeleton, StatusBadge } from '@stellar-starter-kit/ui';
 import { useStreams } from '@stellar-starter-kit/hooks';
 import { getStreamMetrics, type Stream } from '@stellar-starter-kit/types';
 import { formatAddress, formatBps, formatDuration } from '@stellar-starter-kit/utils';
 import type { EnvironmentConfig } from '@stellar-starter-kit/config';
 import { environmentConfig, environmentErrors } from '../../../lib/environment';
 import ConfigurationError from '../../../components/ConfigurationError';
+import { AppHeader } from '../../../components/AppHeader';
 import { REPO_URL } from '../../../lib/constants';
 
 /**
@@ -46,33 +39,38 @@ export function ReceivedStreamCard({ stream, now }: { stream: Stream; now: numbe
         : `${formatDuration(metrics.remainingSeconds)} left to vest.`;
 
   return (
-    <li className="rounded-2xl border border-slate-900 bg-slate-950/40 p-5">
+    <li className="border-border bg-card rounded-2xl border p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-mono text-sm font-bold text-white">Stream #{stream.id}</p>
-          <p className="mt-1 text-xs text-slate-500">
-            From <span className="font-mono text-slate-300">{formatAddress(stream.sender, 6)}</span>
+          <p className="text-foreground font-mono text-sm font-bold">Stream #{stream.id}</p>
+          <p className="text-muted-foreground mt-1 text-xs">
+            From{' '}
+            <span className="text-foreground/80 font-mono">{formatAddress(stream.sender, 6)}</span>
           </p>
-          {stream.label ? <p className="mt-1 text-sm text-slate-300">{stream.label}</p> : null}
+          {stream.label ? <p className="text-foreground/80 mt-1 text-sm">{stream.label}</p> : null}
         </div>
         <StatusBadge status={metrics.status} />
       </div>
 
       <div className="mt-4 space-y-2">
         <ProgressBar value={metrics.progressBps / 100} label="Vested" />
-        <div className="flex flex-wrap justify-between gap-2 text-[10px] text-slate-500">
+        <div className="text-muted-foreground flex flex-wrap justify-between gap-2 text-[10px]">
           <span>{formatBps(metrics.progressBps)} vested</span>
           <span>{timeline}</span>
         </div>
       </div>
 
-      <dl className="mt-4 grid grid-cols-2 gap-4 border-t border-slate-900 pt-4 text-xs">
+      <dl className="border-border mt-4 grid grid-cols-2 gap-4 border-t pt-4 text-xs">
         <div>
-          <dt className="text-[10px] tracking-wide text-slate-500 uppercase">Total (base units)</dt>
-          <dd className="mt-1 font-mono text-slate-300">{formatBaseUnits(stream.totalAmount)}</dd>
+          <dt className="text-muted-foreground text-[10px] tracking-wide uppercase">
+            Total (base units)
+          </dt>
+          <dd className="text-foreground/80 mt-1 font-mono">
+            {formatBaseUnits(stream.totalAmount)}
+          </dd>
         </div>
         <div>
-          <dt className="text-[10px] tracking-wide text-slate-500 uppercase">
+          <dt className="text-muted-foreground text-[10px] tracking-wide uppercase">
             Claimable now (base units)
           </dt>
           <dd className="mt-1 font-mono text-cyan-300">
@@ -80,12 +78,12 @@ export function ReceivedStreamCard({ stream, now }: { stream: Stream; now: numbe
           </dd>
         </div>
         <div>
-          <dt className="text-[10px] tracking-wide text-slate-500 uppercase">Withdrawn</dt>
-          <dd className="mt-1 font-mono text-slate-300">{formatBaseUnits(stream.withdrawn)}</dd>
+          <dt className="text-muted-foreground text-[10px] tracking-wide uppercase">Withdrawn</dt>
+          <dd className="text-foreground/80 mt-1 font-mono">{formatBaseUnits(stream.withdrawn)}</dd>
         </div>
         <div>
-          <dt className="text-[10px] tracking-wide text-slate-500 uppercase">Token</dt>
-          <dd className="mt-1 font-mono text-slate-400">{formatAddress(stream.token, 6)}</dd>
+          <dt className="text-muted-foreground text-[10px] tracking-wide uppercase">Token</dt>
+          <dd className="text-muted-foreground mt-1 font-mono">{formatAddress(stream.token, 6)}</dd>
         </div>
       </dl>
     </li>
@@ -159,12 +157,12 @@ export function MyStreams({ config }: { config: EnvironmentConfig }) {
   }, [connect]);
 
   return (
-    <div className="min-h-screen bg-[#06060c] text-slate-100 selection:bg-purple-500/30 selection:text-purple-200">
-      <Header />
+    <div className="bg-background text-foreground min-h-screen selection:bg-purple-500/30 selection:text-purple-200">
+      <AppHeader />
       <main className="relative z-10 mx-auto max-w-4xl px-6 pt-12 pb-24">
         <Link
           href="/streams"
-          className="inline-flex items-center gap-2 text-sm text-slate-400 transition-colors hover:text-white"
+          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-2 text-sm transition-colors"
         >
           <ArrowLeft className="h-4 w-4" /> Back to the dashboard
         </Link>
@@ -173,10 +171,10 @@ export function MyStreams({ config }: { config: EnvironmentConfig }) {
           <span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/20 bg-cyan-500/5 px-3 py-1 text-xs font-semibold tracking-wide text-cyan-300">
             <Inbox className="h-3.5 w-3.5" /> Recipient inbox
           </span>
-          <h1 className="mt-4 text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
+          <h1 className="text-foreground mt-4 text-4xl font-extrabold tracking-tight sm:text-5xl">
             My streams
           </h1>
-          <p className="mt-3 max-w-2xl text-lg font-light text-slate-400">
+          <p className="text-muted-foreground mt-3 max-w-2xl text-lg font-light">
             Streams sent to your connected wallet, discovered from the stream contract&apos;s{' '}
             <code className="font-mono text-cyan-300">created</code> events. No backend or indexer
             is involved: the scan reads the events a Soroban RPC node still retains (roughly the
@@ -185,26 +183,26 @@ export function MyStreams({ config }: { config: EnvironmentConfig }) {
           </p>
         </div>
 
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-900 bg-slate-950/40 px-6 py-4">
+        <div className="border-border bg-card mb-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border px-6 py-4">
           <div className="flex items-center gap-2 text-sm">
             {isConnected ? (
               <>
                 <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
-                <span className="font-mono text-slate-300">
+                <span className="text-foreground/80 font-mono">
                   {formatAddress(activeAddress ?? '', 6)}
                 </span>
               </>
             ) : (
               <>
                 <span className="h-2 w-2 rounded-full bg-rose-500" />
-                <span className="text-slate-400">Wallet not connected</span>
+                <span className="text-muted-foreground">Wallet not connected</span>
               </>
             )}
           </div>
           {isConnected ? (
             <button
               onClick={disconnect}
-              className="rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-slate-900 hover:text-white"
+              className="border-border bg-card text-foreground hover:bg-secondary rounded-lg border px-4 py-2 text-xs font-semibold transition"
             >
               Disconnect
             </button>
@@ -251,16 +249,16 @@ export function MyStreams({ config }: { config: EnvironmentConfig }) {
             </div>
           </div>
         ) : !isConnected ? (
-          <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-8 text-center">
-            <Waves className="mx-auto h-8 w-8 text-slate-600" aria-hidden="true" />
-            <p className="mt-3 text-sm font-semibold text-slate-200">Connect your wallet</p>
-            <p className="mx-auto mt-1 max-w-md text-sm text-slate-400">
+          <div className="border-border bg-card rounded-2xl border p-8 text-center">
+            <Waves className="text-muted-foreground mx-auto h-8 w-8" aria-hidden="true" />
+            <p className="text-foreground mt-3 text-sm font-semibold">Connect your wallet</p>
+            <p className="text-muted-foreground mx-auto mt-1 max-w-md text-sm">
               The inbox is bound to the connected address: only streams where it is the recipient
               are shown, and nothing is requested until a wallet is connected.
             </p>
           </div>
         ) : loading ? (
-          <div className="space-y-3 rounded-2xl border border-slate-900 bg-slate-950/40 p-6">
+          <div className="border-border bg-card space-y-3 rounded-2xl border p-6">
             <span role="status" className="sr-only">
               Scanning recent ledgers for streams sent to you
             </span>
@@ -287,19 +285,19 @@ export function MyStreams({ config }: { config: EnvironmentConfig }) {
         ) : (
           <div className="space-y-4">
             <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="text-xl font-bold text-white">Received</h2>
-              <p className="text-sm text-slate-400">
+              <h2 className="text-foreground text-xl font-bold">Received</h2>
+              <p className="text-muted-foreground text-sm">
                 {receivedStreams.length} stream{receivedStreams.length === 1 ? '' : 's'} sent to you
               </p>
             </div>
 
             {receivedStreams.length === 0 ? (
-              <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-8 text-center">
-                <Inbox className="mx-auto h-8 w-8 text-slate-600" aria-hidden="true" />
-                <p className="mt-3 text-sm font-semibold text-slate-200">
+              <div className="border-border bg-card rounded-2xl border p-8 text-center">
+                <Inbox className="text-muted-foreground mx-auto h-8 w-8" aria-hidden="true" />
+                <p className="text-foreground mt-3 text-sm font-semibold">
                   No streams sent to this wallet in the scanned ledgers
                 </p>
-                <p className="mx-auto mt-1 max-w-md text-sm text-slate-400">
+                <p className="text-muted-foreground mx-auto mt-1 max-w-md text-sm">
                   {hasMore
                     ? 'The scan has more events to read. Load more to look further back in the node’s retained window.'
                     : 'Streams older than the node’s event window cannot be discovered without an indexer.'}
@@ -339,7 +337,7 @@ export function MyStreams({ config }: { config: EnvironmentConfig }) {
                     {loadingMore ? 'Loading more streams…' : 'Load more'}
                   </Button>
                 ) : (
-                  <p className="text-xs text-slate-500">
+                  <p className="text-muted-foreground text-xs">
                     End of list — all events in the scanned window have been read
                   </p>
                 )}

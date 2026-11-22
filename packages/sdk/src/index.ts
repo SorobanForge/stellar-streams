@@ -22,6 +22,7 @@ import type {
   CreateEscrowParams,
   CreateStreamParams,
   Escrow,
+  EscrowSchedule,
   Stream,
   StreamConfig,
 } from '@stellar-starter-kit/types';
@@ -29,6 +30,7 @@ import {
   ContractResponseError,
   normalizeConfig,
   normalizeEscrow,
+  normalizeEscrowSchedule,
   normalizeStream,
 } from '@stellar-starter-kit/types';
 
@@ -843,6 +845,32 @@ export interface ReleaseMilestoneParams {
   index: number;
   /** Payer or arbiter authorizing the release. */
   caller: string;
+}
+
+/** Arguments for {@link EscrowClient.createMilestoneEscrow}. */
+export interface CreateMilestoneEscrowParams extends CreateEscrowParams {
+  /** Milestone amounts in the token's smallest unit, in release order. */
+  milestoneAmounts: readonly bigint[];
+}
+
+/** The result of a confirmed {@link EscrowClient.createMilestoneEscrow} call. */
+export interface CreateMilestoneEscrowResult extends WriteResult {
+  /** Id the contract assigned to the new escrow. */
+  id: bigint;
+}
+
+/** Arguments for {@link EscrowClient.setMilestones}. */
+export interface SetMilestonesParams {
+  /** Escrow id as `bigint`, `number`, or decimal string. */
+  id: bigint | number | string;
+  /** Payer authorizing the schedule; the contract rejects any other caller. */
+  caller: string;
+  /**
+   * Milestone amounts in the token's smallest unit, in release order. The
+   * contract requires at least two positive entries that sum to the escrow
+   * amount.
+   */
+  amounts: readonly bigint[];
 }
 
 /**
@@ -2019,8 +2047,41 @@ export class EscrowClient extends SorobanClient {
   }
 
   /**
+   * The milestone schedule attached to an escrow, or `null` when the escrow
+   * has no schedule (and is released through the single `release_escrow`).
+   *
+   * The contract stores amounts and released flags separately, so this reads
+   * the schedule once and then every flag, and returns the validated domain
+   * shape from `normalizeEscrowSchedule`.
+   */
+  async getMilestones(id: bigint | number | string): Promise<EscrowSchedule | null> {
+    const raw = await this.simulate('get_milestones', nativeToScVal(BigInt(id), { type: 'u64' }));
+    if (raw === null) return null;
+    if (!Array.isArray(raw) || !raw.every((amount) => typeof amount === 'bigint')) {
+      throw new ContractResponseError('escrow', 'milestones', 'an array of bigint amounts');
+    }
+    const amounts = raw as bigint[];
+    const released = await Promise.all(
+      amounts.map((_, index) => this.isMilestoneReleased(id, index)),
+    );
+    return normalizeEscrowSchedule(amounts, released);
+  }
+
+  /**
+   * The amount still held for the payee: the sum of every unreleased
+   * milestone, or the full amount for an escrow without a schedule.
+   */
+  async getRemainingAmount(id: bigint | number | string): Promise<bigint> {
+    const raw = await this.simulate('remaining_amount', nativeToScVal(BigInt(id), { type: 'u64' }));
+    if (typeof raw !== 'bigint') {
+      throw new ContractResponseError('escrow', 'remaining_amount', 'a bigint');
+    }
+    return raw;
+  }
+
+  /**
    * Create an escrow in the `created` (unfunded) state. `payer` must sign for
-   * it; `id` is chosen by the caller and must not exist yet.
+   * it; the contract assigns and returns the new id.
    */
   async createEscrow<O extends WriteOptions = WriteOptions>(
     params: CreateEscrowParams,
@@ -2030,13 +2091,84 @@ export class EscrowClient extends SorobanClient {
     return this.invoke(
       'create_escrow',
       [
-        nativeToScVal(BigInt(params.id), { type: 'u64' }),
         addressToScVal(params.payer),
         addressToScVal(params.payee),
         addressToScVal(params.arbiter),
         addressToScVal(params.token),
         nativeToScVal(BigInt(params.amount), { type: 'i128' }),
         nativeToScVal(BigInt(params.deadline), { type: 'u64' }),
+      ],
+      opts,
+    );
+  }
+
+  /**
+   * Create an escrow and attach its milestone schedule in one flow.
+   *
+   * The contract assigns the escrow id and only returns it once the create
+   * transaction confirms, so the schedule has to be a second transaction. The
+   * payer signs both. When the second transaction fails, the escrow already
+   * exists without a schedule and the same payer can call
+   * {@link EscrowClient.setMilestones} to attach it later; the escrow has not
+   * been funded at this point, so no funds are at risk.
+   *
+   * `hash` is the hash of the `set_milestones` transaction — the one that makes
+   * the escrow usable as a milestone escrow.
+   */
+  async createMilestoneEscrow<O extends WriteOptions = WriteOptions>(
+    params: CreateMilestoneEscrowParams,
+    opts: O = {} as O,
+  ): Promise<CreateMilestoneEscrowResult | SimulationResult> {
+    if (params.milestoneAmounts.length < 2) {
+      throw new Error('Invalid milestone schedule: at least two amounts are required.');
+    }
+    const amounts = params.milestoneAmounts.map((amount) => BigInt(amount));
+    if (amounts.some((amount) => amount <= 0n)) {
+      throw new Error('Invalid milestone schedule: every amount must be positive.');
+    }
+    const total = amounts.reduce((sum, amount) => sum + amount, 0n);
+    if (total !== BigInt(params.amount)) {
+      throw new Error('Invalid milestone schedule: the amounts must sum to the escrow amount.');
+    }
+
+    const created = (await this.createEscrow(params, opts)) as unknown as {
+      hash: string;
+      returnValue?: xdr.ScVal;
+    };
+    // A simulation has no assigned id yet, so the schedule is not submitted.
+    if (opts.simulateOnly) return created as unknown as SimulationResult;
+    if (!created.returnValue) {
+      throw new Error(
+        `Transaction ${created.hash} confirmed without a return value, so the escrow id is unknown.`,
+      );
+    }
+    const id = scValToNative(created.returnValue) as bigint;
+    const scheduled = (await this.setMilestones(
+      { id, caller: params.payer, amounts },
+      opts,
+    )) as unknown as { hash: string };
+    return { id, hash: scheduled.hash };
+  }
+
+  /**
+   * Attach (or replace) the milestone schedule of an unfunded escrow. Only the
+   * payer may call this, and only while the escrow is in the `created` state;
+   * the contract requires at least two positive amounts that sum to the escrow
+   * amount.
+   */
+  async setMilestones<O extends WriteOptions = WriteOptions>(
+    params: SetMilestonesParams,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    return this.invoke(
+      'set_milestones',
+      [
+        nativeToScVal(BigInt(params.id), { type: 'u64' }),
+        addressToScVal(params.caller),
+        nativeToScVal(
+          params.amounts.map((amount) => BigInt(amount)),
+          { type: ['i128'] },
+        ),
       ],
       opts,
     );

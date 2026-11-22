@@ -13,7 +13,8 @@ import {
   TriangleAlert,
   Wallet,
 } from 'lucide-react';
-import { cn, Footer, Header, Modal } from '@stellar-starter-kit/ui';
+import { cn, Footer, Modal } from '@stellar-starter-kit/ui';
+import { AppHeader } from '../../components/AppHeader';
 import {
   formatAddress,
   formatBps,
@@ -43,9 +44,8 @@ const buttonVariants = {
   primary:
     'rounded-xl bg-gradient-to-r from-purple-600 to-cyan-500 text-white shadow-lg hover:brightness-110',
   secondary: 'rounded-xl bg-purple-600 text-white hover:bg-purple-500',
-  outline:
-    'rounded-lg border border-slate-800 bg-slate-900/50 text-slate-300 hover:bg-slate-900 hover:text-white',
-  ghost: 'rounded-lg text-slate-400 hover:text-white',
+  outline: 'rounded-lg border border-border bg-card text-foreground hover:bg-secondary',
+  ghost: 'rounded-lg text-muted-foreground hover:text-foreground',
   danger: 'rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20',
 } as const;
 
@@ -56,15 +56,15 @@ const buttonSizes = {
 } as const;
 
 const inputClassName =
-  'w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none';
+  'w-full rounded-xl border border-input bg-background px-4 py-2.5 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:border-purple-500 focus:outline-none';
 
 const badgeVariants = {
-  cyan: 'border-cyan-500/20 bg-cyan-500/5 text-cyan-300',
-  purple: 'border-purple-500/20 bg-purple-500/5 text-purple-300',
-  emerald: 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300',
-  amber: 'border-amber-500/20 bg-amber-500/5 text-amber-300',
-  rose: 'border-rose-500/20 bg-rose-500/5 text-rose-300',
-  slate: 'border-slate-800 bg-slate-900/50 text-slate-300',
+  cyan: 'border-cyan-500/20 bg-cyan-500/5 text-cyan-700 dark:text-cyan-300',
+  purple: 'border-purple-500/20 bg-purple-500/5 text-purple-700 dark:text-purple-300',
+  emerald: 'border-emerald-500/20 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300',
+  amber: 'border-amber-500/20 bg-amber-500/5 text-amber-700 dark:text-amber-300',
+  rose: 'border-rose-500/20 bg-rose-500/5 text-rose-700 dark:text-rose-300',
+  slate: 'border-border bg-secondary text-foreground/80',
 } as const;
 
 type BadgeVariant = keyof typeof badgeVariants;
@@ -98,9 +98,11 @@ function GallerySection({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-2xl border border-slate-900 bg-slate-950/40 p-6">
-      <h2 className="text-sm font-semibold tracking-wider text-slate-400 uppercase">{title}</h2>
-      <p className="mt-1 text-xs font-light text-slate-500">{description}</p>
+    <section className="border-border bg-card rounded-2xl border p-6">
+      <h2 className="text-muted-foreground text-sm font-semibold tracking-wider uppercase">
+        {title}
+      </h2>
+      <p className="text-muted-foreground mt-1 text-xs font-light">{description}</p>
       <div className="mt-6">{children}</div>
     </section>
   );
@@ -109,7 +111,7 @@ function GallerySection({
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-3 py-4 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-      <span className="w-40 shrink-0 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+      <span className="text-muted-foreground w-40 shrink-0 text-xs font-semibold tracking-wider uppercase">
         {label}
       </span>
       <div className="flex flex-wrap items-center gap-3">{children}</div>
@@ -127,8 +129,8 @@ export default function UiGallery() {
   const [modalOpen, setModalOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-[#06060c] text-slate-100 selection:bg-purple-500/30 selection:text-purple-200">
-      <Header />
+    <div className="bg-background text-foreground min-h-screen selection:bg-purple-500/30 selection:text-purple-200">
+      <AppHeader />
 
       <main className="relative z-10 mx-auto max-w-5xl px-6 py-16">
         <div className="flex flex-wrap items-center gap-3">
@@ -137,10 +139,10 @@ export default function UiGallery() {
           </Badge>
           <Badge variant="slate">Not linked from the site navigation</Badge>
         </div>
-        <h1 className="mt-6 text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
+        <h1 className="text-foreground mt-6 text-3xl font-extrabold tracking-tight sm:text-4xl">
           Component gallery
         </h1>
-        <p className="mt-4 max-w-2xl text-sm leading-relaxed font-light text-slate-400">
+        <p className="text-muted-foreground mt-4 max-w-2xl text-sm leading-relaxed font-light">
           Every dashboard primitive in every variant and state, on one page, for design review and
           screenshot diffing. Reach it at <code className="font-mono text-cyan-300">/ui</code>; it
           is deliberately absent from the header. The shared{' '}
@@ -186,7 +188,7 @@ export default function UiGallery() {
                 Danger
               </button>
             </Row>
-            <div className="border-t border-slate-900" />
+            <div className="border-border border-t" />
             <Row label="Sizes">
               <button
                 type="button"
@@ -207,7 +209,7 @@ export default function UiGallery() {
                 Medium
               </button>
             </Row>
-            <div className="border-t border-slate-900" />
+            <div className="border-border border-t" />
             <Row label="States">
               <button
                 type="button"
@@ -255,13 +257,13 @@ export default function UiGallery() {
           >
             <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
               <label className="block">
-                <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                <span className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
                   Default input
                 </span>
                 <input className={cn(inputClassName, 'mt-2')} placeholder="G..." defaultValue="" />
               </label>
               <label className="block">
-                <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                <span className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
                   Number input
                 </span>
                 <input
@@ -273,7 +275,7 @@ export default function UiGallery() {
                 />
               </label>
               <label className="block">
-                <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                <span className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
                   Disabled input
                 </span>
                 <input
@@ -283,7 +285,7 @@ export default function UiGallery() {
                 />
               </label>
               <label className="block">
-                <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                <span className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
                   Error input
                 </span>
                 <input
@@ -296,7 +298,7 @@ export default function UiGallery() {
                 </span>
               </label>
               <label className="block">
-                <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                <span className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
                   Select
                 </span>
                 <select className={cn(inputClassName, 'mt-2')} defaultValue="testnet">
@@ -306,7 +308,7 @@ export default function UiGallery() {
                 </select>
               </label>
               <label className="block">
-                <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                <span className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
                   Textarea
                 </span>
                 <textarea
@@ -330,7 +332,7 @@ export default function UiGallery() {
                 </Badge>
               ))}
             </Row>
-            <div className="border-t border-slate-900" />
+            <div className="border-border border-t" />
             <Row label="With icon">
               <Badge variant="cyan">
                 <Droplets className="h-3.5 w-3.5" /> Stellar Streams Protocol
@@ -340,12 +342,12 @@ export default function UiGallery() {
               <Badge variant="rose">Cancelled</Badge>
               <Badge variant="slate">Ended</Badge>
             </Row>
-            <div className="border-t border-slate-900" />
+            <div className="border-border border-t" />
             <Row label="Status dots">
-              <span className="flex items-center gap-2 text-sm text-slate-300">
+              <span className="text-foreground/80 flex items-center gap-2 text-sm">
                 <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" /> Connected
               </span>
-              <span className="flex items-center gap-2 text-sm text-slate-400">
+              <span className="text-muted-foreground flex items-center gap-2 text-sm">
                 <span className="h-2 w-2 rounded-full bg-rose-500" /> Wallet not connected
               </span>
             </Row>
@@ -391,7 +393,7 @@ export default function UiGallery() {
               Review transaction
             </button>
             <Modal open={modalOpen} onOpenChange={setModalOpen} title="Review transaction">
-              <p className="text-sm leading-relaxed font-light text-slate-400">
+              <p className="text-muted-foreground text-sm leading-relaxed font-light">
                 Confirm the recipient and amount before submitting this transaction.
               </p>
               <div className="mt-6 flex justify-end gap-3">
@@ -419,22 +421,22 @@ export default function UiGallery() {
             description="Panel, glass, and hover-lift containers used across the dashboard."
           >
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-6">
-                <h3 className="text-sm font-bold text-white">Panel card</h3>
-                <p className="mt-2 text-sm leading-relaxed font-light text-slate-400">
-                  Default container: <code className="font-mono">border-slate-900</code> on{' '}
-                  <code className="font-mono">bg-slate-950/40</code>.
+              <div className="border-border bg-card rounded-2xl border p-6">
+                <h3 className="text-foreground text-sm font-bold">Panel card</h3>
+                <p className="text-muted-foreground mt-2 text-sm leading-relaxed font-light">
+                  Default container: <code className="font-mono">border-border</code> on{' '}
+                  <code className="font-mono">bg-card</code>.
                 </p>
               </div>
               <div className="glass rounded-2xl p-6">
-                <h3 className="text-sm font-bold text-white">Glass card</h3>
-                <p className="mt-2 text-sm leading-relaxed font-light text-slate-400">
+                <h3 className="text-foreground text-sm font-bold">Glass card</h3>
+                <p className="text-muted-foreground mt-2 text-sm leading-relaxed font-light">
                   Uses the <code className="font-mono">.glass</code> helper from globals.css.
                 </p>
               </div>
               <div className="glass glass-hover cursor-pointer rounded-2xl p-6">
-                <h3 className="text-sm font-bold text-white">Hover-lift card</h3>
-                <p className="mt-2 text-sm leading-relaxed font-light text-slate-400">
+                <h3 className="text-foreground text-sm font-bold">Hover-lift card</h3>
+                <p className="text-muted-foreground mt-2 text-sm leading-relaxed font-light">
                   <code className="font-mono">.glass-hover</code> — focus me with the mouse.
                 </p>
               </div>
@@ -447,16 +449,17 @@ export default function UiGallery() {
             description="Heading, label, body, and code styles used in pages and docs."
           >
             <div className="space-y-4">
-              <h1 className="text-3xl font-extrabold tracking-tight text-white">Heading 1</h1>
-              <h2 className="text-2xl font-extrabold text-white">Heading 2</h2>
-              <h3 className="text-sm font-bold text-white">Card title</h3>
-              <span className="block text-xs font-semibold tracking-wider text-slate-500 uppercase">
+              <h1 className="text-foreground text-3xl font-extrabold tracking-tight">Heading 1</h1>
+              <h2 className="text-foreground text-2xl font-extrabold">Heading 2</h2>
+              <h3 className="text-foreground text-sm font-bold">Card title</h3>
+              <span className="text-muted-foreground block text-xs font-semibold tracking-wider uppercase">
                 Field label
               </span>
-              <p className="max-w-2xl text-sm leading-relaxed font-light text-slate-400">
-                Body copy is small, light, and slate-toned so dense financial UIs stay readable.
+              <p className="text-muted-foreground max-w-2xl text-sm leading-relaxed font-light">
+                Body copy is small, light, and muted-toned so dense financial UIs stay readable in
+                both themes.
               </p>
-              <pre className="overflow-x-auto rounded-xl border border-slate-900 bg-[#08080f] p-4 font-mono text-xs leading-relaxed text-slate-300">
+              <pre className="border-border bg-secondary text-foreground/80 overflow-x-auto rounded-xl border p-4 font-mono text-xs leading-relaxed">
                 {`import { StreamsClient } from '@stellar-starter-kit/sdk';`}
               </pre>
               <a
@@ -494,9 +497,11 @@ export default function UiGallery() {
               ).map(([expression, result]) => (
                 <div
                   key={expression}
-                  className="flex items-center justify-between gap-4 rounded-xl border border-slate-900 bg-slate-950/40 px-4 py-3"
+                  className="border-border bg-card flex items-center justify-between gap-4 rounded-xl border px-4 py-3"
                 >
-                  <code className="truncate font-mono text-xs text-slate-500">{expression}</code>
+                  <code className="text-muted-foreground truncate font-mono text-xs">
+                    {expression}
+                  </code>
                   <span className="shrink-0 font-mono text-sm font-semibold text-cyan-300">
                     {result}
                   </span>

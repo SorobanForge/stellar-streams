@@ -1,8 +1,55 @@
 @import 'tailwindcss';
 @config '../../tailwind.config.ts';
 
+/*
+ * Class-based dark mode for Tailwind v4. The `dark` class lives on <html> and
+ * is set before first paint by the inline script in layout.tsx, so every
+ * `dark:` utility and the `.dark` token block below switch together.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @layer base {
   :root {
+    /* Light theme (default, and the fallback for `prefers-color-scheme: light`) */
+    --background: 0 0% 100%;
+    --foreground: 224 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 224 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 47% 11%;
+
+    --primary: 263.4 70% 50.4%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 224 47% 11%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 42%;
+
+    --accent: 187 92% 38%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 214 32% 88%;
+    --input: 214 32% 88%;
+    --ring: 263.4 70% 50.4%;
+
+    --radius: 0.75rem;
+
+    --surface-gradient-start: #f6f8fc;
+    --surface-gradient-end: #eef2f8;
+    --glass-background: rgba(255, 255, 255, 0.72);
+    --glass-border: rgba(15, 23, 42, 0.08);
+    --glass-hover-background: rgba(255, 255, 255, 0.9);
+  }
+
+  .dark {
+    /* Dark theme */
     --background: 224 71.4% 4.1%;
     --foreground: 210 20% 98%;
 
@@ -31,30 +78,48 @@
     --input: 215 27.9% 16.9%;
     --ring: 263.4 70% 50.4%;
 
-    --radius: 0.75rem;
+    --surface-gradient-start: #0b1120;
+    --surface-gradient-end: #030712;
+    --glass-background: rgba(15, 23, 42, 0.65);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --glass-hover-background: rgba(15, 23, 42, 0.8);
   }
 }
 
 body {
   color: hsl(var(--foreground));
-  background: radial-gradient(circle at center, #0b1120 0%, #030712 100%);
+  background-color: hsl(var(--background));
+  background-image: radial-gradient(
+    circle at center,
+    var(--surface-gradient-start) 0%,
+    var(--surface-gradient-end) 100%
+  );
   min-height: 100vh;
   overflow-x: hidden;
   font-feature-settings:
     'rlig' 1,
     'calt' 1;
+  transition:
+    background-color 200ms ease,
+    color 200ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body {
+    transition: none;
+  }
 }
 
 /* Glassmorphism helpers */
 .glass {
-  background: rgba(15, 23, 42, 0.65);
+  background: var(--glass-background);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--glass-border);
 }
 
 .glass-hover:hover {
-  background: rgba(15, 23, 42, 0.8);
+  background: var(--glass-hover-background);
   border-color: rgba(6, 182, 212, 0.4);
   box-shadow: 0 0 20px rgba(6, 182, 212, 0.15);
 }

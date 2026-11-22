@@ -10,7 +10,7 @@ const buttonVariants = {
   primary:
     'rounded-xl bg-gradient-to-r from-purple-600 to-cyan-500 text-white shadow-lg hover:brightness-110',
   secondary: 'rounded-xl bg-purple-600 text-white hover:bg-purple-500',
-  ghost: 'rounded-lg text-slate-400 hover:text-white',
+  ghost: 'rounded-lg text-muted-foreground hover:text-foreground',
   danger: 'rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20',
 } as const;
 
@@ -20,7 +20,7 @@ const buttonSizes = {
 } as const;
 
 const inputBase =
-  'w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 placeholder:text-slate-500 focus:border-purple-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40';
+  'w-full rounded-xl border border-input bg-background px-4 py-2.5 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:border-purple-500 focus:ring-1 focus:ring-purple-500/40 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40';
 
 export type ButtonVariant = keyof typeof buttonVariants;
 export type ButtonSize = keyof typeof buttonSizes;
@@ -79,7 +79,7 @@ export function Input({
   return (
     <label className="block" htmlFor={inputId}>
       {label ? (
-        <span className="mb-2 block text-xs font-semibold tracking-wider text-slate-500 uppercase">
+        <span className="text-muted-foreground mb-2 block text-xs font-semibold tracking-wider uppercase">
           {label}
         </span>
       ) : null}
@@ -91,7 +91,7 @@ export function Input({
         className={cn(inputBase, invalid && 'border-rose-500/50 focus:border-rose-500', className)}
       />
       {error ? (
-        <span role="alert" className="mt-1.5 block text-xs text-rose-400">
+        <span role="alert" className="mt-1.5 block text-xs text-rose-600 dark:text-rose-400">
           {error}
         </span>
       ) : null}
@@ -103,10 +103,7 @@ export type CardProps = React.HTMLAttributes<HTMLDivElement>;
 
 export function Card({ className, ...props }: CardProps) {
   return (
-    <div
-      {...props}
-      className={cn('rounded-2xl border border-slate-900 bg-slate-950/40 p-6', className)}
-    />
+    <div {...props} className={cn('border-border bg-card rounded-2xl border p-6', className)} />
   );
 }
 
@@ -120,12 +117,12 @@ export function Card({ className, ...props }: CardProps) {
 export type StatusBadgeStatus = StreamStatus | 'paused' | (string & {});
 
 const statusBadgeVariants = {
-  scheduled: 'border-purple-500/30 bg-purple-500/10 text-purple-200',
-  streaming: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-200',
-  completed: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
-  cancelled: 'border-rose-500/30 bg-rose-500/10 text-rose-200',
-  paused: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
-  unknown: 'border-slate-700 bg-slate-800/40 text-slate-300',
+  scheduled: 'border-purple-500/30 bg-purple-500/10 text-purple-700 dark:text-purple-200',
+  streaming: 'border-cyan-500/30 bg-cyan-500/10 text-cyan-700 dark:text-cyan-200',
+  completed: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200',
+  cancelled: 'border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-200',
+  paused: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-200',
+  unknown: 'border-border bg-muted text-muted-foreground',
 } as const;
 
 const statusBadgeLabels: Record<string, string> = {
@@ -188,7 +185,7 @@ export function ProgressBar({ value, label, className, ...props }: ProgressBarPr
       aria-valuenow={indeterminate ? undefined : clamped}
       aria-valuetext={indeterminate ? 'Indeterminate' : undefined}
       data-indeterminate={indeterminate || undefined}
-      className={cn('h-2 w-full overflow-hidden rounded-full bg-slate-900', className)}
+      className={cn('bg-muted h-2 w-full overflow-hidden rounded-full', className)}
     >
       <div
         className={cn(
@@ -235,7 +232,7 @@ export function Skeleton({
       {...props}
       aria-hidden="true"
       className={cn(
-        'animate-pulse bg-slate-800/60 motion-reduce:animate-none',
+        'bg-muted animate-pulse motion-reduce:animate-none',
         skeletonRounded[rounded],
         className,
       )}
@@ -250,30 +247,30 @@ const alertTones = {
   info: {
     role: 'status',
     icon: Info,
-    container: 'border-cyan-500/20 bg-cyan-500/5 text-cyan-300',
-    title: 'text-cyan-200',
-    iconClassName: 'text-cyan-400',
+    container: 'border-cyan-500/20 bg-cyan-500/5 text-cyan-800 dark:text-cyan-300',
+    title: 'text-cyan-900 dark:text-cyan-200',
+    iconClassName: 'text-cyan-600 dark:text-cyan-400',
   },
   success: {
     role: 'status',
     icon: CheckCircle2,
-    container: 'border-emerald-500/20 bg-emerald-500/5 text-emerald-300',
-    title: 'text-emerald-200',
-    iconClassName: 'text-emerald-400',
+    container: 'border-emerald-500/20 bg-emerald-500/5 text-emerald-800 dark:text-emerald-300',
+    title: 'text-emerald-900 dark:text-emerald-200',
+    iconClassName: 'text-emerald-600 dark:text-emerald-400',
   },
   warning: {
     role: 'status',
     icon: TriangleAlert,
-    container: 'border-amber-500/20 bg-amber-500/5 text-amber-300',
-    title: 'text-amber-200',
-    iconClassName: 'text-amber-400',
+    container: 'border-amber-500/20 bg-amber-500/5 text-amber-800 dark:text-amber-300',
+    title: 'text-amber-900 dark:text-amber-200',
+    iconClassName: 'text-amber-600 dark:text-amber-400',
   },
   error: {
     role: 'alert',
     icon: AlertCircle,
-    container: 'border-rose-500/20 bg-rose-500/5 text-rose-300',
-    title: 'text-rose-200',
-    iconClassName: 'text-rose-400',
+    container: 'border-rose-500/20 bg-rose-500/5 text-rose-800 dark:text-rose-300',
+    title: 'text-rose-900 dark:text-rose-200',
+    iconClassName: 'text-rose-600 dark:text-rose-400',
   },
 } as const;
 
@@ -427,11 +424,11 @@ export function Modal({ open, onOpenChange, title, children, className, ...props
         aria-labelledby={titleId}
         tabIndex={-1}
         className={cn(
-          'w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-950 p-6 text-slate-200 shadow-2xl',
+          'border-border bg-card text-card-foreground w-full max-w-lg rounded-2xl border p-6 shadow-2xl',
           className,
         )}
       >
-        <h2 id={titleId} className="text-lg font-semibold text-white">
+        <h2 id={titleId} className="text-foreground text-lg font-semibold">
           {title}
         </h2>
         <div className="mt-4">{children}</div>

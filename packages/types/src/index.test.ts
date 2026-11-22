@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   ContractResponseError,
+  getEscrowTotals,
   getStreamMetrics,
   getStreamStatus,
   isConfig,
@@ -252,6 +253,46 @@ describe('domain normalizers', () => {
       amount: '170141183460469231731687303715884105727',
       deadline: '9007199254740993',
       status: 'funded',
+    });
+  });
+});
+
+describe('getEscrowTotals', () => {
+  it('reports the full amount as remaining and refundable without a schedule', () => {
+    expect(getEscrowTotals({ amount: '1000' }, null)).toEqual({
+      remainingAmount: 1000n,
+      refundableAmount: 1000n,
+      releasedAmount: 0n,
+    });
+  });
+
+  it('tracks remaining and refundable amounts as milestones are released', () => {
+    const schedule = normalizeEscrowSchedule([400n, 600n], [true, false]);
+
+    expect(getEscrowTotals({ amount: '1000' }, schedule)).toEqual({
+      remainingAmount: 600n,
+      refundableAmount: 600n,
+      releasedAmount: 400n,
+    });
+  });
+
+  it('reports zero remaining and refundable amounts once every milestone is released', () => {
+    const schedule = normalizeEscrowSchedule([400n, 600n], [true, true]);
+
+    expect(getEscrowTotals({ amount: '1000' }, schedule)).toEqual({
+      remainingAmount: 0n,
+      refundableAmount: 0n,
+      releasedAmount: 1000n,
+    });
+  });
+
+  it('never reports a negative refundable amount for an inconsistent schedule', () => {
+    const schedule = normalizeEscrowSchedule([400n, 700n], [true, true]);
+
+    expect(getEscrowTotals({ amount: '1000' }, schedule)).toEqual({
+      remainingAmount: 0n,
+      refundableAmount: 0n,
+      releasedAmount: 1100n,
     });
   });
 });
