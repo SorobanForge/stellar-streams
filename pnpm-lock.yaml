@@ -277,6 +277,9 @@ importers:
       '@stellar-starter-kit/types':
         specifier: workspace:*
         version: link:../types
+      '@stellar-starter-kit/wallets':
+        specifier: workspace:*
+        version: link:../wallets
       '@stellar/stellar-sdk':
         specifier: ^14.5.0
         version: 14.6.1
@@ -287,6 +290,9 @@ importers:
       '@stellar-starter-kit/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
       typedoc:
         specifier: ^0.28.20
         version: 0.28.20(typescript@6.0.3)
