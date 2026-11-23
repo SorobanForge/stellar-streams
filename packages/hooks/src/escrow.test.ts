@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { EscrowError } from '@stellar-starter-kit/sdk';
+import type { EscrowErrorCode } from '@stellar-starter-kit/sdk';
 import {
   useCancelEscrow,
   useCreateEscrow,
@@ -10,6 +10,15 @@ import {
   type CreateEscrowParams,
   type EscrowClientLike,
 } from './index';
+
+/**
+ * A rejection shaped like the SDK's `EscrowError`: the hooks only read the
+ * string `code`, so tests build one locally instead of importing the class and
+ * depending on the SDK package being built first.
+ */
+function escrowError(message: string, code: EscrowErrorCode): Error {
+  return Object.assign(new Error(message), { code });
+}
 
 /** A stub transaction whose `signAndSend` resolves to a confirmed hash. */
 function confirmed(hash: string) {
@@ -73,7 +82,7 @@ describe('escrow mutation hooks', () => {
   it('surfaces EscrowError.code when creation is rejected', async () => {
     const create_escrow = vi
       .fn()
-      .mockRejectedValue(new EscrowError('Deadline must be in the future', 9));
+      .mockRejectedValue(escrowError('Deadline must be in the future', 'INVALID_DEADLINE'));
     const client = { create_escrow } as unknown as EscrowClientLike;
     const onError = vi.fn();
 
@@ -105,7 +114,9 @@ describe('escrow mutation hooks', () => {
   });
 
   it('surfaces EscrowError.code when funding a finalized escrow fails', async () => {
-    const fund_escrow = vi.fn().mockRejectedValue(new EscrowError('Escrow already finalized', 8));
+    const fund_escrow = vi
+      .fn()
+      .mockRejectedValue(escrowError('Escrow already finalized', 'ALREADY_FINALIZED'));
     const client = { fund_escrow } as unknown as EscrowClientLike;
 
     const { result } = renderHook(() => useFundEscrow(client));
@@ -135,7 +146,9 @@ describe('escrow mutation hooks', () => {
   });
 
   it('surfaces EscrowError.code when the release caller is not authorized', async () => {
-    const release_escrow = vi.fn().mockRejectedValue(new EscrowError('Unauthorized operation', 4));
+    const release_escrow = vi
+      .fn()
+      .mockRejectedValue(escrowError('Unauthorized operation', 'UNAUTHORIZED_OPERATION'));
     const client = { release_escrow } as unknown as EscrowClientLike;
 
     const { result } = renderHook(() => useReleaseEscrow(client));
@@ -165,7 +178,9 @@ describe('escrow mutation hooks', () => {
   });
 
   it('surfaces EscrowError.code when a refund is attempted before funding', async () => {
-    const refund_escrow = vi.fn().mockRejectedValue(new EscrowError('Invalid state transition', 5));
+    const refund_escrow = vi
+      .fn()
+      .mockRejectedValue(escrowError('Invalid state transition', 'INVALID_STATE_TRANSITION'));
     const client = { refund_escrow } as unknown as EscrowClientLike;
 
     const { result } = renderHook(() => useRefundEscrow(client));
@@ -195,7 +210,9 @@ describe('escrow mutation hooks', () => {
   });
 
   it('surfaces EscrowError.code when a non-payer tries to cancel', async () => {
-    const cancel_escrow = vi.fn().mockRejectedValue(new EscrowError('Unauthorized operation', 4));
+    const cancel_escrow = vi
+      .fn()
+      .mockRejectedValue(escrowError('Unauthorized operation', 'UNAUTHORIZED_OPERATION'));
     const client = { cancel_escrow } as unknown as EscrowClientLike;
 
     const { result } = renderHook(() => useCancelEscrow(client));
