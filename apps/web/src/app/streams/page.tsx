@@ -41,6 +41,7 @@ import {
   formatBps,
   formatDuration,
   formatRelativeTime,
+  formatTokenAmount,
 } from '@stellar-starter-kit/utils';
 import type { EnvironmentConfig } from '@stellar-starter-kit/config';
 import { environmentConfig, environmentErrors } from '../../lib/environment';
@@ -52,6 +53,7 @@ import {
   validateStreamInput,
 } from '../../lib/stream-validation';
 import { downloadCsv, exportStreamsToCsv, getStreamsCsvFilename } from '../../lib/stream-csv';
+import { formatStreamAmount } from '../../lib/stream-amount';
 
 // framer-motion stays out of the initial route bundle; the banner only loads
 // when an error/success message is shown.

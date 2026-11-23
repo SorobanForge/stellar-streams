@@ -598,7 +598,12 @@ export type StreamErrorCode =
   | 'BATCH_OVERFLOW'
   | 'STREAM_PAUSED'
   | 'NOT_PAUSED'
-  | 'SAME_RECIPIENT';
+  | 'STREAM_COMPLETED'
+  | 'AMOUNT_OVERFLOW'
+  | 'REDUCTION_BELOW_VESTED'
+  | 'INVALID_REDUCTION'
+  | 'SAME_RECIPIENT'
+  | 'PAUSE_WINDOW_EXCEEDED';
 
 /**
  * Stable identifiers for the splits contract's `SplitError` enum. They share
@@ -648,7 +653,12 @@ const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
   15: 'BATCH_OVERFLOW',
   16: 'STREAM_PAUSED',
   17: 'NOT_PAUSED',
-  20: 'SAME_RECIPIENT',
+  18: 'STREAM_COMPLETED',
+  19: 'AMOUNT_OVERFLOW',
+  20: 'REDUCTION_BELOW_VESTED',
+  21: 'INVALID_REDUCTION',
+  22: 'SAME_RECIPIENT',
+  23: 'PAUSE_WINDOW_EXCEEDED',
 };
 
 /**
