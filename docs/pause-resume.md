@@ -17,9 +17,9 @@ If the stream is currently paused (`paused_at` is `Some(pause_time)`), the clock
 
 ## Effect on Cliff and Effective End Date
 
-- **Cliff Behaviour**: If a stream is paused *before* the cliff is reached, the cliff timestamp is effectively shifted forward by the total duration of the pause. The cliff blocks vesting until `\text{Active Elapsed} \ge \text{cliff\_duration}$$.
+- **Cliff Behaviour**: If a stream is paused _before_ the cliff is reached, the cliff timestamp is effectively shifted forward by the total duration of the pause. The cliff blocks vesting until `\text{Active Elapsed} \ge \text{cliff\_duration}$$.
 - **Effective End Date**: Pausing a stream extends its life. The effective end date is pushed out by the exact duration of the pause:
-  
+
   $$\text{Effective End Time} = \text{end\_time} + \text{total\_paused}$$ (or plus the current pause duration if actively paused).
 
 This ensures that the recipient still receives the full duration of active vesting time originally intended.
@@ -46,7 +46,7 @@ Let's trace a linear stream with the following parameters:
 
 ### Timeline of Events:
 
-1. **`t = 150`**: Stream is active. 
+1. **`t = 150`**: Stream is active.
    - Elapsed active time: $150 - 100 = 50$ seconds.
    - Vested amount: $0$ (cliff at 200 has not been reached).
 
