@@ -113,6 +113,16 @@ pub struct EscrowCancelled {
     pub payer: Address,
 }
 
+/// Emitted when a milestone schedule is attached to an escrow.
+#[contractevent(topics = ["escrow", "milestones_configured"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MilestonesConfigured {
+    #[topic]
+    pub id: u64,
+    pub payer: Address,
+    pub amounts: Vec<i128>,
+}
+
 /// Emitted when one milestone is released to the payee.
 #[contractevent(topics = ["escrow", "milestone_released"])]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -225,6 +235,9 @@ impl EscrowContract {
         env.storage().persistent().set(&released_key, &released);
         env.storage().persistent().extend_ttl(&milestones_key, BUMP_THRESHOLD, BUMP_LIMIT);
         env.storage().persistent().extend_ttl(&released_key, BUMP_THRESHOLD, BUMP_LIMIT);
+
+        // Published only once the schedule and its release flags are stored.
+        MilestonesConfigured { id, payer: escrow.payer, amounts }.publish(&env);
 
         Ok(())
     }
@@ -466,6 +479,39 @@ impl EscrowContract {
     /// The milestone schedule attached to an escrow, if any.
     pub fn get_milestones(env: Env, id: u64) -> Option<Vec<i128>> {
         env.storage().persistent().get(&DataKey::Milestones(id))
+    }
+
+    /// The amount of the escrow that has not yet been released to the payee.
+    ///
+    /// For a milestone escrow this is the sum of every unreleased milestone, so
+    /// it reaches zero once the final milestone is released. An escrow without
+    /// a milestone schedule always reports its full amount. Fails with
+    /// `MilestoneScheduleNotFound` only when a schedule is attached but its
+    /// release flags are missing.
+    pub fn remaining_amount(env: Env, id: u64) -> Result<i128, EscrowError> {
+        let escrow: Escrow = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Escrow(id))
+            .ok_or(EscrowError::EscrowNotFound)?;
+
+        let amounts: Option<Vec<i128>> = env.storage().persistent().get(&DataKey::Milestones(id));
+        let Some(amounts) = amounts else {
+            return Ok(escrow.amount);
+        };
+        let released: Vec<u32> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MilestoneReleased(id))
+            .ok_or(EscrowError::MilestoneScheduleNotFound)?;
+
+        let mut remaining: i128 = 0;
+        for (index, amount) in amounts.iter().enumerate() {
+            if released.get(index as u32).unwrap_or(0) == 0 {
+                remaining = remaining.saturating_add(amount);
+            }
+        }
+        Ok(remaining)
     }
 
     /// Whether a specific milestone has been released.
