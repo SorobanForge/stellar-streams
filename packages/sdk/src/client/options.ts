@@ -1,6 +1,7 @@
-import type { WalletAdapter } from '@stellar-streams/wallets';
+import type { WalletAdapter } from '@stellar-starter-kit/wallets';
 
-export type WriteStatus = 'simulating' | 'signing' | 'submitting' | 'polling' | 'confirmed' | 'failed';
+export type WriteStatus =
+  'simulating' | 'signing' | 'submitting' | 'polling' | 'confirmed' | 'failed';
 export type OnStatusChangeCallback = (status: WriteStatus, error?: unknown) => void;
 
 export interface ClientOptions {

@@ -14,10 +14,17 @@ runAdapterConformanceSuite({
   name: 'AlbedoAdapter',
   createAdapter: () => new AlbedoAdapter(),
   setupAvailable: () => {
-    vi.mocked(albedo.publicKey).mockResolvedValue({ pubkey: 'GB_ALBEDO', signature: '', signed_message: '' });
+    if (typeof albedo.publicKey !== 'function') {
+      (albedo as { publicKey: unknown }).publicKey = vi.fn();
+    }
+    vi.mocked(albedo.publicKey).mockResolvedValue({
+      pubkey: 'GB_ALBEDO',
+      signature: '',
+      signed_message: '',
+    });
   },
   setupUnavailable: () => {
-    vi.mocked(albedo.publicKey).mockRejectedValue(new Error('Unavailable'));
+    (albedo as { publicKey?: unknown }).publicKey = undefined;
   },
   setupUserRejection: () => {
     vi.mocked(albedo.tx).mockRejectedValue(new Error('User rejected'));

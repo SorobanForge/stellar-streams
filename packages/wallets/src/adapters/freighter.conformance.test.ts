@@ -11,7 +11,7 @@ vi.mock('@stellar/freighter-api', () => {
   return { ...api, default: api };
 });
 
-import { isConnected, requestAccess, signTransaction } from '@stellar/freighter-api';
+import { getAddress, isConnected, requestAccess, signTransaction } from '@stellar/freighter-api';
 
 runAdapterConformanceSuite({
   name: 'FreighterAdapter',
@@ -19,6 +19,7 @@ runAdapterConformanceSuite({
   setupAvailable: () => {
     vi.mocked(isConnected).mockResolvedValue({ isConnected: true, error: undefined });
     vi.mocked(requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER', error: undefined });
+    vi.mocked(getAddress).mockResolvedValue({ address: 'GB_FREIGHTER', error: undefined });
   },
   setupUnavailable: () => {
     vi.mocked(isConnected).mockResolvedValue({ isConnected: false, error: undefined });
