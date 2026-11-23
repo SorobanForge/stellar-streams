@@ -20,6 +20,7 @@ import { formatAddress, formatBps, formatDuration } from '@stellar-starter-kit/u
 import type { EnvironmentConfig } from '@stellar-starter-kit/config';
 import { environmentConfig, environmentErrors } from '../../../lib/environment';
 import ConfigurationError from '../../../components/ConfigurationError';
+import { VestingChart } from '../../../components/VestingChart';
 import { REPO_URL } from '../../../lib/constants';
 
 /**
@@ -64,6 +65,10 @@ export function ReceivedStreamCard({ stream, now }: { stream: Stream; now: numbe
           <span>{formatBps(metrics.progressBps)} vested</span>
           <span>{timeline}</span>
         </div>
+      </div>
+
+      <div className="mt-4">
+        <VestingChart stream={stream} />
       </div>
 
       <dl className="mt-4 grid grid-cols-2 gap-4 border-t border-slate-900 pt-4 text-xs">

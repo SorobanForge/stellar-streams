@@ -227,6 +227,30 @@ await withdraw.mutate(id, claimable);
 
 ---
 
+## Sender controls
+
+`usePauseStream`, `useResumeStream`, and `useTopUpStream` follow the same
+`{ mutate, status, error, hash, reset }` shape as the other mutations. Pause and
+resume take an optional `{ signal }` per call:
+
+```tsx
+const pause = usePauseStream(client);
+const resume = useResumeStream(client);
+const topUp = useTopUpStream(client);
+
+await pause.mutate(id, { signal });
+await resume.mutate(id);
+await topUp.mutate({ id, amount: '25000000' });
+```
+
+`useTopUpStream` validates `amount` as a positive integer in the token's
+smallest unit before calling the SDK. Contract rejections such as
+`STREAM_COMPLETED` and `AMOUNT_OVERFLOW` are exposed unchanged through `error`.
+A mutation that settles after its component unmounts is ignored rather than
+updating state or firing callbacks late.
+
+---
+
 ## Splits
 
 `packages/hooks` mirrors the stream data layer for the `splits` contract. The
@@ -314,9 +338,9 @@ import { useStream, useStreams, useStellarNetworkStatus } from '@stellar-starter
 
 The package has no default exports or additional entry points. Its named
 exports are the stream hooks (`useStream`, `useStreams`, `useCreateStream`,
-`useWithdrawStream`, `useCancelStream`), the split hooks (`useSplit`,
-`useSplits`, `useCreateSplit`, `useDistributeSplit`), and
-`useStellarNetworkStatus`. The dashboard does not currently import these hooks.
+`useWithdrawStream`, `useCancelStream`, `usePauseStream`, `useResumeStream`,
+`useTopUpStream`), the split hooks (`useSplit`, `useSplits`, `useCreateSplit`,
+`useDistributeSplit`), and `useStellarNetworkStatus`.
 
 ---
 

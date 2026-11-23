@@ -361,6 +361,90 @@ export function useCancelStream(
   return useContractMutation<StreamsClient, [StreamId]>(client, run, options);
 }
 
+/** Per-call options for the sender-control mutations. */
+export interface StreamWriteOptions {
+  /** Aborts the wallet prompt, submission and confirmation poll for this call. */
+  signal?: AbortSignal;
+}
+
+/** Pauses a stream until it is explicitly resumed. */
+export function usePauseStream(
+  client: StreamsClient | null,
+  options: StreamMutationOptions = {},
+): StreamMutationResult<[StreamId, StreamWriteOptions?]> {
+  const run = useCallback(
+    (streams: StreamsClient, id: StreamId, opts?: StreamWriteOptions) => streams.pause(id, opts),
+    [],
+  );
+  return useContractMutation<StreamsClient, [StreamId, StreamWriteOptions?]>(client, run, options);
+}
+
+/** Resumes a paused stream, continuing its schedule from where it stopped. */
+export function useResumeStream(
+  client: StreamsClient | null,
+  options: StreamMutationOptions = {},
+): StreamMutationResult<[StreamId, StreamWriteOptions?]> {
+  const run = useCallback(
+    (streams: StreamsClient, id: StreamId, opts?: StreamWriteOptions) => streams.resume(id, opts),
+    [],
+  );
+  return useContractMutation<StreamsClient, [StreamId, StreamWriteOptions?]>(client, run, options);
+}
+
+/** Amount added to a stream, in the token's smallest unit. */
+export type TopUpAmount = bigint | number | string;
+
+/** Arguments for {@link useTopUpStream}. */
+export interface TopUpStreamParams {
+  id: StreamId;
+  /** Positive integer amount, in the token's smallest unit. */
+  amount: TopUpAmount;
+}
+
+export type TopUpStreamResult = StreamMutationResult<[TopUpStreamParams]>;
+
+/**
+ * Normalizes a top-up amount to a positive `bigint`, rejecting fractions,
+ * zero, negatives, and non-numeric strings before any client call is made.
+ */
+function parseTopUpAmount(amount: TopUpAmount): bigint {
+  const invalid = () => new Error(`Invalid amount: ${String(amount)}. Must be a positive integer.`);
+
+  if (typeof amount === 'bigint') {
+    if (amount <= 0n) throw invalid();
+    return amount;
+  }
+  if (typeof amount === 'number') {
+    if (!Number.isSafeInteger(amount) || amount <= 0) throw invalid();
+    return BigInt(amount);
+  }
+
+  const value = amount.trim();
+  if (!/^\d+$/.test(value)) throw invalid();
+  const parsed = BigInt(value);
+  if (parsed <= 0n) throw invalid();
+  return parsed;
+}
+
+/**
+ * Adds tokens to an existing stream, extending its schedule at the same rate.
+ *
+ * The amount is validated as a positive integer before the SDK is called, so a
+ * malformed value fails locally instead of reaching the wallet. Contract
+ * rejections such as `STREAM_COMPLETED` and `AMOUNT_OVERFLOW` pass through
+ * unchanged on `error`.
+ */
+export function useTopUpStream(
+  client: StreamsClient | null,
+  options: StreamMutationOptions = {},
+): TopUpStreamResult {
+  const run = useCallback((streams: StreamsClient, params: TopUpStreamParams) => {
+    const amount = parseTopUpAmount(params.amount);
+    return streams.topUp(params.id, amount);
+  }, []);
+  return useContractMutation<StreamsClient, [TopUpStreamParams]>(client, run, options);
+}
+
 export interface UseStreamsResult {
   /** Streams involving the address, or an empty array while loading / unsupported. */
   streams: Stream[];

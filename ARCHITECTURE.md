@@ -107,9 +107,10 @@ supported maximum amount — is documented in [packages/utils/README.md](package
 The `hooks` package wraps those calls for React: `useStream` retries a failed refresh with bounded
 exponential backoff, keeps the last successful value on screen, and flags it through `isStale` so a
 dashboard can show a "reconnecting" hint instead of blanking the view. Writes go through
-`useCreateStream`, `useWithdrawStream`, and `useCancelStream`, which each expose
-`{ mutate, status, error, hash, reset }`, allow one transaction in flight at a time, and report the
-confirmed hash through an optional `onSuccess` callback.
+`useCreateStream`, `useWithdrawStream`, `useCancelStream`, `usePauseStream`, `useResumeStream`,
+and `useTopUpStream`, which each expose `{ mutate, status, error, hash, reset }`, allow one
+transaction in flight at a time, and report the confirmed hash through an optional `onSuccess`
+callback.
 
 ---
 
@@ -119,6 +120,8 @@ A Next.js 15 App Router application:
 
 - `/` — product overview.
 - `/streams` — create, inspect, withdraw from, and cancel streams.
+- `/streams/my` — received-stream inbox for the connected wallet.
+- `/activity` — Horizon-backed payment and contract-invocation history.
 - `/escrow` — interact with the escrow primitive.
 - `/docs` — setup and reference documentation.
 - `/ui` — internal component gallery for design review (not linked in the header).

@@ -598,7 +598,12 @@ export type StreamErrorCode =
   | 'BATCH_OVERFLOW'
   | 'STREAM_PAUSED'
   | 'NOT_PAUSED'
-  | 'SAME_RECIPIENT';
+  | 'STREAM_COMPLETED'
+  | 'AMOUNT_OVERFLOW'
+  | 'REDUCTION_BELOW_VESTED'
+  | 'INVALID_REDUCTION'
+  | 'SAME_RECIPIENT'
+  | 'PAUSE_WINDOW_EXCEEDED';
 
 /**
  * Stable identifiers for the splits contract's `SplitError` enum. They share
@@ -648,7 +653,12 @@ const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
   15: 'BATCH_OVERFLOW',
   16: 'STREAM_PAUSED',
   17: 'NOT_PAUSED',
-  20: 'SAME_RECIPIENT',
+  18: 'STREAM_COMPLETED',
+  19: 'AMOUNT_OVERFLOW',
+  20: 'REDUCTION_BELOW_VESTED',
+  21: 'INVALID_REDUCTION',
+  22: 'SAME_RECIPIENT',
+  23: 'PAUSE_WINDOW_EXCEEDED',
 };
 
 /**
@@ -1904,6 +1914,43 @@ export class StreamsClient extends SorobanClient {
     opts: O = {} as O,
   ): Promise<WriteResultFor<O>> {
     return this.invoke('cancel', [nativeToScVal(BigInt(id), { type: 'u64' })], opts);
+  }
+
+  /**
+   * Add `amount` to a stream's deposit without changing its payment rate. Only
+   * the sender can authorize it, and only while the stream is still streaming:
+   * cancelled or already-finished streams are rejected. The schedule's end time
+   * is extended in proportion to the deposit, so already-vested tokens stay
+   * vested.
+   *
+   * @param id - Stream id as `bigint`, `number`, or decimal string.
+   * @param amount - Amount to add, in the token's smallest unit, as a positive
+   *   decimal integer (`bigint`, number, or string).
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns `{ hash }` of the confirmed transaction. Read the stream again to
+   *   see the new `totalAmount` and `endTime`.
+   * @throws Error when `amount` is not a positive integer, or no
+   *   `publicKey` / `signTransaction` was configured.
+   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`,
+   *   `INVALID_AMOUNT`, `ALREADY_CANCELLED`, `STREAM_COMPLETED` or
+   *   `AMOUNT_OVERFLOW`.
+   * @example
+   * ```typescript
+   * const { hash } = await client.topUp(stream.id, '50000000');
+   * const toppedUp = await client.getStream(stream.id);
+   * ```
+   */
+  async topUp<O extends WriteOptions = WriteOptions>(
+    id: bigint | number | string,
+    amount: bigint | number | string,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    const parsed = parseAmount(amount.toString());
+    return this.invoke(
+      'top_up',
+      [nativeToScVal(BigInt(id), { type: 'u64' }), nativeToScVal(parsed, { type: 'i128' })],
+      opts,
+    );
   }
 
   /**
