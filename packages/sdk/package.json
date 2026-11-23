@@ -19,9 +19,9 @@
     "build": "tsc --project tsconfig.build.json",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "node scripts/record-rpc-fixtures.ts --check && vitest run",
-    "fixtures:record": "node scripts/record-rpc-fixtures.ts",
-    "fixtures:check": "node scripts/record-rpc-fixtures.ts --check",
+    "test": "node --experimental-strip-types scripts/record-rpc-fixtures.ts --check && vitest run",
+    "fixtures:record": "node --experimental-strip-types scripts/record-rpc-fixtures.ts",
+    "fixtures:check": "node --experimental-strip-types scripts/record-rpc-fixtures.ts --check",
     "docs": "typedoc"
   },
   "dependencies": {
