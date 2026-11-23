@@ -45,7 +45,7 @@ export interface Escrow {
   token: string;
 }
 
-export type DataKey = {tag: "Escrow", values: readonly [u64]} | {tag: "NextId", values: void};
+export type DataKey = {tag: "Escrow", values: readonly [u64]} | {tag: "NextId", values: void} | {tag: "Milestones", values: readonly [u64]} | {tag: "MilestoneReleased", values: readonly [u64]};
 
 export const EscrowError = {
   1: {message:"EscrowNotFound"},
@@ -55,7 +55,11 @@ export const EscrowError = {
   6: {message:"DeadlineNotReached"},
   7: {message:"DeadlineExpired"},
   8: {message:"AlreadyFinalized"},
-  9: {message:"InvalidDeadline"}
+  9: {message:"InvalidDeadline"},
+  10: {message:"MilestoneScheduleNotFound"},
+  11: {message:"MilestoneIndexOutOfRange"},
+  12: {message:"MilestoneAlreadyReleased"},
+  13: {message:"MilestoneScheduleInvalid"}
 }
 
 export enum EscrowStatus {
@@ -65,6 +69,7 @@ export enum EscrowStatus {
   Refunded = 3,
   Cancelled = 4,
 }
+
 
 
 
@@ -113,6 +118,12 @@ export interface Client {
   refund_escrow: ({id, caller}: {id: u64, caller: string}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
 
   /**
+   * Construct and simulate a get_milestones transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * The milestone schedule attached to an escrow, if any.
+   */
+  get_milestones: ({id}: {id: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Option<Array<i128>>>>
+
+  /**
    * Construct and simulate a next_escrow_id transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    * The id that will be assigned to the next escrow.
    */
@@ -123,6 +134,32 @@ export interface Client {
    * Release funds to the payee. Authorized by either the payer or the arbiter.
    */
   release_escrow: ({id, caller}: {id: u64, caller: string}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+
+  /**
+   * Construct and simulate a set_milestones transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Attach a milestone schedule to an unfunded escrow.
+   * 
+   * `amounts` must contain at least two positive entries and sum to the
+   * escrow amount. Only the payer may configure the schedule, and only
+   * before the escrow is funded.
+   */
+  set_milestones: ({id, caller, amounts}: {id: u64, caller: string, amounts: Array<i128>}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+
+  /**
+   * Construct and simulate a release_milestone transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Release a single milestone to the payee.
+   * 
+   * The payer or arbiter may release milestones while the escrow is funded
+   * and the deadline has not passed. A milestone can only be released once;
+   * releasing the final milestone marks the escrow as `Released`.
+   */
+  release_milestone: ({id, milestone_index, caller}: {id: u64, milestone_index: u32, caller: string}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+
+  /**
+   * Construct and simulate a is_milestone_released transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Whether a specific milestone has been released.
+   */
+  is_milestone_released: ({id, milestone_index}: {id: u64, milestone_index: u32}, options?: MethodOptions) => Promise<AssembledTransaction<boolean>>
 
 }
 export class Client extends ContractClient {
@@ -143,22 +180,27 @@ export class Client extends ContractClient {
   constructor(public readonly options: ContractClientOptions) {
     super(
       new ContractSpec([ "AAAAAQAAAAAAAAAAAAAABkVzY3JvdwAAAAAACAAAAAAAAAAGYW1vdW50AAAAAAALAAAAAAAAAAdhcmJpdGVyAAAAABMAAAAAAAAACGRlYWRsaW5lAAAABgAAAAAAAAACaWQAAAAAAAYAAAAAAAAABXBheWVlAAAAAAAAEwAAAAAAAAAFcGF5ZXIAAAAAAAATAAAAAAAAAAZzdGF0dXMAAAAAB9AAAAAMRXNjcm93U3RhdHVzAAAAAAAAAAV0b2tlbgAAAAAAABM=",
-        "AAAAAgAAAAAAAAAAAAAAB0RhdGFLZXkAAAAAAgAAAAEAAAAAAAAABkVzY3JvdwAAAAAAAQAAAAYAAAAAAAAAAAAAAAZOZXh0SWQAAA==",
-        "AAAABAAAAAAAAAAAAAAAC0VzY3Jvd0Vycm9yAAAAAAcAAAAAAAAADkVzY3Jvd05vdEZvdW5kAAAAAAABAAAAAAAAAA1JbnZhbGlkQW1vdW50AAAAAAAAAwAAAAAAAAAVVW5hdXRob3JpemVkT3BlcmF0aW9uAAAAAAAABAAAAAAAAAAWSW52YWxpZFN0YXRlVHJhbnNpdGlvbgAAAAAABQAAAAAAAAASRGVhZGxpbmVOb3RSZWFjaGVkAAAAAAAGAAAAAAAAAA9EZWFkbGluZUV4cGlyZWQAAAAABwAAAAAAAAAQQWxyZWFkeUZpbmFsaXplZAAAAAg=",
+        "AAAAAgAAAAAAAAAAAAAAB0RhdGFLZXkAAAAABAAAAAEAAAAAAAAABkVzY3JvdwAAAAAAAQAAAAYAAAAAAAAAAAAAAAZOZXh0SWQAAAAAAAEAAAAAAAAACk1pbGVzdG9uZXMAAAAAAAEAAAAGAAAAAQAAAAAAAAARTWlsZXN0b25lUmVsZWFzZWQAAAAAAAABAAAABg==",
+        "AAAABAAAAAAAAAAAAAAAC0VzY3Jvd0Vycm9yAAAAAAwAAAAAAAAADkVzY3Jvd05vdEZvdW5kAAAAAAABAAAAAAAAAA1JbnZhbGlkQW1vdW50AAAAAAAAAwAAAAAAAAAVVW5hdXRob3JpemVkT3BlcmF0aW9uAAAAAAAABAAAAAAAAAAWSW52YWxpZFN0YXRlVHJhbnNpdGlvbgAAAAAABQAAAAAAAAASRGVhZGxpbmVOb3RSZWFjaGVkAAAAAAAGAAAAAAAAAA9EZWFkbGluZUV4cGlyZWQAAAAABwAAAAAAAAAQQWxyZWFkeUZpbmFsaXplZAAAAAgAAAAAAAAAD0ludmFsaWREZWFkbGluZQAAAAAJAAAAAAAAABlNaWxlc3RvbmVTY2hlZHVsZU5vdEZvdW5kAAAAAAAACgAAAAAAAAAYTWlsZXN0b25lSW5kZXhPdXRPZlJhbmdlAAAACwAAAAAAAAAYTWlsZXN0b25lQWxyZWFkeVJlbGVhc2VkAAAADAAAAAAAAAAYTWlsZXN0b25lU2NoZWR1bGVJbnZhbGlkAAAADQ==",
         "AAAAAwAAAAAAAAAAAAAADEVzY3Jvd1N0YXR1cwAAAAUAAAAAAAAAB0NyZWF0ZWQAAAAAAAAAAAAAAAAGRnVuZGVkAAAAAAABAAAAAAAAAAhSZWxlYXNlZAAAAAIAAAAAAAAACFJlZnVuZGVkAAAAAwAAAAAAAAAJQ2FuY2VsbGVkAAAAAAAABA==",
         "AAAABQAAACFFbWl0dGVkIHdoZW4gYW4gZXNjcm93IGlzIGZ1bmRlZC4AAAAAAAAAAAAADEVzY3Jvd0Z1bmRlZAAAAAIAAAAGZXNjcm93AAAAAAAGZnVuZGVkAAAAAAACAAAAAAAAAAJpZAAAAAAABgAAAAEAAAAAAAAABmFtb3VudAAAAAAACwAAAAAAAAAC",
         "AAAABQAAACxFbWl0dGVkIHdoZW4gYW4gZXNjcm93IGFncmVlbWVudCBpcyBjcmVhdGVkLgAAAAAAAAANRXNjcm93Q3JlYXRlZAAAAAAAAAIAAAAGZXNjcm93AAAAAAAHY3JlYXRlZAAAAAADAAAAAAAAAAJpZAAAAAAABgAAAAEAAAAAAAAABXBheWVyAAAAAAAAEwAAAAAAAAAAAAAABmFtb3VudAAAAAAACwAAAAAAAAAC",
         "AAAABQAAADZFbWl0dGVkIHdoZW4gZXNjcm93ZWQgZnVuZHMgYXJlIHJlZnVuZGVkIHRvIHRoZSBwYXllci4AAAAAAAAAAAAORXNjcm93UmVmdW5kZWQAAAAAAAIAAAAGZXNjcm93AAAAAAAIcmVmdW5kZWQAAAAEAAAAAAAAAAJpZAAAAAAABgAAAAEAAAAAAAAABmNhbGxlcgAAAAAAEwAAAAAAAAAAAAAABXBheWVyAAAAAAAAEwAAAAAAAAAAAAAABmFtb3VudAAAAAAACwAAAAAAAAAC",
         "AAAABQAAADZFbWl0dGVkIHdoZW4gZXNjcm93ZWQgZnVuZHMgYXJlIHJlbGVhc2VkIHRvIHRoZSBwYXllZS4AAAAAAAAAAAAORXNjcm93UmVsZWFzZWQAAAAAAAIAAAAGZXNjcm93AAAAAAAIcmVsZWFzZWQAAAAEAAAAAAAAAAJpZAAAAAAABgAAAAEAAAAAAAAABmNhbGxlcgAAAAAAEwAAAAAAAAAAAAAABXBheWVlAAAAAAAAEwAAAAAAAAAAAAAABmFtb3VudAAAAAAACwAAAAAAAAAC",
         "AAAABQAAACRFbWl0dGVkIHdoZW4gYW4gZXNjcm93IGlzIGNhbmNlbGxlZC4AAAAAAAAAD0VzY3Jvd0NhbmNlbGxlZAAAAAACAAAABmVzY3JvdwAAAAAACWNhbmNlbGxlZAAAAAAAAAIAAAAAAAAAAmlkAAAAAAAGAAAAAQAAAAAAAAAFcGF5ZXIAAAAAAAATAAAAAAAAAAI=",
+        "AAAABQAAADRFbWl0dGVkIHdoZW4gb25lIG1pbGVzdG9uZSBpcyByZWxlYXNlZCB0byB0aGUgcGF5ZWUuAAAAAAAAABFNaWxlc3RvbmVSZWxlYXNlZAAAAAAAAAIAAAAGZXNjcm93AAAAAAASbWlsZXN0b25lX3JlbGVhc2VkAAAAAAAFAAAAAAAAAAJpZAAAAAAABgAAAAEAAAAAAAAABWluZGV4AAAAAAAABAAAAAAAAAAAAAAABmNhbGxlcgAAAAAAEwAAAAAAAAAAAAAABXBheWVlAAAAAAAAEwAAAAAAAAAAAAAABmFtb3VudAAAAAAACwAAAAAAAAAC",
         "AAAAAAAAAEpUaGUgY29udHJhY3QgaW50ZXJmYWNlIHZlcnNpb24sIHNoYXJlZCBieSBldmVyeSBjb250cmFjdCBpbiB0aGUKd29ya3NwYWNlLgAAAAAAB3ZlcnNpb24AAAAAAAAAAAEAAAAE",
         "AAAAAAAAABlHZXQgZXNjcm93IGRldGFpbHMgYnkgSUQuAAAAAAAACmdldF9lc2Nyb3cAAAAAAAEAAAAAAAAAAmlkAAAAAAAGAAAAAQAAA+gAAAfQAAAABkVzY3JvdwAA",
         "AAAAAAAAAFtGdW5kIHRoZSBlc2Nyb3cgYnkgdHJhbnNmZXJyaW5nIHRoZSBzcGVjaWZpZWQgYW1vdW50IG9mIHRva2VucyBmcm9tIHBheWVyIHRvIHRoaXMgY29udHJhY3QuAAAAAAtmdW5kX2VzY3JvdwAAAAABAAAAAAAAAAJpZAAAAAAABgAAAAEAAAPpAAAAAgAAB9AAAAALRXNjcm93RXJyb3IA",
         "AAAAAAAAAIRDYW5jZWwgdGhlIGVzY3Jvdy4gQ2FuIGJlIGNhbmNlbGxlZCBieSBwYXllciBpbW1lZGlhdGVseSBpZiB1bmZ1bmRlZCAoQ3JlYXRlZCksCm9yIGFmdGVyIHRoZSBkZWFkbGluZSBoYXMgcGFzc2VkIGlmIGZ1bmRlZCAoRnVuZGVkKS4AAAANY2FuY2VsX2VzY3JvdwAAAAAAAAIAAAAAAAAAAmlkAAAAAAAGAAAAAAAAAAZjYWxsZXIAAAAAABMAAAABAAAD6QAAAAIAAAfQAAAAC0VzY3Jvd0Vycm9yAA==",
         "AAAAAAAAAMVDcmVhdGUgYSBuZXcgZXNjcm93IGFncmVlbWVudC4gVGhlIGNvbnRyYWN0IGFzc2lnbnMgdGhlIGlkIOKAlCB0aGUgZmlyc3QKZXNjcm93IGlzIGAxYCBhbmQgZXZlcnkgc3VjY2Vzc2Z1bCBjcmVhdGlvbiBpbmNyZW1lbnRzIHRoZSBjb3VudGVyIOKAlCBhbmQKcmV0dXJucyBpdC4gSW5pdGlhbCBzdGF0dXMgaXMgQ3JlYXRlZCAodW5mdW5kZWQpLgAAAAAAAA1jcmVhdGVfZXNjcm93AAAAAAAABgAAAAAAAAAFcGF5ZXIAAAAAAAATAAAAAAAAAAVwYXllZQAAAAAAABMAAAAAAAAAB2FyYml0ZXIAAAAAEwAAAAAAAAAFdG9rZW4AAAAAAAATAAAAAAAAAAZhbW91bnQAAAAAAAsAAAAAAAAACGRlYWRsaW5lAAAABgAAAAEAAAPpAAAABgAAB9AAAAALRXNjcm93RXJyb3IA",
         "AAAAAAAAAElSZWZ1bmQgZnVuZHMgdG8gdGhlIHBheWVyLiBBdXRob3JpemVkIGJ5IGVpdGhlciB0aGUgcGF5ZWUgb3IgdGhlIGFyYml0ZXIuAAAAAAAADXJlZnVuZF9lc2Nyb3cAAAAAAAACAAAAAAAAAAJpZAAAAAAABgAAAAAAAAAGY2FsbGVyAAAAAAATAAAAAQAAA+kAAAACAAAH0AAAAAtFc2Nyb3dFcnJvcgA=",
+        "AAAAAAAAADVUaGUgbWlsZXN0b25lIHNjaGVkdWxlIGF0dGFjaGVkIHRvIGFuIGVzY3JvdywgaWYgYW55LgAAAAAAAA5nZXRfbWlsZXN0b25lcwAAAAAAAQAAAAAAAAACaWQAAAAAAAYAAAABAAAD6AAAA+oAAAAL",
         "AAAAAAAAADBUaGUgaWQgdGhhdCB3aWxsIGJlIGFzc2lnbmVkIHRvIHRoZSBuZXh0IGVzY3Jvdy4AAAAObmV4dF9lc2Nyb3dfaWQAAAAAAAAAAAABAAAABg==",
-        "AAAAAAAAAEpSZWxlYXNlIGZ1bmRzIHRvIHRoZSBwYXllZS4gQXV0aG9yaXplZCBieSBlaXRoZXIgdGhlIHBheWVyIG9yIHRoZSBhcmJpdGVyLgAAAAAADnJlbGVhc2VfZXNjcm93AAAAAAACAAAAAAAAAAJpZAAAAAAABgAAAAAAAAAGY2FsbGVyAAAAAAATAAAAAQAAA+kAAAACAAAH0AAAAAtFc2Nyb3dFcnJvcgA=" ]),
+        "AAAAAAAAAEpSZWxlYXNlIGZ1bmRzIHRvIHRoZSBwYXllZS4gQXV0aG9yaXplZCBieSBlaXRoZXIgdGhlIHBheWVyIG9yIHRoZSBhcmJpdGVyLgAAAAAADnJlbGVhc2VfZXNjcm93AAAAAAACAAAAAAAAAAJpZAAAAAAABgAAAAAAAAAGY2FsbGVyAAAAAAATAAAAAQAAA+kAAAACAAAH0AAAAAtFc2Nyb3dFcnJvcgA=",
+        "AAAAAAAAANdBdHRhY2ggYSBtaWxlc3RvbmUgc2NoZWR1bGUgdG8gYW4gdW5mdW5kZWQgZXNjcm93LgoKYGFtb3VudHNgIG11c3QgY29udGFpbiBhdCBsZWFzdCB0d28gcG9zaXRpdmUgZW50cmllcyBhbmQgc3VtIHRvIHRoZQplc2Nyb3cgYW1vdW50LiBPbmx5IHRoZSBwYXllciBtYXkgY29uZmlndXJlIHRoZSBzY2hlZHVsZSwgYW5kIG9ubHkKYmVmb3JlIHRoZSBlc2Nyb3cgaXMgZnVuZGVkLgAAAAAOc2V0X21pbGVzdG9uZXMAAAAAAAMAAAAAAAAAAmlkAAAAAAAGAAAAAAAAAAZjYWxsZXIAAAAAABMAAAAAAAAAB2Ftb3VudHMAAAAD6gAAAAsAAAABAAAD6QAAAAIAAAfQAAAAC0VzY3Jvd0Vycm9yAA==",
+        "AAAAAAAAAPZSZWxlYXNlIGEgc2luZ2xlIG1pbGVzdG9uZSB0byB0aGUgcGF5ZWUuCgpUaGUgcGF5ZXIgb3IgYXJiaXRlciBtYXkgcmVsZWFzZSBtaWxlc3RvbmVzIHdoaWxlIHRoZSBlc2Nyb3cgaXMgZnVuZGVkCmFuZCB0aGUgZGVhZGxpbmUgaGFzIG5vdCBwYXNzZWQuIEEgbWlsZXN0b25lIGNhbiBvbmx5IGJlIHJlbGVhc2VkIG9uY2U7CnJlbGVhc2luZyB0aGUgZmluYWwgbWlsZXN0b25lIG1hcmtzIHRoZSBlc2Nyb3cgYXMgYFJlbGVhc2VkYC4AAAAAABFyZWxlYXNlX21pbGVzdG9uZQAAAAAAAAMAAAAAAAAAAmlkAAAAAAAGAAAAAAAAAA9taWxlc3RvbmVfaW5kZXgAAAAABAAAAAAAAAAGY2FsbGVyAAAAAAATAAAAAQAAA+kAAAACAAAH0AAAAAtFc2Nyb3dFcnJvcgA=",
+        "AAAAAAAAAC9XaGV0aGVyIGEgc3BlY2lmaWMgbWlsZXN0b25lIGhhcyBiZWVuIHJlbGVhc2VkLgAAAAAVaXNfbWlsZXN0b25lX3JlbGVhc2VkAAAAAAAAAgAAAAAAAAACaWQAAAAAAAYAAAAAAAAAD21pbGVzdG9uZV9pbmRleAAAAAAEAAAAAQAAAAE=" ]),
       options
     )
   }
@@ -169,7 +211,11 @@ export class Client extends ContractClient {
         cancel_escrow: this.txFromJSON<Result<void>>,
         create_escrow: this.txFromJSON<Result<u64>>,
         refund_escrow: this.txFromJSON<Result<void>>,
+        get_milestones: this.txFromJSON<Option<Array<i128>>>,
         next_escrow_id: this.txFromJSON<u64>,
-        release_escrow: this.txFromJSON<Result<void>>
+        release_escrow: this.txFromJSON<Result<void>>,
+        set_milestones: this.txFromJSON<Result<void>>,
+        release_milestone: this.txFromJSON<Result<void>>,
+        is_milestone_released: this.txFromJSON<boolean>
   }
 }
