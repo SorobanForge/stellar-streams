@@ -2130,7 +2130,7 @@ fn test_pause_window_expires_one_second_past_the_limit() {
     // and the recipient can withdraw again even though `paused_at` is stored.
     advance_time(&env, MAX_PAUSE_SECONDS + 1);
     assert_eq!(client.vested(&id), 1001);
-    assert_eq!(client.try_withdraw(&id), Ok(1001));
+    assert_eq!(client.try_withdraw(&id), Ok(Ok(1001)));
 
     // A late `resume` has nothing left to resume.
     assert_eq!(client.try_resume(&id), Err(Ok(StreamError::PauseWindowExceeded)));
