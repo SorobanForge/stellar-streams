@@ -84,5 +84,12 @@ async function recordFixtures(): Promise<void> {
   }
 }
 
-if (process.argv.includes('--check')) await checkFixtures();
-else await recordFixtures();
+async function main() {
+  if (process.argv.includes('--check')) await checkFixtures();
+  else await recordFixtures();
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
