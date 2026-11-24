@@ -276,6 +276,15 @@ wallet's message and logs it at `warn` level. Offer a retry instead of an error
 banner styled as a failure, and never retry automatically — the user has to
 approve the next request.
 
+## Adding a wallet adapter
+
+A new wallet is one class under `src/adapters/` plus a registration entry in
+`WalletProvider` and `capabilities.ts`. The
+[wallet adapter authoring guide](../../docs/wallet-adapters.md) walks through
+the `WalletAdapter` contract, a complete copy-pasteable adapter, the rejection
+vs. cancellation error rules, and the shared test mock (`src/testing/mock-wallet.ts`)
+the adapter suites drive.
+
 ## Development
 
 ```bash

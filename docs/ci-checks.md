@@ -62,6 +62,30 @@ node scripts/check-pr-supply-chain.mjs --base origin/main
 The scan jobs need tooling that CI installs itself; their commands are in the
 sections below.
 
+## Dependency caching
+
+Every job that installs Node or Rust dependencies restores a cache keyed on a
+committed lockfile, so a cache hit skips re-downloading packages and a cache
+miss still produces a correct build:
+
+| Cache                                                | Tool                                                                | Key                                                                       |
+| :--------------------------------------------------- | :------------------------------------------------------------------ | :------------------------------------------------------------------------ |
+| pnpm content-addressable store                       | `actions/setup-node` with `cache: pnpm` and `cache-dependency-path` | `pnpm-lock.yaml`                                                          |
+| Cargo registry, git checkout, and `contracts/target` | `Swatinem/rust-cache` (`workspaces: contracts`)                     | `contracts/Cargo.lock`, the Rust toolchain version, and the target triple |
+
+The Node jobs cover **Lint Codebase**, **Run TypeScript Checks**, **Run Unit
+Tests**, **Verify Production Build**, and the release workflow. The Rust cache
+covers **Test Soroban Contracts**, **Check Generated Bindings**, and the Rust
+leg of CodeQL.
+
+`contracts/Cargo.lock` is committed for the same reason as `pnpm-lock.yaml`:
+it pins the dependency graph that CI builds and tests, and gives the Rust cache
+a stable, committed key. Update it with `cargo update` when contract
+dependencies change, and commit it in the same PR.
+
+The bindings job's pinned Stellar CLI download is not cached; it is fetched on
+each run so a stale binary can never hide a binding-generation regression.
+
 ## Details
 
 ### Lint Codebase
