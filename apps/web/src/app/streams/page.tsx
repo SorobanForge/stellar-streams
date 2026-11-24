@@ -21,12 +21,14 @@ import { useWallet } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
 import {
   Button,
+  DataTable,
   Footer,
   Header,
   Input,
   ProgressBar,
   Skeleton,
   StatusBadge,
+  type DataTableColumn,
 } from '@stellar-starter-kit/ui';
 import {
   useCancelStream,
@@ -361,6 +363,64 @@ export function StreamsDashboard({
   const claimable = stream ? computeClaimable(stream, nowSeconds) : contractClaimable;
   const feeAmount = computeProtocolFee(claimable, feeBps ?? 0);
   const netAmount = claimable - feeAmount;
+
+  const streamStatus = (item: Stream) =>
+    item.cancelled ? 'cancelled' : getStreamMetrics(item, nowSeconds).status;
+
+  // Column order and formatting preserve the bespoke table this replaced.
+  // Amounts stay in XLM (7 decimals) as before; the base-unit listing lives in
+  // the recipient inbox.
+  const streamColumns: DataTableColumn<Stream>[] = [
+    {
+      id: 'id',
+      header: 'ID',
+      sortable: true,
+      sortValue: (item) => item.id,
+      cell: (item) => <span className="font-semibold text-white">#{item.id}</span>,
+    },
+    {
+      id: 'recipient',
+      header: 'Recipient',
+      cell: (item) => formatAddress(item.recipient, 6),
+    },
+    {
+      id: 'total',
+      header: 'Total Amount',
+      sortable: true,
+      sortValue: (item) => item.totalAmount,
+      cell: (item) => `${formatTokenAmount(item.totalAmount, 7)} XLM`,
+    },
+    {
+      id: 'withdrawn',
+      header: 'Withdrawn',
+      sortable: true,
+      sortValue: (item) => item.withdrawn,
+      cell: (item) => `${formatTokenAmount(item.withdrawn, 7)} XLM`,
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      sortable: true,
+      sortValue: streamStatus,
+      cell: (item) => <StatusBadge status={streamStatus(item)} />,
+    },
+    {
+      id: 'action',
+      header: 'Action',
+      cell: (item) => (
+        <button
+          type="button"
+          onClick={() => {
+            setLookupId(item.id);
+            void loadStream(item.id);
+          }}
+          className="text-purple-400 underline hover:text-purple-300"
+        >
+          Inspect
+        </button>
+      ),
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-[#06060c] text-slate-100 selection:bg-purple-500/30 selection:text-purple-200">
@@ -751,85 +811,49 @@ export function StreamsDashboard({
             </div>
           </div>
 
-          {listingLoading && (
-            <div className="space-y-3 rounded-2xl border border-slate-900 bg-slate-950/40 p-6">
-              <Skeleton height="1.5rem" width="30%" rounded="sm" />
-              <Skeleton height="1rem" width="60%" rounded="sm" />
-            </div>
-          )}
-
-          {!listingLoading && isConnected && loadedStreams.length === 0 && (
-            <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-8 text-center">
-              <p className="text-sm text-slate-400">No streams found for this address.</p>
-            </div>
-          )}
+          <DataTable
+            caption={
+              activeAddress
+                ? `Streams for ${formatAddress(activeAddress, 6)}`
+                : 'Streams for the connected wallet'
+            }
+            columns={streamColumns}
+            rows={loadedStreams}
+            getRowKey={(item) => item.id}
+            loading={listingLoading}
+            loadingState={
+              <div className="space-y-3 rounded-2xl border border-slate-900 bg-slate-950/40 p-6">
+                <Skeleton height="1.5rem" width="30%" rounded="sm" />
+                <Skeleton height="1rem" width="60%" rounded="sm" />
+              </div>
+            }
+            emptyState={
+              isConnected ? (
+                <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-8 text-center">
+                  <p className="text-sm text-slate-400">No streams found for this address.</p>
+                </div>
+              ) : null
+            }
+            className="font-mono"
+          />
 
           {!listingLoading && loadedStreams.length > 0 && (
-            <>
-              <div className="overflow-x-auto rounded-2xl border border-slate-900 bg-slate-950/40">
-                <table className="w-full text-left font-mono text-xs">
-                  <thead className="border-b border-slate-900 bg-slate-900/30 text-slate-400 uppercase">
-                    <tr>
-                      <th className="px-4 py-3">ID</th>
-                      <th className="px-4 py-3">Recipient</th>
-                      <th className="px-4 py-3">Total Amount</th>
-                      <th className="px-4 py-3">Withdrawn</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-900 text-slate-300">
-                    {loadedStreams.map((item) => (
-                      <tr key={item.id} className="transition-colors hover:bg-slate-900/20">
-                        <td className="px-4 py-3 font-semibold text-white">#{item.id}</td>
-                        <td className="px-4 py-3">{formatAddress(item.recipient, 6)}</td>
-                        <td className="px-4 py-3">{formatTokenAmount(item.totalAmount, 7)} XLM</td>
-                        <td className="px-4 py-3">{formatTokenAmount(item.withdrawn, 7)} XLM</td>
-                        <td className="px-4 py-3">
-                          <StatusBadge
-                            status={
-                              item.cancelled
-                                ? 'cancelled'
-                                : getStreamMetrics(item, nowSeconds).status
-                            }
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setLookupId(item.id);
-                              void loadStream(item.id);
-                            }}
-                            className="text-purple-400 underline hover:text-purple-300"
-                          >
-                            Inspect
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Pagination Controls */}
-              <div className="flex flex-col items-center justify-center pt-2">
-                {hasMore ? (
-                  <Button
-                    type="button"
-                    onClick={() => void loadMore()}
-                    disabled={loadingMore}
-                    loading={loadingMore}
-                    variant="secondary"
-                    className="px-6 py-2"
-                  >
-                    {loadingMore ? 'Loading more streams...' : 'Load more'}
-                  </Button>
-                ) : (
-                  <p className="text-xs text-slate-500">End of list — all streams loaded</p>
-                )}
-              </div>
-            </>
+            <div className="flex flex-col items-center justify-center pt-2">
+              {hasMore ? (
+                <Button
+                  type="button"
+                  onClick={() => void loadMore()}
+                  disabled={loadingMore}
+                  loading={loadingMore}
+                  variant="secondary"
+                  className="px-6 py-2"
+                >
+                  {loadingMore ? 'Loading more streams...' : 'Load more'}
+                </Button>
+              ) : (
+                <p className="text-xs text-slate-500">End of list — all streams loaded</p>
+              )}
+            </div>
           )}
         </div>
       </main>

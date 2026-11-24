@@ -1,21 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-vi.mock('@albedo-link/intent', () => ({
-  default: {
-    publicKey: vi.fn(),
-    tx: vi.fn(),
-  },
-}));
-
-import albedo from '@albedo-link/intent';
 import { AlbedoAdapter } from './albedo';
 import type { WalletAdapter } from './adapter';
+import { createMockWallet } from '../testing/mock-wallet';
+
+const wallet = createMockWallet();
+
+// The adapter loads the SDK with a dynamic `import()`, so this factory runs on
+// the first wallet call, after `wallet` is initialised.
+vi.mock('@albedo-link/intent', () => wallet.asAlbedoModule());
 
 describe('AlbedoAdapter', () => {
   const adapter = new AlbedoAdapter();
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    wallet.reset();
   });
 
   it('has id albedo and name Albedo', () => {
@@ -23,32 +21,20 @@ describe('AlbedoAdapter', () => {
     expect(adapter.name).toBe('Albedo');
   });
 
-  it('isAvailable true when publicKey is a function', async () => {
-    vi.mocked(albedo.publicKey).mockResolvedValue({
-      pubkey: 'GB_ALBEDO',
-      signature: '',
-      signed_message: '',
-    } as unknown as Awaited<ReturnType<typeof albedo.publicKey>>);
+  it('isAvailable true when the intent client exposes publicKey', async () => {
     expect(await adapter.isAvailable()).toBe(true);
   });
 
   it('connect retrieves pubkey', async () => {
-    vi.mocked(albedo.publicKey).mockResolvedValue({
-      pubkey: 'GB_ALBEDO',
-      signature: '',
-      signed_message: '',
-    } as unknown as Awaited<ReturnType<typeof albedo.publicKey>>);
+    wallet.connect('GB_ALBEDO');
     const key = await adapter.connect();
     expect(key).toBe('GB_ALBEDO');
-    expect(adapter.getPublicKey()).resolves.toBe('GB_ALBEDO');
+    await expect(adapter.getPublicKey()).resolves.toBe('GB_ALBEDO');
+    expect(wallet.calls.map((call) => call.method)).toEqual(['connect', 'connect']);
   });
 
   it('connect throws when no pubkey', async () => {
-    vi.mocked(albedo.publicKey).mockResolvedValue({
-      pubkey: '',
-      signature: '',
-      signed_message: '',
-    } as unknown as Awaited<ReturnType<typeof albedo.publicKey>>);
+    wallet.connect('');
     await expect(adapter.connect()).rejects.toThrow('Failed to retrieve public key from wallet.');
   });
 
@@ -57,15 +43,9 @@ describe('AlbedoAdapter', () => {
   });
 
   it('signTransaction delegates to albedo tx', async () => {
-    vi.mocked(albedo.tx).mockResolvedValue({
-      signed_envelope_xdr: 'signed-albedo-xdr',
-      tx_hash: 'hash',
-      xdr: 'xdr',
-      network: 'testnet',
-      result: 'ok',
-    } as unknown as Awaited<ReturnType<typeof albedo.tx>>);
+    wallet.sign('signed-albedo-xdr');
     const signed = await adapter.signTransaction('xdr', { network: 'MAINNET' });
     expect(signed).toBe('signed-albedo-xdr');
-    expect(albedo.tx).toHaveBeenCalledWith({ xdr: 'xdr', network: 'mainnet' });
+    expect(wallet.calls).toEqual([{ method: 'sign', args: ['xdr', { network: 'mainnet' }] }]);
   });
 });

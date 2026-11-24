@@ -24,6 +24,8 @@ export type {
   StatusBadgeProps,
   StatusBadgeStatus,
 } from './primitives';
+export { DataTable } from './DataTable';
+export type { DataTableColumn, DataTableProps, DataTableSort, SortDirection } from './DataTable';
 export { Header } from './components/Header';
 export { Footer } from './components/Footer';
 export { Logo } from './components/Logo';
