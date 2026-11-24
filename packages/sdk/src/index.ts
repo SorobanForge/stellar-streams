@@ -206,6 +206,24 @@ export interface StreamsClientOptions {
    * Leave this unset to submit the wallet-signed transaction unchanged.
    */
   feeBump?: FeeBumpOptions;
+  /**
+   * A pre-fetched source account to use instead of calling `getAccount` on
+   * first use. Server-side scripts that already hold the account and its
+   * sequence number can skip the initial RPC round trip by passing it here.
+   *
+   * The injected account is used **exactly once** as the starting cache;
+   * after the first write (or an explicit {@link StreamsClient.invalidateAccount}
+   * call) the cache is cleared and subsequent operations re-fetch normally.
+   *
+   * @example
+   * ```typescript
+   * import { Account } from '@stellar/stellar-sdk';
+   * // The account was already fetched for another purpose; reuse it.
+   * const account = new Account(publicKey, '123456');
+   * const client = new StreamsClient({ contractId, rpcUrl, networkPassphrase, publicKey, account });
+   * ```
+   */
+  account?: Account;
 }
 
 /** Details of a {@link StreamsClientOptions.rpcUrls} host rotation. */
@@ -623,7 +641,60 @@ export type SplitErrorCode =
   | 'DuplicateRecipient'
   | 'SplitNotFound'
   | 'Unauthorized'
-  | 'ShareOverflow';
+  | 'ShareOverflow'
+  | 'RecipientIndexOutOfBounds'
+  | 'InvalidStateTransition';
+
+/**
+ * Maps each numeric code from the splits contract's `SplitError` enum onto its
+ * stable {@link SplitErrorCode} name. Must stay in sync with `SplitError` in
+ * `contracts/splits/src/lib.rs`.
+ */
+export const SPLIT_ERROR_CODES: Record<number, SplitErrorCode> = {
+  1: 'EmptyRecipients',
+  2: 'LengthMismatch',
+  3: 'InvalidShares',
+  4: 'InvalidAmount',
+  5: 'DuplicateRecipient',
+  6: 'SplitNotFound',
+  7: 'Unauthorized',
+  8: 'ShareOverflow',
+  9: 'RecipientIndexOutOfBounds',
+  10: 'InvalidStateTransition',
+};
+
+/**
+ * Raised when a splits contract call fails with one of its own contract errors.
+ * Mirrors {@link StreamsError} for the `splits` contract: `code` is the stable
+ * name, `contractCode` is the raw numeric discriminant.
+ *
+ * @example
+ * ```typescript
+ * import { SplitsError } from '@stellar-starter-kit/sdk';
+ *
+ * try {
+ *   await splitsClient.distribute(id, params);
+ * } catch (err) {
+ *   if (err instanceof SplitsError) {
+ *     err.code;         // e.g. 'RecipientIndexOutOfBounds'
+ *     err.contractCode; // e.g. 9
+ *   }
+ * }
+ * ```
+ */
+export class SplitsError extends Error {
+  /** Stable identifier for the splits contract error, e.g. `RecipientIndexOutOfBounds`. */
+  readonly code?: SplitErrorCode;
+  /** The raw numeric code from the contract's `SplitError` enum. */
+  readonly contractCode?: number;
+
+  constructor(message: string, contractCode?: number) {
+    super(message);
+    this.name = 'SplitsError';
+    this.contractCode = contractCode;
+    this.code = contractCode === undefined ? undefined : SPLIT_ERROR_CODES[contractCode];
+  }
+}
 /**
  * The one place the stream contract's numeric codes are named. Must stay in
  * sync with the `StreamError` enum in `contracts/stream/src/lib.rs`; codes
@@ -783,6 +854,58 @@ export interface ListStreamsResult {
 }
 
 /**
+ * Options for {@link iterateStreams}. All fields except `client` and `address`
+ * mirror {@link ListStreamsOptions} and are forwarded to each `listStreams` page.
+ */
+export interface IterateStreamsOptions {
+  /** The `StreamsClient` to page through. */
+  client: { listStreams: (opts: ListStreamsOptions) => Promise<ListStreamsResult> };
+  /** Address (public key or contract id) to filter streams by. */
+  address: string;
+  /** Number of streams to request per page. */
+  pageSize?: number;
+  /** Maximum ledger span to scan. */
+  maxLedgers?: number;
+  /** AbortSignal to cancel iteration between pages. */
+  signal?: AbortSignal;
+}
+
+/**
+ * Async generator that iterates every stream for an address one page at a time,
+ * yielding each {@link Stream} and stopping when the cursor stops advancing.
+ *
+ * A guard prevents infinite loops when the RPC returns the same cursor twice in
+ * a row: if the cursor does not advance, iteration stops immediately.
+ *
+ * @example
+ * ```typescript
+ * for await (const stream of iterateStreams({ client, address: publicKey })) {
+ *   console.log(stream.id);
+ * }
+ * ```
+ */
+export async function* iterateStreams(
+  options: IterateStreamsOptions,
+): AsyncGenerator<Stream, void, unknown> {
+  const { client, address, pageSize, maxLedgers, signal } = options;
+  let cursor: string | undefined;
+  for (;;) {
+    const opts: ListStreamsOptions = { address, pageSize, maxLedgers, signal };
+    if (cursor !== undefined) opts.cursor = cursor;
+    const result = await client.listStreams(opts);
+    for (const stream of result.streams) {
+      yield stream;
+    }
+    // Stop when no results at all or when the cursor did not advance.
+    if (result.streams.length === 0) break;
+    if (result.cursor === cursor) break;
+    cursor = result.cursor;
+    // An empty cursor means the page source is exhausted.
+    if (!cursor) break;
+  }
+}
+
+/**
  * Raised when a `listStreams` cursor is not a paging token returned by the
  * RPC API. Cursors are opaque, so a value from another network or a truncated
  * token fails before any RPC request is made.
@@ -911,6 +1034,10 @@ abstract class SorobanClient {
       );
     }
     this.transport = this.rpc;
+    // Seed the account cache from an injected pre-fetched account, if provided.
+    if (options.account) {
+      this.account = Promise.resolve(options.account);
+    }
   }
 
   /** The RPC host currently serving requests, useful when diagnosing latency. */
@@ -2441,4 +2568,101 @@ function contractErrorCodeFromEvents(
     }
   }
   return undefined;
+}
+
+// ─── #331: standalone waitForTransaction ─────────────────────────────────────
+
+/**
+ * Arguments for {@link waitForTransaction}.
+ */
+export interface WaitForTransactionOptions {
+  /** The transaction hash to poll for. */
+  hash: string;
+  /**
+   * A Soroban RPC server or any object with a compatible `getTransaction`
+   * method. When omitted, `rpcUrl` must be provided.
+   */
+  transport?: { getTransaction(hash: string): Promise<SorobanRpc.Api.GetTransactionResponse> };
+  /**
+   * Soroban RPC URL, e.g. `https://soroban-testnet.stellar.org`.
+   * Required when `transport` is not provided.
+   */
+  rpcUrl?: string;
+  /** Network passphrase — forwarded when constructing a `SorobanRpc.Server` internally. */
+  networkPassphrase?: string;
+  /** Milliseconds between polls. Defaults to 1 000 ms. */
+  pollIntervalMs?: number;
+  /** Maximum milliseconds to wait before giving up. Defaults to 30 000 ms. */
+  pollTimeoutMs?: number;
+  /** Cancels the polling loop when aborted. */
+  signal?: AbortSignal;
+}
+
+/** Result returned by {@link waitForTransaction} when the transaction confirms. */
+export interface WaitForTransactionResult {
+  /** The confirmed transaction hash. */
+  hash: string;
+}
+
+/**
+ * Polls Soroban RPC until the transaction with `hash` succeeds, fails, or
+ * times out. This is the standalone counterpart to the internal poll used by
+ * `StreamsClient` writes: it reuses the same `sleep` / `throwIfAborted`
+ * helpers so callers who submitted a transaction through a different path
+ * (another SDK, the Stellar CLI) get identical status handling and error
+ * messages.
+ *
+ * Resolves with `{ hash }` on SUCCESS; rejects with a {@link StreamsError} on
+ * FAILED; rejects with a plain `Error` on timeout or abort.
+ *
+ * @example
+ * ```typescript
+ * import { waitForTransaction } from '@stellar-starter-kit/sdk';
+ *
+ * const result = await waitForTransaction({
+ *   hash: 'abc...',
+ *   rpcUrl: 'https://soroban-testnet.stellar.org',
+ *   networkPassphrase: 'Test SDF Network ; September 2015',
+ *   pollIntervalMs: 500,
+ *   pollTimeoutMs: 60_000,
+ * });
+ * console.log('confirmed', result.hash);
+ * ```
+ */
+export async function waitForTransaction(
+  options: WaitForTransactionOptions,
+): Promise<WaitForTransactionResult> {
+  const { hash, signal, pollIntervalMs = 1_000, pollTimeoutMs = 30_000 } = options;
+
+  let transport: { getTransaction(hash: string): Promise<SorobanRpc.Api.GetTransactionResponse> };
+  if (options.transport) {
+    transport = options.transport;
+  } else if (options.rpcUrl) {
+    transport = new SorobanRpc.Server(options.rpcUrl) as unknown as typeof transport;
+  } else {
+    throw new Error('waitForTransaction requires either `transport` or `rpcUrl`.');
+  }
+
+  const startedAt = Date.now();
+  for (;;) {
+    throwIfAborted(signal);
+    const result = await transport.getTransaction(hash);
+    if (result.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
+      return { hash };
+    }
+    if (result.status === SorobanRpc.Api.GetTransactionStatus.FAILED) {
+      throw new StreamsError(
+        `Transaction ${hash} failed: ${describeTransactionResult(result.resultXdr)}` +
+          describeDiagnostics(result.diagnosticEventsXdr),
+      );
+    }
+    // NOT_FOUND: not yet included in a ledger.
+    const elapsed = Date.now() - startedAt;
+    if (elapsed + pollIntervalMs > pollTimeoutMs) {
+      throw new Error(
+        `Timed out waiting for transaction ${hash} after ${formatElapsed(elapsed)}; it may still land, check the hash on an explorer.`,
+      );
+    }
+    await sleep(pollIntervalMs, signal);
+  }
 }
