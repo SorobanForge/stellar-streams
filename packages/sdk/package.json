@@ -19,13 +19,14 @@
     "build": "tsc --project tsconfig.build.json",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types scripts/record-rpc-fixtures.ts --check && vitest run",
-    "fixtures:record": "node --experimental-strip-types scripts/record-rpc-fixtures.ts",
-    "fixtures:check": "node --experimental-strip-types scripts/record-rpc-fixtures.ts --check",
+    "test": "tsx scripts/record-rpc-fixtures.ts --check && vitest run",
+    "fixtures:record": "node scripts/record-rpc-fixtures.ts",
+    "fixtures:check": "node scripts/record-rpc-fixtures.ts --check",
     "docs": "typedoc"
   },
   "dependencies": {
     "@stellar-starter-kit/types": "workspace:*",
+    "@stellar-starter-kit/wallets": "workspace:*",
     "@stellar/stellar-sdk": "^14.5.0"
   },
   "devDependencies": {
@@ -33,6 +34,7 @@
     "@stellar-starter-kit/eslint-config": "workspace:*",
     "typedoc": "^0.28.20",
     "typescript": "^6.0.3",
+    "tsx": "^4.23.15",
     "vitest": "^4.1.10"
   }
 }
