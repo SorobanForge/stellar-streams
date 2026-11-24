@@ -399,7 +399,7 @@ export interface VestingSchedule {
   /** Seconds the stream has already spent paused (contract `total_paused`). */
   totalPaused?: number;
   /** Unix second the stream was paused at, when it is paused now (`paused_at`). */
-  pausedAt?: number;
+  pausedAt?: number | null;
 }
 
 /** Saturating `a - b` for non-negative seconds counts. */
@@ -426,7 +426,7 @@ export function computeVestedAmount(schedule: VestingSchedule, now: number): big
 
   const cappedNow = Math.min(now, endTime);
   const elapsed = cappedNow - startTime;
-  const activePause = pausedAt !== undefined && now > pausedAt ? cappedNow - pausedAt : 0;
+  const activePause = pausedAt != null && now > pausedAt ? cappedNow - pausedAt : 0;
   const effectiveElapsed = saturatingSub(saturatingSub(elapsed, totalPaused), activePause);
 
   const duration = endTime - startTime;
@@ -458,7 +458,7 @@ export interface ClaimableStream {
   /** Seconds the stream has already spent paused (contract `total_paused`). */
   totalPaused?: number;
   /** Unix second the stream was paused at, when it is paused now (`paused_at`). */
-  pausedAt?: number;
+  pausedAt?: number | null;
 }
 
 export function computeClaimable(stream: ClaimableStream, now: number): bigint {
