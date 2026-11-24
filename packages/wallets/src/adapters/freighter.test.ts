@@ -1,29 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { FreighterAdapter } from './freighter';
+import { createMockWallet } from '../testing/mock-wallet';
 
-// The source imports the CommonJS package's default export, while these tests
-// assert on the named ones, so both point at the same mocks.
-vi.mock('@stellar/freighter-api', () => {
-  const isConnected = vi.fn();
-  const getAddress = vi.fn();
-  const requestAccess = vi.fn();
-  const signTransaction = vi.fn();
-  const signAuthEntry = vi.fn();
-  const api = { isConnected, getAddress, requestAccess, signTransaction, signAuthEntry };
-  return { ...api, default: api };
-});
+const wallet = createMockWallet();
 
-import {
-  isConnected,
-  getAddress,
-  requestAccess,
-  signTransaction,
-  signAuthEntry,
-} from '@stellar/freighter-api';
+// The adapter loads the SDK with a dynamic `import()`, so this factory runs on
+// the first wallet call, after `wallet` is initialised.
+vi.mock('@stellar/freighter-api', () => wallet.asFreighterModule());
 
 describe('FreighterAdapter', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    wallet.reset();
   });
 
   function newAdapter(): FreighterAdapter {
@@ -37,40 +24,36 @@ describe('FreighterAdapter', () => {
   });
 
   it('isAvailable returns true when connected', async () => {
-    vi.mocked(isConnected).mockResolvedValue({ isConnected: true });
     const adapter = newAdapter();
     expect(await adapter.isAvailable()).toBe(true);
   });
 
   it('isAvailable returns false when not connected', async () => {
-    vi.mocked(isConnected).mockResolvedValue({ isConnected: false });
+    wallet.disconnect();
     const adapter = newAdapter();
     expect(await adapter.isAvailable()).toBe(false);
   });
 
   it('connect retrieves address via requestAccess', async () => {
-    vi.mocked(isConnected).mockResolvedValue({ isConnected: true });
-    vi.mocked(requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER' });
-    vi.mocked(getAddress).mockResolvedValue({ address: 'GB_FREIGHTER' });
+    wallet.connect('GB_FREIGHTER');
     const adapter = newAdapter();
     const key = await adapter.connect();
     expect(key).toBe('GB_FREIGHTER');
     // getPublicKey asks the extension again instead of serving a cached key.
     await expect(adapter.getPublicKey()).resolves.toBe('GB_FREIGHTER');
-    expect(getAddress).toHaveBeenCalledTimes(1);
+    expect(wallet.calls.map((call) => call.args[0])).toEqual(['requestAccess', 'getAddress']);
   });
 
   it('connect falls back to getAddress when requestAccess fails', async () => {
-    vi.mocked(isConnected).mockResolvedValue({ isConnected: true });
-    vi.mocked(requestAccess).mockRejectedValue(new Error('denied'));
-    vi.mocked(getAddress).mockResolvedValue({ address: 'GB_FALLBACK' });
+    wallet.connect('GB_FALLBACK').reject('denied');
     const adapter = newAdapter();
     const key = await adapter.connect();
     expect(key).toBe('GB_FALLBACK');
+    expect(wallet.calls.map((call) => call.args[0])).toEqual(['requestAccess', 'getAddress']);
   });
 
   it('connect throws when not connected', async () => {
-    vi.mocked(isConnected).mockResolvedValue({ isConnected: false });
+    wallet.disconnect();
     const adapter = newAdapter();
     await expect(adapter.connect()).rejects.toThrow(
       'Freighter wallet extension is not installed or enabled.',
@@ -78,41 +61,42 @@ describe('FreighterAdapter', () => {
   });
 
   it('signTransaction delegates to freighter API', async () => {
-    vi.mocked(signTransaction).mockResolvedValue({
-      signedTxXdr: 'signed-xdr',
-      signerAddress: 'GB_FREIGHTER',
-    });
+    wallet.sign('signed-freighter-xdr');
     const adapter = newAdapter();
     const signed = await adapter.signTransaction('xdr', {
       network: 'TESTNET',
       networkPassphrase: 'custom-passphrase',
     });
-    expect(signed).toBe('signed-xdr');
-    expect(signTransaction).toHaveBeenCalledWith('xdr', {
-      networkPassphrase: 'custom-passphrase',
-      address: '',
-    });
+    expect(signed).toBe('signed-freighter-xdr');
+    expect(wallet.calls).toEqual([
+      {
+        method: 'sign',
+        args: ['xdr', { networkPassphrase: 'custom-passphrase', address: '' }],
+      },
+    ]);
   });
 
   it('signAuthEntry delegates to freighter API', async () => {
-    vi.mocked(signAuthEntry).mockResolvedValue({
-      signedAuthEntry: 'signed-entry-xdr',
-      signerAddress: 'GB_FREIGHTER',
-    });
+    wallet.signAuthEntry('signed-entry-xdr');
     const adapter = newAdapter();
     const signed = await adapter.signAuthEntry('entry-xdr', { network: 'MAINNET' });
     expect(signed).toBe('signed-entry-xdr');
-    expect(signAuthEntry).toHaveBeenCalledWith('entry-xdr', {
-      networkPassphrase: 'Public Global Stellar Network ; September 2015',
-      address: '',
-    });
+    expect(wallet.calls).toEqual([
+      {
+        method: 'signAuthEntry',
+        args: [
+          'entry-xdr',
+          {
+            networkPassphrase: 'Public Global Stellar Network ; September 2015',
+            address: '',
+          },
+        ],
+      },
+    ]);
   });
 
   it('signAuthEntry throws when freighter returns no signature', async () => {
-    vi.mocked(signAuthEntry).mockResolvedValue({
-      signedAuthEntry: null,
-      signerAddress: 'GB_FREIGHTER',
-    });
+    wallet.signAuthEntry(null);
     const adapter = newAdapter();
     await expect(adapter.signAuthEntry('entry-xdr')).rejects.toThrow('Failed to sign auth entry.');
   });
