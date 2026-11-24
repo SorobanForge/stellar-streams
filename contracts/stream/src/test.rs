@@ -1122,6 +1122,50 @@ fn test_reduce_stream_rejects_below_vested_amount() {
 }
 
 #[test]
+fn test_reduce_stream_rejection_leaves_state_untouched() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 500);
+    assert_eq!(client.vested(&id), 500);
+
+    // Snapshot the stream, the token balances and the event log so the
+    // rejected calls below can be checked against exactly what came before.
+    let before = client.get_stream(&id).unwrap();
+    let events_before = env.events().all();
+
+    // Below the 500 that has already vested. Issue #80.
+    assert_eq!(client.try_reduce_stream(&id, &499), Err(Ok(StreamError::ReductionBelowVested)));
+    // Not a reduction at all: equal to, then above, the current total.
+    assert_eq!(client.try_reduce_stream(&id, &1000), Err(Ok(StreamError::InvalidReduction)));
+    assert_eq!(client.try_reduce_stream(&id, &1200), Err(Ok(StreamError::InvalidReduction)));
+
+    // The rejected reductions changed nothing: `get_stream` still reports the
+    // original total and the rest of the stored stream is identical.
+    assert_eq!(client.get_stream(&id).unwrap(), before);
+    assert_eq!(client.get_stream(&id).unwrap().total_amount, 1000);
+    // No event at all was emitted, so in particular no `StreamReduced`.
+    assert_eq!(env.events().all(), events_before);
+    // No refund was transferred to the sender, and no tokens moved anywhere.
+    assert_eq!(token.balance(&sender), 0);
+    assert_eq!(token.balance(&recipient), 0);
+    assert_eq!(token.balance(&client.address), 1000);
+
+    // A valid reduction immediately afterwards still succeeds: the rejected
+    // attempts left the stream reducible and its vesting intact.
+    client.reduce_stream(&id, &600);
+    let reduced = client.get_stream(&id).unwrap();
+    assert_eq!(reduced.total_amount, 600);
+    assert_eq!(reduced.end_time, 600);
+    assert_eq!(token.balance(&sender), 400);
+    assert_eq!(token.balance(&client.address), 600);
+    assert_eq!(client.claimable(&id), 500);
+}
+
+#[test]
 fn test_reduce_stream_requires_sender_auth() {
     let env = Env::default();
     env.mock_all_auths();
