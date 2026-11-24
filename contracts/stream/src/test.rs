@@ -3,10 +3,7 @@
 use super::*;
 use proptest::prelude::*;
 use soroban_sdk::{
-    testutils::{
-        storage::{Instance as _, Persistent as _},
-        Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke,
-    },
+    testutils::{Address as _, Events as _, Ledger as _, MockAuth, MockAuthInvoke},
     Env, Event, IntoVal, String, Val, Vec,
 };
 
@@ -2304,4 +2301,212 @@ fn test_preview_withdraw_reports_paused_and_unknown_streams() {
     assert_eq!(client.try_preview_withdraw(&id), Err(Ok(StreamError::StreamPaused)));
 
     assert_eq!(client.try_preview_withdraw(&99), Err(Ok(StreamError::StreamNotFound)));
+}
+
+// ==================== Issue #295: withdraw_to tests ====================
+
+#[test]
+fn test_withdraw_to_rejects_non_recipient() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+    let outsider = account(&env);
+    let destination = account(&env);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 500);
+
+    let args: Vec<Val> = Vec::from_array(&env, [id.into_val(&env), destination.into_val(&env)]);
+    // Only outsider authorizes: recipient's `require_auth` fails.
+    env.mock_auths(&[MockAuth {
+        address: &outsider,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "withdraw_to",
+            args,
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(client.try_withdraw_to(&id, &destination).is_err());
+
+    // Without any auth, it also fails.
+    env.mock_auths(&[]);
+    assert!(client.try_withdraw_to(&id, &destination).is_err());
+}
+
+#[test]
+fn test_withdraw_to_with_fee_to_third_address() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let sender = account(&env);
+    let recipient = account(&env);
+    let treasury = account(&env);
+    let admin = account(&env);
+    let destination = account(&env);
+    let client = register(&env);
+
+    // Initialize with 100 bps (1%) fee.
+    client.initialize(&admin, &treasury, &100);
+    token.mint(&sender, 1000);
+
+    let now = env.ledger().timestamp();
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, now, now + 1000, now);
+    advance_time(&env, 1000);
+
+    // Recipient withdraws to destination: 1000 claimable, 10 fee to treasury, 990 to destination.
+    let withdrawn = client.withdraw_to(&id, &destination);
+    assert_eq!(withdrawn, 990);
+    assert_eq!(token.balance(&destination), 990);
+    assert_eq!(token.balance(&treasury), 10);
+    assert_eq!(token.balance(&recipient), 0);
+    assert_eq!(token.balance(&client.address), 0);
+
+    let stream = client.get_stream(&id).unwrap();
+    assert_eq!(stream.withdrawn, 1000);
+}
+
+#[test]
+fn test_withdraw_to_paused_stream_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+    let destination = account(&env);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 500);
+
+    client.pause(&id);
+    assert_eq!(client.try_withdraw_to(&id, &destination), Err(Ok(StreamError::StreamPaused)));
+}
+
+// ==================== Issue #294: get_streams tests ====================
+
+#[test]
+fn test_get_streams_mixed_batch_and_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 3000);
+
+    let id1 = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    let id2 = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    // Empty vector returns empty vector.
+    let empty_ids: Vec<u64> = Vec::new(&env);
+    let empty_result = client.get_streams(&empty_ids);
+    assert_eq!(empty_result.len(), 0);
+
+    // Mixed batch: existing, missing, existing in custom order.
+    let mixed_ids: Vec<u64> = Vec::from_array(&env, [id2, 9999, id1, 8888]);
+    let results = client.get_streams(&mixed_ids);
+    assert_eq!(results.len(), 4);
+    assert_eq!(results.get(0).unwrap().map(|s| s.id), Some(id2));
+    assert_eq!(results.get(1).unwrap(), None);
+    assert_eq!(results.get(2).unwrap().map(|s| s.id), Some(id1));
+    assert_eq!(results.get(3).unwrap(), None);
+}
+
+#[test]
+fn test_get_streams_bumps_persistent_ttl() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.min_persistent_entry_ttl = 600_000;
+        l.max_entry_ttl = 3_000_000;
+    });
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    // Move close to expiry.
+    env.ledger().with_mut(|l| l.sequence_number = 590_000);
+    let ids = Vec::from_array(&env, [id]);
+    let res = client.get_streams(&ids);
+    assert!(res.get(0).unwrap().is_some());
+
+    // Past the original expiry, entry is still alive because get_streams bumped its TTL.
+    env.ledger().with_mut(|l| l.sequence_number = 650_000);
+    assert!(client.get_stream(&id).is_some());
+}
+
+// ==================== Issue #298: close_stream tests ====================
+
+#[test]
+fn test_close_stream_rejects_active_stream() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 500);
+
+    // Active (ongoing, not ended, not cancelled) stream must be rejected.
+    assert_eq!(client.try_close_stream(&id), Err(Ok(StreamError::InvalidStateTransition)));
+}
+
+#[test]
+fn test_close_stream_rejects_unclaimed_remainder() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 1000);
+
+    // Ended, but withdrawn is 0 < total_amount (1000).
+    assert_eq!(client.try_close_stream(&id), Err(Ok(StreamError::InvalidStateTransition)));
+
+    // Partially withdrawn (500 < 1000).
+    assert_eq!(client.withdraw(&id), 1000);
+    // Now fully withdrawn (1000 == 1000), close succeeds.
+    assert_eq!(client.close_stream(&id), ());
+}
+
+#[test]
+fn test_close_stream_rejects_cancelled_with_unclaimed_remainder() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 400);
+
+    client.cancel(&id);
+    // Cancelled, but vested remainder (400) not yet withdrawn.
+    assert_eq!(client.try_close_stream(&id), Err(Ok(StreamError::InvalidStateTransition)));
+
+    // Recipient claims the remainder.
+    assert_eq!(client.withdraw(&id), 400);
+    // Now fully withdrawn, close succeeds.
+    assert_eq!(client.close_stream(&id), ());
+}
+
+#[test]
+fn test_close_stream_success_and_double_close() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 1000);
+    assert_eq!(client.withdraw(&id), 1000);
+
+    // Close removes the entry.
+    client.close_stream(&id);
+
+    // get_stream returns None.
+    assert_eq!(client.get_stream(&id), None);
+
+    // withdraw returns StreamNotFound.
+    assert_eq!(client.try_withdraw(&id), Err(Ok(StreamError::StreamNotFound)));
+
+    // Double close returns StreamNotFound.
+    assert_eq!(client.try_close_stream(&id), Err(Ok(StreamError::StreamNotFound)));
 }
