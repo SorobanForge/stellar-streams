@@ -39,9 +39,49 @@ instead of returning an unsigned entry.
 | `AlbedoAdapter`    | `albedo`     | Yes     | No         | Yes               | No              |
 | `RabetAdapter`     | `rabe`       | Yes     | Yes        | Yes               | No              |
 | `HanaAdapter`      | `hana`       | Yes     | No         | Yes               | No              |
+| `LedgerAdapter`    | `ledger`     | Yes     | Yes        | Yes               | No              |
 
 An auth-entry flow that targets a wallet without this capability is a
 follow-up feature, not something the dashboard should attempt today.
+
+## Capability matrix
+
+`WALLET_CAPABILITIES` publishes the same information as data, so a component
+can decide what to render instead of showing a button that will fail with
+`NotSupportedError`.
+
+| Key         | Adapter            | `signAuthEntry` | `hardware` | `deepLink` |
+| ----------- | ------------------ | --------------- | ---------- | ---------- |
+| `freighter` | `FreighterAdapter` | Yes             | No         | No         |
+| `albedo`    | `AlbedoAdapter`    | No              | No         | Yes        |
+| `rabe`      | `RabetAdapter`     | No              | No         | No         |
+| `hana`      | `HanaAdapter`      | No              | No         | No         |
+| `ledger`    | `LedgerAdapter`    | No              | Yes        | No         |
+
+- **`signAuthEntry`** — the adapter implements Soroban auth-entry signing.
+- **`hardware`** — the wallet is a device (Ledger), not an extension or web
+  wallet; Ledger also requires WebHID.
+- **`deepLink`** — the wallet is driven through a web link/intent (Albedo's
+  `@albedo-link/intent`) rather than an injected `window` provider.
+
+The matrix is asserted against the adapters in `capabilities.test.ts`, so
+adding or removing an adapter method fails the build before the table can go
+stale. Read it directly, or through the provider:
+
+```tsx
+import { useWallet, WALLET_CAPABILITIES } from '@stellar-starter-kit/wallets';
+
+// Static lookup, e.g. to label the wallet picker before connecting.
+const ledgerSupportsAuthEntry = WALLET_CAPABILITIES.ledger.signAuthEntry;
+
+export function SignAuthEntryButton() {
+  // Active wallet, from the provider context (null while disconnected).
+  const { capabilities } = useWallet();
+  if (!capabilities?.signAuthEntry) return null;
+
+  return <button type="button">Sign auth entry</button>;
+}
+```
 
 ## Ledger hardware wallet
 
@@ -203,6 +243,15 @@ A rejection is expected behaviour, not a bug. The provider surfaces the
 wallet's message and logs it at `warn` level. Offer a retry instead of an error
 banner styled as a failure, and never retry automatically — the user has to
 approve the next request.
+
+## Adding a wallet adapter
+
+A new wallet is one class under `src/adapters/` plus a registration entry in
+`WalletProvider` and `capabilities.ts`. The
+[wallet adapter authoring guide](../../docs/wallet-adapters.md) walks through
+the `WalletAdapter` contract, a complete copy-pasteable adapter, the rejection
+vs. cancellation error rules, and the shared test mock (`src/testing/mock-wallet.ts`)
+the adapter suites drive.
 
 ## Development
 

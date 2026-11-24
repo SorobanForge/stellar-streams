@@ -25,7 +25,12 @@ import type {
   Stream,
   StreamConfig,
 } from '@stellar-starter-kit/types';
-import { normalizeConfig, normalizeEscrow, normalizeStream } from '@stellar-starter-kit/types';
+import {
+  ContractResponseError,
+  normalizeConfig,
+  normalizeEscrow,
+  normalizeStream,
+} from '@stellar-starter-kit/types';
 
 /**
  * A memo attached to a write transaction. Text memos are for exchange-style
@@ -56,6 +61,17 @@ export interface WriteOptions {
    * simulated CPU/memory cost, and any authorization entries the call needs.
    */
   simulateOnly?: boolean;
+}
+
+/**
+ * A stream's vested and claimable amounts read together, mirroring the
+ * contract's `VestingSummary` struct. Both are in the token's smallest unit.
+ */
+export interface VestingSummary {
+  /** Total amount vested so far, including what has already been withdrawn. */
+  vested: bigint;
+  /** Vested-but-unclaimed amount the recipient could withdraw right now. */
+  claimable: bigint;
 }
 
 /** The result of a submitted write. */
@@ -434,6 +450,49 @@ export function assetContractId(
   return resolved.contractId(networkPassphrase);
 }
 
+/**
+ * The contract interface version this SDK is built against.
+ *
+ * Must match `CONTRACT_VERSION` in `contracts/version/src/lib.rs`, which is the
+ * value every contract's `version()` view returns; it is the one place the
+ * number is written in TypeScript. Bump it in the same release that bumps the
+ * contract interface, then compare deployments against it with
+ * {@link describeVersionMismatch}.
+ */
+export const SUPPORTED_CONTRACT_VERSION = 1;
+
+/**
+ * Compare a contract's reported interface version with the version this SDK was
+ * built against, so a stale dashboard or a mismatched deployment fails loudly
+ * instead of half-working.
+ *
+ * @param onChainVersion - The `u32` reported by
+ *   {@link StreamsClient.getVersion} / {@link EscrowClient.getVersion}.
+ * @param supportedVersion - The version to compare against; defaults to
+ *   {@link SUPPORTED_CONTRACT_VERSION}.
+ * @returns A message explaining the difference, or `null` when the two agree.
+ * @example
+ * ```typescript
+ * import { describeVersionMismatch } from '@stellar-starter-kit/sdk';
+ *
+ * const problem = describeVersionMismatch(await client.getVersion());
+ * if (problem) console.error(problem);
+ * ```
+ */
+export function describeVersionMismatch(
+  onChainVersion: number,
+  supportedVersion: number = SUPPORTED_CONTRACT_VERSION,
+): string | null {
+  if (onChainVersion === supportedVersion) return null;
+  const direction = onChainVersion > supportedVersion ? 'newer' : 'older';
+  return (
+    `The contract reports interface version ${onChainVersion}, which is ${direction} than the ` +
+    `version this SDK is built against (${supportedVersion}). Calls may fail or decode ` +
+    `unexpected values. Upgrade the SDK, or point the client at a version ${supportedVersion} ` +
+    'deployment.'
+  );
+}
+
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_POLL_TIMEOUT_MS = 30_000;
 /** Base fee used for write transactions when the caller does not pass `fee`. */
@@ -444,6 +503,11 @@ const MAX_BACKOFF_MS = 8_000;
 const MAX_LABEL_BYTES = 64;
 /** Must match `MAX_REFERENCE_LEN` in the stream contract. */
 const MAX_REFERENCE_BYTES = 128;
+/**
+ * Most streams one `createStreams` call may create. Must match `MAX_BATCH` in
+ * the stream contract: a larger batch is rejected with `BATCH_TOO_LARGE`.
+ */
+export const MAX_BATCH_STREAMS = 14;
 /** `getStream` calls {@link StreamsClient.listStreams} runs at a time. */
 const STREAM_FETCH_CONCURRENCY = 8;
 
@@ -534,10 +598,6 @@ export type StreamErrorCode =
   | 'BATCH_OVERFLOW'
   | 'STREAM_PAUSED'
   | 'NOT_PAUSED'
-  | 'STREAM_COMPLETED'
-  | 'AMOUNT_OVERFLOW'
-  | 'REDUCTION_BELOW_VESTED'
-  | 'INVALID_REDUCTION'
   | 'SAME_RECIPIENT';
 
 /**
@@ -588,11 +648,7 @@ const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
   15: 'BATCH_OVERFLOW',
   16: 'STREAM_PAUSED',
   17: 'NOT_PAUSED',
-  18: 'STREAM_COMPLETED',
-  19: 'AMOUNT_OVERFLOW',
-  20: 'REDUCTION_BELOW_VESTED',
-  21: 'INVALID_REDUCTION',
-  22: 'SAME_RECIPIENT',
+  20: 'SAME_RECIPIENT',
 };
 
 /**
@@ -658,7 +714,12 @@ export type EscrowErrorCode =
   | 'INVALID_STATE_TRANSITION'
   | 'DEADLINE_NOT_REACHED'
   | 'DEADLINE_EXPIRED'
-  | 'ALREADY_FINALIZED';
+  | 'ALREADY_FINALIZED'
+  | 'INVALID_DEADLINE'
+  | 'MILESTONE_SCHEDULE_NOT_FOUND'
+  | 'MILESTONE_INDEX_OUT_OF_RANGE'
+  | 'MILESTONE_ALREADY_RELEASED'
+  | 'MILESTONE_SCHEDULE_INVALID';
 
 /** Events requested per `getEvents` call when {@link StreamsClient.listStreams} pages. */
 export const DEFAULT_EVENT_PAGE_SIZE = 100;
@@ -752,6 +813,11 @@ const ESCROW_ERROR_CODES: Record<number, EscrowErrorCode> = {
   6: 'DEADLINE_NOT_REACHED',
   7: 'DEADLINE_EXPIRED',
   8: 'ALREADY_FINALIZED',
+  9: 'INVALID_DEADLINE',
+  10: 'MILESTONE_SCHEDULE_NOT_FOUND',
+  11: 'MILESTONE_INDEX_OUT_OF_RANGE',
+  12: 'MILESTONE_ALREADY_RELEASED',
+  13: 'MILESTONE_SCHEDULE_INVALID',
 };
 
 /** The escrow counterpart of `StreamsError`; raised for `EscrowClient` failures. */
@@ -767,6 +833,16 @@ export class EscrowError extends Error {
     this.contractCode = contractCode;
     this.code = contractCode === undefined ? undefined : ESCROW_ERROR_CODES[contractCode];
   }
+}
+
+/** Arguments for {@link EscrowClient.releaseMilestone}. */
+export interface ReleaseMilestoneParams {
+  /** Escrow id as `bigint`, `number`, or decimal string. */
+  id: bigint | number | string;
+  /** Zero-based index of the milestone to release. */
+  index: number;
+  /** Payer or arbiter authorizing the release. */
+  caller: string;
 }
 
 /**
@@ -921,6 +997,30 @@ abstract class SorobanClient {
    */
   invalidateAccount(): void {
     this.account = null;
+  }
+
+  /**
+   * The deployed contract's interface version, read from its `version()` view.
+   *
+   * `stream`, `splits` and `escrow` all report the shared `CONTRACT_VERSION`
+   * constant, so `StreamsClient` and `EscrowClient` answer with the same number
+   * for one deployment. Compare the result with {@link SUPPORTED_CONTRACT_VERSION}
+   * — {@link describeVersionMismatch} turns the comparison into a message —
+   * before trusting a deployment a dashboard was configured with.
+   *
+   * @returns The contract's `u32` interface version.
+   * @throws StreamsError / EscrowError when the simulation fails.
+   * @example
+   * ```typescript
+   * import { describeVersionMismatch } from '@stellar-starter-kit/sdk';
+   *
+   * const onChain = await client.getVersion();
+   * const problem = describeVersionMismatch(onChain);
+   * if (problem) throw new Error(problem);
+   * ```
+   */
+  async getVersion(): Promise<number> {
+    return (await this.simulate('version')) as number;
   }
 
   /** Simulates a read-only call on the client's contract and returns the decoded result. */
@@ -1146,14 +1246,22 @@ abstract class SorobanClient {
     }
   }
 
-  /** Polls `getTransaction` until the transaction succeeds, fails, or times out. */
-  private async poll(hash: string, signal?: AbortSignal): Promise<{ hash: string }> {
+  /**
+   * Polls `getTransaction` until the transaction succeeds, fails, or times out.
+   * A successful invoke also reports the contract's return value, which is the
+   * only truthful source for values the caller cannot predict, such as the ids
+   * allocated by `create_streams`.
+   */
+  private async poll(
+    hash: string,
+    signal?: AbortSignal,
+  ): Promise<{ hash: string; returnValue?: xdr.ScVal }> {
     const startedAt = Date.now();
     for (;;) {
       throwIfAborted(signal);
       const result = await this.transport.getTransaction(hash);
       if (result.status === SorobanRpc.Api.GetTransactionStatus.SUCCESS) {
-        return { hash };
+        return { hash, returnValue: result.returnValue };
       }
       if (result.status === SorobanRpc.Api.GetTransactionStatus.FAILED) {
         throw new Error(
@@ -1188,6 +1296,44 @@ abstract class SorobanClient {
     );
   }
 }
+
+/** One stream in a {@link StreamsClient.createStreams} batch. */
+export interface CreateStreamsEntry {
+  /** Address that receives the stream. */
+  recipient: string;
+  /** Amount to lock, in the token's smallest unit, as a decimal integer string. */
+  amount: string;
+  /** Unix seconds the stream starts vesting. */
+  startTime: number;
+  /** Unix seconds the stream is fully vested; must be after `startTime`. */
+  endTime: number;
+  /** Unix seconds before which nothing is claimable; between start and end. */
+  cliffTime: number;
+}
+
+/** Arguments for {@link StreamsClient.createStreams}. */
+export interface CreateStreamsParams {
+  /** Account that funds every stream and signs the batch. */
+  sender: string;
+  /** Token contract id (`C...`) every stream locks. */
+  token: string;
+  /** Streams to create, 1 to {@link MAX_BATCH_STREAMS} entries. */
+  entries: CreateStreamsEntry[];
+}
+
+/** The result of a confirmed {@link StreamsClient.createStreams} call. */
+export interface CreateStreamsResult extends WriteResult {
+  /** Ids allocated by the contract, in `entries` order. */
+  ids: bigint[];
+}
+
+/**
+ * `simulateOnly: true` changes the return type of `createStreams` like every
+ * other write; a confirmed batch resolves with its ids and hash.
+ */
+export type CreateStreamsResultFor<O extends WriteOptions> = O extends { simulateOnly: true }
+  ? SimulationResult
+  : CreateStreamsResult;
 
 /**
  * A typed client for the Stellar Streams protocol. Read calls simulate against
@@ -1302,6 +1448,26 @@ export class StreamsClient extends SorobanClient {
    */
   async vested(id: bigint | number | string): Promise<bigint> {
     return (await this.simulate('vested', nativeToScVal(BigInt(id), { type: 'u64' }))) as bigint;
+  }
+
+  /**
+   * Read a stream's vested and claimable amounts in one call, from a single
+   * contract read — cheaper and consistent compared with calling
+   * {@link vested} and {@link claimable} back to back.
+   *
+   * @param id - Stream id as `bigint`, `number`, or decimal string.
+   * @returns `{ vested, claimable }` as `bigint` amounts in the token's smallest unit.
+   * @throws StreamsError when the simulation fails with a contract error, e.g.
+   *   `STREAM_NOT_FOUND` (contract error `#4`) for an unknown id.
+   * @example
+   * ```typescript
+   * const { vested, claimable } = await client.getVestingSummary(stream.id);
+   * console.log(`${claimable} of ${vested} vested is withdrawable now`);
+   * ```
+   */
+  async getVestingSummary(id: bigint | number | string): Promise<VestingSummary> {
+    const raw = await this.simulate('vesting_summary', nativeToScVal(BigInt(id), { type: 'u64' }));
+    return normalizeVestingSummary(raw);
   }
 
   /**
@@ -1507,6 +1673,9 @@ export class StreamsClient extends SorobanClient {
    * Lock tokens and open a new stream. `params.token` may be any token
    * contract id; `params.amount` is in that token's smallest unit, so scale it
    * by the token's own `decimals` (see {@link getTokenMetadata}), not by 7.
+   * `params.amount` accepts a decimal string or a `bigint`: a caller holding a
+   * `bigint` (a claimable or vested result, say) can pass it as-is, and the
+   * client stringifies it before the same validation runs.
    *
    * Inputs are validated before the transaction is built: an invalid address,
    * a non-positive amount, an inconsistent schedule or oversized metadata
@@ -1515,14 +1684,15 @@ export class StreamsClient extends SorobanClient {
    * metadata (empty strings).
    *
    * @param params - Sender, recipient, token, amount in the token's smallest
-   *   unit, the `startTime`/`endTime`/`cliffTime` schedule (Unix seconds), and
-   *   optional `label` (64 bytes) / `reference` (128 bytes) metadata.
+   *   unit (decimal string or `bigint`), the `startTime`/`endTime`/`cliffTime`
+   *   schedule (Unix seconds), and optional `label` (64 bytes) / `reference`
+   *   (128 bytes) metadata.
    * @returns The hash of the confirmed transaction; resolve the new stream id
    *   with {@link nextStreamId} before the call or by reading events after it.
    * @throws Error when a field is invalid — `sender`/`recipient` are not
    *   `G...`/`C...` addresses, `token` is not a `C...` address, `amount` is not
-   *   a positive decimal integer string, `endTime <= startTime`, `cliffTime` is
-   *   outside the schedule, or the metadata is too long.
+   *   a positive integer that fits in an `i128`, `endTime <= startTime`,
+   *   `cliffTime` is outside the schedule, or the metadata is too long.
    * @throws Error when no `publicKey` / `signTransaction` was configured.
    * @throws StreamsError when the pre-flight simulation or the submitted
    *   transaction is rejected by the contract — e.g. `INVALID_AMOUNT`,
@@ -1562,7 +1732,9 @@ export class StreamsClient extends SorobanClient {
     assertAddress(params.sender, 'sender');
     assertAddress(params.recipient, 'recipient');
     assertTokenId(params.token);
-    const amount = parseAmount(params.amount);
+    // `amount` may be a bigint; stringify first so validation and the error
+    // messages are identical for both input forms.
+    const amount = parseAmount(params.amount.toString());
     assertSchedule(params.startTime, params.endTime, params.cliffTime);
     assertMetadata(label, reference);
     return this.invoke(
@@ -1580,6 +1752,100 @@ export class StreamsClient extends SorobanClient {
       ],
       opts,
     );
+  }
+
+  /**
+   * Create up to {@link MAX_BATCH_STREAMS} streams in one transaction, the
+   * payroll path: `sender` funds every stream and authorizes once, instead of
+   * sending one transaction per recipient.
+   *
+   * The contract's `create_streams(sender, token, entries)` takes each entry as
+   * `(recipient, amount, start_time, cliff_time, end_time)`. Entries carry no
+   * metadata: batch streams store an empty `label` and `reference`. The call is
+   * all-or-nothing, so one invalid entry moves no tokens and allocates no ids.
+   *
+   * Every entry is validated with the same rules as {@link createStream} before
+   * the transaction is built, and an empty or oversized batch is rejected
+   * without a network round trip. The resolved `ids` are the ids the contract
+   * allocated, in input order (`ids[i]` belongs to `entries[i]`).
+   *
+   * @param params - `sender`, `token`, and the entries to create.
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns `{ ids, hash }`: the allocated stream ids and the confirmed
+   *   transaction hash. With `simulateOnly: true` it resolves with the
+   *   simulation instead, like every other write.
+   * @throws Error when `sender`/`token` is invalid, `entries` is empty or has
+   *   more than {@link MAX_BATCH_STREAMS} items, or an entry's recipient,
+   *   amount or schedule is invalid — before any network call.
+   * @throws Error when no `publicKey` / `signTransaction` was configured.
+   * @throws StreamsError when the contract rejects the batch — `EMPTY_BATCH`,
+   *   `BATCH_TOO_LARGE`, `BATCH_OVERFLOW`, `INVALID_AMOUNT`,
+   *   `INVALID_START_TIME`, `INVALID_TIME_RANGE` or `INVALID_CLIFF`.
+   * @example
+   * ```typescript
+   * const now = Math.floor(Date.now() / 1_000);
+   * const { ids, hash } = await client.createStreams({
+   *   sender: address,
+   *   token: USDC,
+   *   entries: payroll.map(({ recipient, amount }) => ({
+   *     recipient,
+   *     amount: parseTokenAmount(amount, decimals).toString(),
+   *     startTime: now,
+   *     endTime: now + 30 * 86_400,
+   *     cliffTime: now,
+   *   })),
+   * });
+   * // ids[i] is the stream created for entries[i].
+   * ```
+   */
+  async createStreams<O extends WriteOptions = WriteOptions>(
+    params: CreateStreamsParams,
+    opts: O = {} as O,
+  ): Promise<CreateStreamsResultFor<O>> {
+    assertAddress(params.sender, 'sender');
+    assertTokenId(params.token);
+    if (params.entries.length === 0) {
+      throw new Error('Invalid entries: a batch must contain at least one stream.');
+    }
+    if (params.entries.length > MAX_BATCH_STREAMS) {
+      throw new Error(
+        `Invalid entries: ${params.entries.length} streams. A batch may contain at most ${MAX_BATCH_STREAMS}.`,
+      );
+    }
+
+    // Same per-entry rules as `createStream`; the contract applies them again.
+    // Entries are encoded in the contract's tuple order, which puts the cliff
+    // before the end time.
+    const entries = params.entries.map((entry) => {
+      assertAddress(entry.recipient, 'recipient');
+      const amount = parseAmount(entry.amount);
+      assertSchedule(entry.startTime, entry.endTime, entry.cliffTime);
+      return xdr.ScVal.scvVec([
+        addressToScVal(entry.recipient),
+        nativeToScVal(amount, { type: 'i128' }),
+        nativeToScVal(BigInt(entry.startTime), { type: 'u64' }),
+        nativeToScVal(BigInt(entry.cliffTime), { type: 'u64' }),
+        nativeToScVal(BigInt(entry.endTime), { type: 'u64' }),
+      ]);
+    });
+
+    const outcome = await this.invoke(
+      'create_streams',
+      [addressToScVal(params.sender), addressToScVal(params.token), xdr.ScVal.scvVec(entries)],
+      opts,
+    );
+    if (opts.simulateOnly) return outcome as CreateStreamsResultFor<O>;
+
+    const { hash, returnValue } = outcome as unknown as {
+      hash: string;
+      returnValue?: xdr.ScVal;
+    };
+    if (!returnValue) {
+      throw new Error(
+        `Transaction ${hash} confirmed without a return value, so the created stream ids are unknown.`,
+      );
+    }
+    return { hash, ids: scValToNative(returnValue) as bigint[] } as CreateStreamsResultFor<O>;
   }
 
   /**
@@ -1641,65 +1907,49 @@ export class StreamsClient extends SorobanClient {
   }
 
   /**
-   * Add `amount` to a stream's deposit without changing its payment rate. The
-   * contract extends `endTime` so tokens that already vested stay vested.
-   *
-   * Only the stream's sender can authorize a top-up, and only while the stream
-   * is still streaming.
+   * Pause a stream so nothing further vests until it is resumed. Only the
+   * sender can authorize it; pausing an already-paused stream is a no-op.
    *
    * @param id - Stream id as `bigint`, `number`, or decimal string.
-   * @param amount - Amount to add, in the token's smallest unit. Must be a
-   *   positive integer (`bigint`, `number`, or decimal string).
    * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
-   * @returns The hash of the confirmed transaction. Read the stream again to
-   *   see the new `totalAmount` and `endTime`.
-   * @throws Error when `amount` is not a positive integer, or no wallet is configured.
-   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`,
-   *   `ALREADY_CANCELLED`, `STREAM_COMPLETED`, `AMOUNT_OVERFLOW` or `UNAUTHORIZED`.
+   * @returns The hash of the confirmed transaction.
+   * @throws Error when no `publicKey` / `signTransaction` was configured.
+   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`
+   *   or `ALREADY_CANCELLED`.
+   * @example
+   * ```typescript
+   * await client.pause(stream.id);
+   * // withdraw() now fails with StreamsError code 'STREAM_PAUSED'.
+   * ```
    */
-  async topUp<O extends WriteOptions = WriteOptions>(
+  async pause<O extends WriteOptions = WriteOptions>(
     id: bigint | number | string,
-    amount: bigint | number | string,
     opts: O = {} as O,
   ): Promise<WriteResultFor<O>> {
-    const value = parseAmount(String(amount));
-    return this.invoke(
-      'top_up',
-      [nativeToScVal(BigInt(id), { type: 'u64' }), nativeToScVal(value, { type: 'i128' })],
-      opts,
-    );
+    return this.invoke('pause', [nativeToScVal(BigInt(id), { type: 'u64' })], opts);
   }
 
   /**
-   * Shrink a stream's total without cancelling it. The difference between the
-   * current total and `newTotal` is refunded to the sender immediately, and the
-   * contract shortens `endTime` so the payment rate is preserved.
-   *
-   * Only the stream's sender can authorize a reduction. `newTotal` must be
-   * positive, strictly below the current total, and at least the amount that
-   * has already vested.
+   * Resume a paused stream. Vesting picks up where it stopped; the time spent
+   * paused does not count toward the schedule. Only the sender can authorize
+   * it; resuming a stream that is not paused is a no-op.
    *
    * @param id - Stream id as `bigint`, `number`, or decimal string.
-   * @param newTotal - The new total, in the token's smallest unit.
    * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
-   * @returns The hash of the confirmed transaction. Read the stream again to
-   *   see the reduced `totalAmount` and `endTime`.
-   * @throws Error when `newTotal` is not a positive integer, or no wallet is configured.
-   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`,
-   *   `ALREADY_CANCELLED`, `INVALID_REDUCTION`, `REDUCTION_BELOW_VESTED`,
-   *   `AMOUNT_OVERFLOW` or `UNAUTHORIZED`.
+   * @returns The hash of the confirmed transaction.
+   * @throws Error when no `publicKey` / `signTransaction` was configured.
+   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`
+   *   or `ALREADY_CANCELLED`.
+   * @example
+   * ```typescript
+   * await client.resume(stream.id);
+   * ```
    */
-  async reduceStream<O extends WriteOptions = WriteOptions>(
+  async resume<O extends WriteOptions = WriteOptions>(
     id: bigint | number | string,
-    newTotal: bigint | number | string,
     opts: O = {} as O,
   ): Promise<WriteResultFor<O>> {
-    const value = parseAmount(String(newTotal));
-    return this.invoke(
-      'reduce_stream',
-      [nativeToScVal(BigInt(id), { type: 'u64' }), nativeToScVal(value, { type: 'i128' })],
-      opts,
-    );
+    return this.invoke('resume', [nativeToScVal(BigInt(id), { type: 'u64' })], opts);
   }
 
   /**
@@ -1759,6 +2009,15 @@ export class EscrowClient extends SorobanClient {
     return raw === null ? null : normalizeEscrow(raw);
   }
 
+  /** Whether the zero-based milestone index has already been released. */
+  async isMilestoneReleased(id: bigint | number | string, index: number): Promise<boolean> {
+    return (await this.simulate(
+      'is_milestone_released',
+      nativeToScVal(BigInt(id), { type: 'u64' }),
+      nativeToScVal(index, { type: 'u32' }),
+    )) as boolean;
+  }
+
   /**
    * Create an escrow in the `created` (unfunded) state. `payer` must sign for
    * it; `id` is chosen by the caller and must not exist yet.
@@ -1804,6 +2063,22 @@ export class EscrowClient extends SorobanClient {
     );
   }
 
+  /** Release one zero-based milestone to the payee. `caller` must be the payer or arbiter. */
+  async releaseMilestone<O extends WriteOptions = WriteOptions>(
+    params: ReleaseMilestoneParams,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    return this.invoke(
+      'release_milestone',
+      [
+        nativeToScVal(BigInt(params.id), { type: 'u64' }),
+        nativeToScVal(params.index, { type: 'u32' }),
+        addressToScVal(params.caller),
+      ],
+      opts,
+    );
+  }
+
   /** Refund the funds to the payer. `caller` must be the payee or the arbiter. */
   async refundEscrow<O extends WriteOptions = WriteOptions>(
     id: bigint | number | string,
@@ -1832,6 +2107,21 @@ export class EscrowClient extends SorobanClient {
       opts,
     );
   }
+}
+
+/** Validate a decoded `VestingSummary` struct and keep both amounts as `bigint`. */
+function normalizeVestingSummary(raw: unknown): VestingSummary {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new ContractResponseError('vesting summary', '<response>', 'an object');
+  }
+  const { vested, claimable } = raw as Record<string, unknown>;
+  if (typeof vested !== 'bigint') {
+    throw new ContractResponseError('vesting summary', 'vested', 'a bigint');
+  }
+  if (typeof claimable !== 'bigint') {
+    throw new ContractResponseError('vesting summary', 'claimable', 'a bigint');
+  }
+  return { vested, claimable };
 }
 
 /** The configured endpoints, primary first, without duplicates or blanks. */
@@ -1922,13 +2212,26 @@ function assertStreamAddress(address: string): void {
   }
 }
 
-/** Parses `params.amount` and enforces the contract's `amount > 0`. */
+/** The inclusive range of the contract's `i128` amount argument. */
+const I128_MIN = -(1n << 127n);
+const I128_MAX = (1n << 127n) - 1n;
+
+/**
+ * Parses `params.amount` and enforces the contract's `amount > 0`.
+ *
+ * The range check runs here rather than being left to XDR encoding so an
+ * out-of-range value fails with the same field-named error as any other bad
+ * amount, before a transaction is built.
+ */
 function parseAmount(amount: string): bigint {
   let value: bigint;
   try {
     value = BigInt(amount);
   } catch {
     throw new Error(`Invalid amount: ${amount}. Expected a decimal integer string.`);
+  }
+  if (value < I128_MIN || value > I128_MAX) {
+    throw new Error(`Invalid amount: ${amount}. Must fit in a signed 128-bit integer.`);
   }
   if (value <= 0n) {
     throw new Error(`Invalid amount: ${amount}. Must be greater than 0.`);

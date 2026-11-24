@@ -361,71 +361,66 @@ export function useCancelStream(
   return useContractMutation<StreamsClient, [StreamId]>(client, run, options);
 }
 
-/** Arguments for a sender's top-up: the stream and the amount to add. */
-export interface TopUpStreamArgs {
-  id: StreamId;
-  /** Amount in the token's smallest unit; must be a positive integer. */
-  amount: bigint | number | string;
+/**
+ * Pauses accrual for a stream. Only the sender can authorize it.
+ *
+ * The stream is marked paused optimistically in every mounted
+ * `useStream` for the id, then reconciled by a refetch on success or rolled
+ * back on failure.
+ */
+export function usePauseStream(
+  client: StreamsClient | null,
+  options: StreamMutationOptions = {},
+): StreamMutationResult<[StreamId]> {
+  const run = useCallback(async (streams: StreamsClient, id: StreamId) => {
+    const key = String(id);
+    const now = Math.floor(Date.now() / 1000);
+    const opId = pushOptimistic(streams, key, () => ({ pausedAt: now }));
+    try {
+      const result = await streams.pause(id);
+      settleOptimistic(streams, key, opId);
+      void notifyOptimisticRefresh(streams, key);
+      return result;
+    } catch (err) {
+      rollbackOptimistic(streams, key, opId);
+      throw err;
+    }
+  }, []);
+  return useContractMutation<StreamsClient, [StreamId]>(client, run, options);
 }
 
 /**
- * Tops up a stream, extending its schedule at the current payment rate.
+ * Resumes accrual for a stream. Only the sender can authorize it.
  *
- * The amount is validated as a positive integer before the client is called;
- * contract rejections (e.g. `STREAM_COMPLETED` or `AMOUNT_OVERFLOW`) surface
- * unchanged through `error` and `errorCode`.
+ * The stream is marked resumed optimistically in every mounted
+ * `useStream` for the id, then reconciled by a refetch on success or rolled
+ * back on failure.
  */
-export function useTopUpStream(
+export function useResumeStream(
   client: StreamsClient | null,
   options: StreamMutationOptions = {},
-): StreamMutationResult<[TopUpStreamArgs]> {
-  const run = useCallback(async (streams: StreamsClient, args: TopUpStreamArgs) => {
-    let amount: bigint;
+): StreamMutationResult<[StreamId]> {
+  const run = useCallback(async (streams: StreamsClient, id: StreamId) => {
+    const key = String(id);
+    const now = Math.floor(Date.now() / 1000);
+    const opId = pushOptimistic(streams, key, (stream) => {
+      const added = stream.pausedAt ? Math.max(0, now - stream.pausedAt) : 0;
+      return {
+        pausedAt: null,
+        totalPaused: (stream.totalPaused ?? 0) + added,
+      };
+    });
     try {
-      amount = BigInt(args.amount);
-    } catch {
-      throw new Error(`Invalid top-up amount: ${args.amount}. Use a whole number.`);
+      const result = await streams.resume(id);
+      settleOptimistic(streams, key, opId);
+      void notifyOptimisticRefresh(streams, key);
+      return result;
+    } catch (err) {
+      rollbackOptimistic(streams, key, opId);
+      throw err;
     }
-    if (amount <= 0n) {
-      throw new Error('Top-up amount must be greater than zero.');
-    }
-    return streams.topUp(args.id, amount);
   }, []);
-  return useContractMutation<StreamsClient, [TopUpStreamArgs]>(client, run, options);
-}
-
-/** Arguments for a sender's reduction: the stream and its new total. */
-export interface ReduceStreamArgs {
-  id: StreamId;
-  /** New total in the token's smallest unit; must be a positive integer. */
-  newTotal: bigint | number | string;
-}
-
-/**
- * Reduces a stream's total, refunding the difference to the sender.
- *
- * The new total is validated as a positive integer before the client is
- * called. The contract still enforces that it is below the current total and
- * at least the vested amount, so `REDUCTION_BELOW_VESTED` and
- * `INVALID_REDUCTION` arrive through `errorCode`.
- */
-export function useReduceStream(
-  client: StreamsClient | null,
-  options: StreamMutationOptions = {},
-): StreamMutationResult<[ReduceStreamArgs]> {
-  const run = useCallback(async (streams: StreamsClient, args: ReduceStreamArgs) => {
-    let newTotal: bigint;
-    try {
-      newTotal = BigInt(args.newTotal);
-    } catch {
-      throw new Error(`Invalid new total: ${args.newTotal}. Use a whole number.`);
-    }
-    if (newTotal <= 0n) {
-      throw new Error('New total must be greater than zero.');
-    }
-    return streams.reduceStream(args.id, newTotal);
-  }, []);
-  return useContractMutation<StreamsClient, [ReduceStreamArgs]>(client, run, options);
+  return useContractMutation<StreamsClient, [StreamId]>(client, run, options);
 }
 
 export interface UseStreamsResult {
@@ -435,6 +430,14 @@ export interface UseStreamsResult {
   error: string | null;
   /** Re-run the listing, e.g. after creating or cancelling a stream. */
   refresh: () => Promise<void>;
+  /** Next cursor to fetch, if available. */
+  cursor?: string;
+  /** Whether there is a next page to fetch. */
+  hasMore: boolean;
+  /** Fetch the next page of streams using cursor. */
+  loadMore: () => Promise<void>;
+  /** Whether a loadMore call is in flight. */
+  loadingMore: boolean;
 }
 
 /**
@@ -478,7 +481,10 @@ export function useStreams(
   address: string | null | undefined,
 ): UseStreamsResult {
   const [streams, setStreams] = useState<Stream[]>([]);
+  const [cursor, setCursor] = useState<string | undefined>(undefined);
+  const [hasMore, setHasMore] = useState<boolean>(false);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mounted = useRef(true);
   /** Monotonic token: only the latest request may commit state. */
@@ -497,6 +503,9 @@ export function useStreams(
     const request = ++requestId.current;
     abortRef.current?.abort();
     abortRef.current = null;
+
+    setCursor(undefined);
+    setHasMore(false);
 
     if (!client || !address) {
       setStreams([]);
@@ -523,18 +532,53 @@ export function useStreams(
     try {
       const found = await listStreams.call(client, { address, signal: controller.signal });
       if (!mounted.current || request !== requestId.current || controller.signal.aborted) return;
-      setStreams(Array.isArray(found) ? found : found.streams);
+      const fetchedStreams = Array.isArray(found) ? found : found.streams;
+      const nextCursor = Array.isArray(found) ? undefined : found.cursor;
+      setStreams(fetchedStreams);
+      setCursor(nextCursor);
+      setHasMore(Boolean(nextCursor && nextCursor.length > 0));
     } catch (err) {
       // An aborted request is not an error: the component unmounted or the
       // address changed while it was in flight.
       if (!mounted.current || request !== requestId.current || controller.signal.aborted) return;
       setStreams([]);
+      setCursor(undefined);
+      setHasMore(false);
       setError(err instanceof Error ? err.message : 'Failed to load streams');
     } finally {
       if (mounted.current && request === requestId.current) setLoading(false);
       if (abortRef.current === controller) abortRef.current = null;
     }
   }, [client, address]);
+
+  const loadMore = useCallback(async () => {
+    if (!client || !address || !cursor || loadingMore || loading) return;
+    const request = requestId.current;
+
+    const listStreams = (client as StreamsClient & StreamsLister).listStreams;
+    if (typeof listStreams !== 'function') return;
+
+    setLoadingMore(true);
+    try {
+      const found = await listStreams.call(client, { address, cursor });
+      if (!mounted.current || request !== requestId.current) return;
+      const nextStreams = Array.isArray(found) ? found : found.streams;
+      const nextCursor = Array.isArray(found) ? undefined : found.cursor;
+
+      setStreams((prev) => {
+        const existingIds = new Set(prev.map((s) => s.id));
+        const newItems = nextStreams.filter((s) => !existingIds.has(s.id));
+        return [...prev, ...newItems];
+      });
+      setCursor(nextCursor);
+      setHasMore(Boolean(nextCursor && nextCursor.length > 0 && nextStreams.length > 0));
+    } catch (err) {
+      if (!mounted.current || request !== requestId.current) return;
+      setError(err instanceof Error ? err.message : 'Failed to load more streams');
+    } finally {
+      if (mounted.current && request === requestId.current) setLoadingMore(false);
+    }
+  }, [client, address, cursor, loadingMore, loading]);
 
   useEffect(() => {
     void refresh();
@@ -547,5 +591,5 @@ export function useStreams(
     };
   }, [refresh]);
 
-  return { streams, loading, error, refresh };
+  return { streams, loading, loadingMore, hasMore, cursor, error, refresh, loadMore };
 }

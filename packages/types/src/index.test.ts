@@ -5,9 +5,12 @@ import {
   getStreamStatus,
   isConfig,
   isEscrow,
+  isEscrowSchedule,
+  isSplit,
   isStream,
   normalizeConfig,
   normalizeEscrow,
+  normalizeEscrowSchedule,
   normalizeSplit,
   normalizeStream,
   type Stream,
@@ -37,6 +40,13 @@ const rawEscrow = {
   amount: 100n,
   deadline: 200n,
   status: 1,
+};
+const rawSplit = {
+  id: 1n,
+  creator: 'GCREATOR',
+  recipients: ['GONE', 'GTWO'],
+  shares: [50, 50],
+  total_shares: 100,
 };
 
 const START = 1_000;
@@ -197,6 +207,30 @@ describe('domain normalizers', () => {
     });
   });
 
+  it('normalizes a fully released milestone schedule', () => {
+    expect(normalizeEscrowSchedule([400n, 600n], [true, true])).toEqual({
+      milestones: [
+        { index: 0, amount: 400n, released: true },
+        { index: 1, amount: 600n, released: true },
+      ],
+      releasedAmount: 1000n,
+    });
+  });
+
+  it('normalizes a partially released milestone schedule', () => {
+    expect(normalizeEscrowSchedule([400n, 600n], [true, false])).toEqual({
+      milestones: [
+        { index: 0, amount: 400n, released: true },
+        { index: 1, amount: 600n, released: false },
+      ],
+      releasedAmount: 400n,
+    });
+  });
+
+  it('normalizes an empty milestone schedule', () => {
+    expect(normalizeEscrowSchedule([], [])).toEqual({ milestones: [], releasedAmount: 0n });
+  });
+
   it('normalizes escrow integers and status names', () => {
     expect(
       normalizeEscrow({
@@ -220,22 +254,53 @@ describe('domain normalizers', () => {
       status: 'funded',
     });
   });
+
+  it('normalizes pause fields for running, paused, and legacy streams', () => {
+    const running = normalizeStream({
+      ...rawStream,
+      paused_at: null,
+      total_paused: 0n,
+    });
+    expect(running.pausedAt).toBeNull();
+    expect(running.totalPaused).toBe(0);
+
+    const paused = normalizeStream({
+      ...rawStream,
+      paused_at: 1_500n,
+      total_paused: 120n,
+    });
+    expect(paused.pausedAt).toBe(1_500);
+    expect(paused.totalPaused).toBe(120);
+
+    const legacy = normalizeStream(rawStream);
+    expect(legacy.pausedAt).toBeNull();
+    expect(legacy.totalPaused).toBe(0);
+  });
 });
 
 describe('contract response guards', () => {
-  it('accepts valid stream, config, and escrow payloads', () => {
+  it('accepts valid stream, config, escrow, and split payloads', () => {
     expect(isStream(rawStream)).toBe(true);
     expect(isConfig(rawConfig)).toBe(true);
     expect(isEscrow(rawEscrow)).toBe(true);
+    expect(isSplit(rawSplit)).toBe(true);
   });
 
   it.each([
     ['stream', isStream, { ...rawStream, recipient: undefined }],
     ['stream', isStream, { ...rawStream, cancelled: 'false' }],
+    ['stream', isStream, { ...rawStream, paused_at: 'not-a-bigint' }],
+    ['stream', isStream, { ...rawStream, total_paused: 'not-a-bigint' }],
     ['config', isConfig, { ...rawConfig, fee_bps: '100' }],
     ['config', isConfig, { admin: 'GADMIN', fee_bps: 100 }],
     ['escrow', isEscrow, { ...rawEscrow, amount: '100' }],
     ['escrow', isEscrow, { ...rawEscrow, status: undefined }],
+    ['split', isSplit, { ...rawSplit, id: 1 }],
+    ['split', isSplit, { ...rawSplit, creator: undefined }],
+    ['split', isSplit, { ...rawSplit, recipients: 'GONE' }],
+    ['split', isSplit, { ...rawSplit, recipients: ['GONE', 2] }],
+    ['split', isSplit, { ...rawSplit, shares: ['50'] }],
+    ['split', isSplit, { ...rawSplit, total_shares: '100' }],
   ])('rejects malformed %s payloads', (_kind, guard, payload) => {
     expect(guard(payload)).toBe(false);
   });
@@ -244,11 +309,25 @@ describe('contract response guards', () => {
     expect(() => normalizeStream({ ...rawStream, recipient: undefined })).toThrow(
       new ContractResponseError('stream', 'recipient', 'a string'),
     );
+    expect(() => normalizeStream({ ...rawStream, paused_at: 'invalid' })).toThrow(
+      new ContractResponseError('stream', 'paused_at', 'a bigint or null'),
+    );
+    expect(() => normalizeStream({ ...rawStream, total_paused: 'invalid' })).toThrow(
+      new ContractResponseError('stream', 'total_paused', 'a bigint'),
+    );
     expect(() => normalizeConfig({ ...rawConfig, fee_bps: '100' })).toThrow(
       new ContractResponseError('config', 'fee_bps', 'an integer'),
     );
     expect(() => normalizeEscrow({ ...rawEscrow, amount: '100' })).toThrow(
       new ContractResponseError('escrow', 'amount', 'a bigint'),
     );
+    expect(() => normalizeSplit({ ...rawSplit, total_shares: '100' })).toThrow(
+      new ContractResponseError('split', 'total_shares', 'an integer'),
+    );
+  });
+
+  it('rejects milestone arrays whose lengths differ', () => {
+    expect(isEscrowSchedule([400n, 600n], [true])).toBe(false);
+    expect(() => normalizeEscrowSchedule([400n, 600n], [true])).toThrow(ContractResponseError);
   });
 });

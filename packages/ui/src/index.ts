@@ -1,7 +1,31 @@
 export { cn } from './utils';
 export { REPO_URL } from './constants';
-export { Button, Card, Input } from './primitives';
-export type { ButtonProps, CardProps, InputProps } from './primitives';
+export {
+  Alert,
+  Button,
+  Card,
+  Dialog,
+  Input,
+  Modal,
+  ProgressBar,
+  Skeleton,
+  StatusBadge,
+} from './primitives';
+export type {
+  AlertProps,
+  AlertTone,
+  ButtonProps,
+  CardProps,
+  InputProps,
+  ModalProps,
+  ProgressBarProps,
+  SkeletonProps,
+  SkeletonRounded,
+  StatusBadgeProps,
+  StatusBadgeStatus,
+} from './primitives';
+export { DataTable } from './DataTable';
+export type { DataTableColumn, DataTableProps, DataTableSort, SortDirection } from './DataTable';
 export { Header } from './components/Header';
 export { Footer } from './components/Footer';
 export { Logo } from './components/Logo';

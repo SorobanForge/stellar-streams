@@ -87,6 +87,11 @@ We enforce strict formatting and linting rules using **ESLint** and **Prettier**
 - Check formatting: `pnpm run format:check`
 - Fix formatting: `pnpm run format:write`
 
+Formatting is enforced for Markdown as well as code, so Prettier owns the
+column widths in documentation tables. The [CI checks reference](docs/ci-checks.md)
+lists every workflow job, what it runs, and the exact command to reproduce it
+locally, including the security scans that need their own tooling.
+
 ### Smart contract tests & snapshots
 
 The Soroban contracts live in `contracts/` and their unit tests commit generated
@@ -106,6 +111,14 @@ only writes snapshots, it never prunes the ones that no longer have a test.
 
 Full details, including how to check for stale and orphaned snapshots, are in
 the [development guide](docs/development-guide.md#test-snapshots).
+
+### Adding a wallet adapter
+
+Wallet adapters live in `packages/wallets/src/adapters/`. Read the
+[wallet adapter authoring guide](docs/wallet-adapters.md) before starting: it
+covers the interface, the registry and capability entries a new wallet needs,
+the rejection vs. cancellation error rules, and the shared test mock that keeps
+adapter suites consistent.
 
 ### Git Commit Conventions
 
@@ -145,7 +158,9 @@ git commit -m "feat(sdk): add Stellar wallet connection hook"
    ```
 2. Open a Pull Request on GitHub against the `main` branch.
 3. Fill out the PR template completely.
-4. Ensure all CI checks (linting, testing, and building) pass successfully.
+4. Ensure all CI checks (linting, testing, and building) pass successfully. The
+   [CI checks reference](docs/ci-checks.md) explains what each job runs, how to
+   reproduce it locally, and the known false positives.
 5. Address any review feedback. Once approved, your PR will be merged!
 
 ---

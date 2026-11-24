@@ -80,6 +80,22 @@ export function parseEnvironment(env?: Record<string, string | undefined>): Pars
   const network: Network = isValidNetwork(rawNetwork) ? rawNetwork : DEFAULTS.NETWORK;
   const knownNetworkConfig = KNOWN_NETWORKS[network];
 
+  // Validate that overridden endpoints are absolute http(s) URLs before they
+  // reach the RPC/Horizon clients. A missing scheme would otherwise only fail
+  // later, deep inside the SDK.
+  for (const [field, value] of [
+    [ENV_VARS.HORIZON_URL, rawHorizonUrl],
+    [ENV_VARS.SOROBAN_RPC_URL, rawSorobanRpcUrl],
+  ] as const) {
+    if (value && !isHttpUrl(value)) {
+      errors.push({
+        field,
+        message: `Invalid ${field} "${value}". Must be an absolute http: or https: URL.`,
+        severity: 'error',
+      });
+    }
+  }
+
   // Determine primary network configuration source and validate consistency
   determineNetworkSource(
     { network, rawHorizonUrl, rawSorobanRpcUrl, rawNetworkPassphrase, rawExpertUrl },
@@ -194,8 +210,8 @@ function determineNetworkSource(
     }
   }
 
-  // Check RPC URL
-  if (rawSorobanRpcUrl) {
+  // Check RPC URL (skip malformed URLs; they are already reported above)
+  if (rawSorobanRpcUrl && isHttpUrl(rawSorobanRpcUrl)) {
     const rpcNetwork = getNetworkByRpcUrl(rawSorobanRpcUrl);
     if (!rpcNetwork) {
       errors.push({
@@ -216,8 +232,8 @@ function determineNetworkSource(
     }
   }
 
-  // Check Horizon URL
-  if (rawHorizonUrl) {
+  // Check Horizon URL (skip malformed URLs; they are already reported above)
+  if (rawHorizonUrl && isHttpUrl(rawHorizonUrl)) {
     const horizonNetwork = getNetworkByHorizonUrl(rawHorizonUrl);
     if (!horizonNetwork) {
       errors.push({
@@ -251,6 +267,19 @@ function determineNetworkSource(
   }
 
   return 'network';
+}
+
+/**
+ * Check if a string is an absolute http: or https: URL.
+ * Plain http is allowed so a local quickstart node keeps working.
+ */
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 /**

@@ -5,8 +5,8 @@ import type { CreateStreamParams } from '@stellar-starter-kit/types';
 import {
   useCancelStream,
   useCreateStream,
-  useReduceStream,
-  useTopUpStream,
+  usePauseStream,
+  useResumeStream,
   useWithdrawStream,
 } from './index';
 
@@ -141,73 +141,54 @@ describe('stream mutation hooks', () => {
     expect(result.current.error).toBeNull();
   });
 
-  it('tops up a stream with a validated amount', async () => {
-    const topUp = vi.fn().mockResolvedValue({ hash: 'tx-top-up' });
-    const client = { topUp } as unknown as StreamsClient;
+  it('pauses a stream and surfaces success', async () => {
+    const pause = vi.fn().mockResolvedValue({ hash: 'tx-pause' });
+    const client = { pause } as unknown as StreamsClient;
     const onSuccess = vi.fn();
 
-    const { result } = renderHook(() => useTopUpStream(client, { onSuccess }));
+    const { result } = renderHook(() => usePauseStream(client, { onSuccess }));
 
     await act(async () => {
-      expect(await result.current.mutate({ id: 3, amount: '250' })).toEqual({
-        hash: 'tx-top-up',
-      });
+      expect(await result.current.mutate(7)).toEqual({ hash: 'tx-pause' });
     });
 
-    expect(topUp).toHaveBeenCalledWith(3, 250n);
+    expect(pause).toHaveBeenCalledWith(7);
+    expect(onSuccess).toHaveBeenCalledWith({ hash: 'tx-pause' });
     expect(result.current.status).toBe('success');
-    expect(onSuccess).toHaveBeenCalledWith({ hash: 'tx-top-up' });
+    expect(result.current.hash).toBe('tx-pause');
   });
 
-  it('rejects a non-positive top-up before calling the client', async () => {
-    const topUp = vi.fn();
-    const client = { topUp } as unknown as StreamsClient;
+  it('resumes a stream and surfaces success', async () => {
+    const resume = vi.fn().mockResolvedValue({ hash: 'tx-resume' });
+    const client = { resume } as unknown as StreamsClient;
+    const onSuccess = vi.fn();
 
-    const { result } = renderHook(() => useTopUpStream(client));
+    const { result } = renderHook(() => useResumeStream(client, { onSuccess }));
 
     await act(async () => {
-      expect(await result.current.mutate({ id: 3, amount: '0' })).toBeNull();
+      expect(await result.current.mutate(7)).toEqual({ hash: 'tx-resume' });
     });
 
-    expect(topUp).not.toHaveBeenCalled();
+    expect(resume).toHaveBeenCalledWith(7);
+    expect(onSuccess).toHaveBeenCalledWith({ hash: 'tx-resume' });
+    expect(result.current.status).toBe('success');
+    expect(result.current.hash).toBe('tx-resume');
+  });
+
+  it('surfaces an error when pause fails', async () => {
+    const pause = vi.fn().mockRejectedValue(new Error('unauthorized'));
+    const client = { pause } as unknown as StreamsClient;
+    const onError = vi.fn();
+
+    const { result } = renderHook(() => usePauseStream(client, { onError }));
+
+    await act(async () => {
+      expect(await result.current.mutate(7)).toBeNull();
+    });
+
+    expect(pause).toHaveBeenCalledWith(7);
+    expect(onError).toHaveBeenCalledWith('unauthorized');
     expect(result.current.status).toBe('error');
-    expect(result.current.error).toMatch(/greater than zero/i);
-  });
-
-  it('reduces a stream and keeps the contract error code', async () => {
-    const reduceStream = vi.fn().mockRejectedValue(
-      Object.assign(new Error('Simulation of reduce_stream failed'), {
-        code: 'REDUCTION_BELOW_VESTED',
-      }),
-    );
-    const client = { reduceStream } as unknown as StreamsClient;
-
-    const { result } = renderHook(() => useReduceStream(client));
-
-    await act(async () => {
-      expect(await result.current.mutate({ id: 4, newTotal: '40' })).toBeNull();
-    });
-
-    expect(reduceStream).toHaveBeenCalledWith(4, 40n);
-    expect(result.current.status).toBe('error');
-    expect(result.current.error).toBe('Simulation of reduce_stream failed');
-    expect(result.current.errorCode).toBe('REDUCTION_BELOW_VESTED');
-  });
-
-  it('clears the error code on reset', async () => {
-    const reduceStream = vi
-      .fn()
-      .mockRejectedValue(Object.assign(new Error('rejected'), { code: 'INVALID_REDUCTION' }));
-    const client = { reduceStream } as unknown as StreamsClient;
-
-    const { result } = renderHook(() => useReduceStream(client));
-
-    await act(async () => {
-      await result.current.mutate({ id: 4, newTotal: '40' });
-    });
-    act(() => result.current.reset());
-
-    expect(result.current.status).toBe('idle');
-    expect(result.current.errorCode).toBeNull();
+    expect(result.current.error).toBe('unauthorized');
   });
 });
