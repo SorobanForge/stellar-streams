@@ -1,14 +1,18 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { RabetAdapter } from './rabe';
 import { WalletCancelledError, WalletRejectedError } from '../errors';
+import { createMockWallet } from '../testing/mock-wallet';
 
 const originalWindow = globalThis.window;
+const wallet = createMockWallet();
+
+type RabetWindow = Window & { rabet?: ReturnType<typeof wallet.asRabetProvider> };
 
 describe('RabetAdapter', () => {
   const adapter = new RabetAdapter();
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    wallet.reset();
     (globalThis as { window?: unknown }).window = {};
   });
 
@@ -16,57 +20,48 @@ describe('RabetAdapter', () => {
     (globalThis as { window?: unknown }).window = originalWindow;
   });
 
+  function installRabet(): void {
+    (globalThis.window as RabetWindow).rabet = wallet.asRabetProvider();
+  }
+
   it('has id rabe and name Rabet', () => {
     expect(adapter.id).toBe('rabe');
     expect(adapter.name).toBe('Rabet');
   });
 
   it('isAvailable true when window.rabet is defined', async () => {
-    (globalThis.window as Window & { rabet?: unknown }).rabet = {
-      connect: vi.fn(),
-      sign: vi.fn(),
-    };
+    installRabet();
     expect(await adapter.isAvailable()).toBe(true);
   });
 
   it('isAvailable false when window.rabet is undefined', async () => {
-    delete (globalThis.window as Window & { rabet?: unknown }).rabet;
     expect(await adapter.isAvailable()).toBe(false);
   });
 
   it('connect retrieves publicKey', async () => {
-    (globalThis.window as Window & { rabet?: unknown }).rabet = {
-      connect: vi.fn().mockResolvedValue({ publicKey: 'GB_RABET' }),
-      sign: vi.fn(),
-    };
+    installRabet();
+    wallet.connect('GB_RABET');
     const key = await adapter.connect();
     expect(key).toBe('GB_RABET');
-    expect(adapter.getPublicKey()).resolves.toBe('GB_RABET');
+    await expect(adapter.getPublicKey()).resolves.toBe('GB_RABET');
+    expect(wallet.calls.map((call) => call.method)).toEqual(['connect', 'connect']);
   });
 
   it('connect throws when rabet missing', async () => {
-    delete (globalThis.window as Window & { rabet?: unknown }).rabet;
     await expect(adapter.connect()).rejects.toThrow('Rabet wallet extension is not installed.');
   });
 
   it('signTransaction delegates to rabet sign', async () => {
-    (globalThis.window as Window & { rabet?: unknown }).rabet = {
-      connect: vi.fn().mockResolvedValue({ publicKey: 'GB_RABET' }),
-      sign: vi.fn().mockResolvedValue('signed-rabet-xdr'),
-    };
+    installRabet();
+    wallet.sign('signed-rabet-xdr');
     const signed = await adapter.signTransaction('xdr', { network: 'MAINNET' });
     expect(signed).toBe('signed-rabet-xdr');
-    expect((globalThis.window as Window & { rabet?: unknown }).rabet!.sign).toHaveBeenCalledWith(
-      'xdr',
-      'mainnet',
-    );
+    expect(wallet.calls).toEqual([{ method: 'sign', args: ['xdr', 'mainnet'] }]);
   });
 
   it('maps a rejected signing request to a typed rejection error', async () => {
-    (globalThis.window as Window & { rabet?: unknown }).rabet = {
-      connect: vi.fn(),
-      sign: vi.fn().mockRejectedValue({ error: 'User rejected the request.' }),
-    };
+    installRabet();
+    wallet.reject();
 
     const error = await adapter.signTransaction('xdr').catch((err: unknown) => err);
 
@@ -79,10 +74,8 @@ describe('RabetAdapter', () => {
   });
 
   it('maps a cancelled signing request to a typed cancellation error', async () => {
-    (globalThis.window as Window & { rabet?: unknown }).rabet = {
-      connect: vi.fn(),
-      sign: vi.fn().mockRejectedValue(new Error('Request cancelled by the user.')),
-    };
+    installRabet();
+    wallet.reject('Request cancelled by the user.');
 
     const error = await adapter.signTransaction('xdr').catch((err: unknown) => err);
 
@@ -97,10 +90,8 @@ describe('RabetAdapter', () => {
   });
 
   it('keeps unclassified signing failures as plain errors', async () => {
-    (globalThis.window as Window & { rabet?: unknown }).rabet = {
-      connect: vi.fn(),
-      sign: vi.fn().mockRejectedValue(new Error('Wallet is locked.')),
-    };
+    installRabet();
+    wallet.reject('Wallet is locked.');
 
     const error = await adapter.signTransaction('xdr').catch((err: unknown) => err);
 
@@ -111,21 +102,14 @@ describe('RabetAdapter', () => {
   });
 
   it('disconnect revokes the Rabet session', async () => {
-    const disconnect = vi.fn().mockResolvedValue(undefined);
-    (globalThis.window as Window & { rabet?: unknown }).rabet = {
-      connect: vi.fn().mockResolvedValue({ publicKey: 'GB_RABET' }),
-      sign: vi.fn(),
-      disconnect,
-    };
-
+    installRabet();
     await adapter.connect();
     await adapter.disconnect();
 
-    expect(disconnect).toHaveBeenCalledTimes(1);
+    expect(wallet.calls.filter((call) => call.method === 'disconnect')).toHaveLength(1);
   });
 
   it('disconnect is a no-op when the extension is missing', async () => {
-    delete (globalThis.window as Window & { rabet?: unknown }).rabet;
     await expect(adapter.disconnect()).resolves.toBeUndefined();
   });
 });
