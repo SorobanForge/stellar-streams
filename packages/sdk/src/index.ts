@@ -27,6 +27,12 @@ import type {
 } from '@stellar-starter-kit/types';
 import { normalizeConfig, normalizeEscrow, normalizeStream } from '@stellar-starter-kit/types';
 import { parseTokenAmount } from '@stellar-starter-kit/utils';
+import {
+  ContractResponseError,
+  normalizeConfig,
+  normalizeEscrow,
+  normalizeStream,
+} from '@stellar-starter-kit/types';
 
 /**
  * A memo attached to a write transaction. Text memos are for exchange-style
@@ -63,6 +69,17 @@ export interface WriteOptions {
    * simulated CPU/memory cost, and any authorization entries the call needs.
    */
   simulateOnly?: boolean;
+}
+
+/**
+ * A stream's vested and claimable amounts read together, mirroring the
+ * contract's `VestingSummary` struct. Both are in the token's smallest unit.
+ */
+export interface VestingSummary {
+  /** Total amount vested so far, including what has already been withdrawn. */
+  vested: bigint;
+  /** Vested-but-unclaimed amount the recipient could withdraw right now. */
+  claimable: bigint;
 }
 
 /** The result of a submitted write. */
@@ -448,6 +465,49 @@ export function assetContractId(
   return resolved.contractId(networkPassphrase);
 }
 
+/**
+ * The contract interface version this SDK is built against.
+ *
+ * Must match `CONTRACT_VERSION` in `contracts/version/src/lib.rs`, which is the
+ * value every contract's `version()` view returns; it is the one place the
+ * number is written in TypeScript. Bump it in the same release that bumps the
+ * contract interface, then compare deployments against it with
+ * {@link describeVersionMismatch}.
+ */
+export const SUPPORTED_CONTRACT_VERSION = 1;
+
+/**
+ * Compare a contract's reported interface version with the version this SDK was
+ * built against, so a stale dashboard or a mismatched deployment fails loudly
+ * instead of half-working.
+ *
+ * @param onChainVersion - The `u32` reported by
+ *   {@link StreamsClient.getVersion} / {@link EscrowClient.getVersion}.
+ * @param supportedVersion - The version to compare against; defaults to
+ *   {@link SUPPORTED_CONTRACT_VERSION}.
+ * @returns A message explaining the difference, or `null` when the two agree.
+ * @example
+ * ```typescript
+ * import { describeVersionMismatch } from '@stellar-starter-kit/sdk';
+ *
+ * const problem = describeVersionMismatch(await client.getVersion());
+ * if (problem) console.error(problem);
+ * ```
+ */
+export function describeVersionMismatch(
+  onChainVersion: number,
+  supportedVersion: number = SUPPORTED_CONTRACT_VERSION,
+): string | null {
+  if (onChainVersion === supportedVersion) return null;
+  const direction = onChainVersion > supportedVersion ? 'newer' : 'older';
+  return (
+    `The contract reports interface version ${onChainVersion}, which is ${direction} than the ` +
+    `version this SDK is built against (${supportedVersion}). Calls may fail or decode ` +
+    `unexpected values. Upgrade the SDK, or point the client at a version ${supportedVersion} ` +
+    'deployment.'
+  );
+}
+
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_POLL_TIMEOUT_MS = 30_000;
 /** Base fee used for write transactions when the caller does not pass `fee`. */
@@ -612,6 +672,7 @@ const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
   20: 'REDUCTION_BELOW_VESTED',
   21: 'INVALID_REDUCTION',
   22: 'SAME_RECIPIENT',
+  20: 'SAME_RECIPIENT',
 };
 
 /**
@@ -677,7 +738,12 @@ export type EscrowErrorCode =
   | 'INVALID_STATE_TRANSITION'
   | 'DEADLINE_NOT_REACHED'
   | 'DEADLINE_EXPIRED'
-  | 'ALREADY_FINALIZED';
+  | 'ALREADY_FINALIZED'
+  | 'INVALID_DEADLINE'
+  | 'MILESTONE_SCHEDULE_NOT_FOUND'
+  | 'MILESTONE_INDEX_OUT_OF_RANGE'
+  | 'MILESTONE_ALREADY_RELEASED'
+  | 'MILESTONE_SCHEDULE_INVALID';
 
 /** Events requested per `getEvents` call when {@link StreamsClient.listStreams} pages. */
 export const DEFAULT_EVENT_PAGE_SIZE = 100;
@@ -771,6 +837,11 @@ const ESCROW_ERROR_CODES: Record<number, EscrowErrorCode> = {
   6: 'DEADLINE_NOT_REACHED',
   7: 'DEADLINE_EXPIRED',
   8: 'ALREADY_FINALIZED',
+  9: 'INVALID_DEADLINE',
+  10: 'MILESTONE_SCHEDULE_NOT_FOUND',
+  11: 'MILESTONE_INDEX_OUT_OF_RANGE',
+  12: 'MILESTONE_ALREADY_RELEASED',
+  13: 'MILESTONE_SCHEDULE_INVALID',
 };
 
 /** The escrow counterpart of `StreamsError`; raised for `EscrowClient` failures. */
@@ -786,6 +857,16 @@ export class EscrowError extends Error {
     this.contractCode = contractCode;
     this.code = contractCode === undefined ? undefined : ESCROW_ERROR_CODES[contractCode];
   }
+}
+
+/** Arguments for {@link EscrowClient.releaseMilestone}. */
+export interface ReleaseMilestoneParams {
+  /** Escrow id as `bigint`, `number`, or decimal string. */
+  id: bigint | number | string;
+  /** Zero-based index of the milestone to release. */
+  index: number;
+  /** Payer or arbiter authorizing the release. */
+  caller: string;
 }
 
 /**
@@ -940,6 +1021,30 @@ abstract class SorobanClient {
    */
   invalidateAccount(): void {
     this.account = null;
+  }
+
+  /**
+   * The deployed contract's interface version, read from its `version()` view.
+   *
+   * `stream`, `splits` and `escrow` all report the shared `CONTRACT_VERSION`
+   * constant, so `StreamsClient` and `EscrowClient` answer with the same number
+   * for one deployment. Compare the result with {@link SUPPORTED_CONTRACT_VERSION}
+   * — {@link describeVersionMismatch} turns the comparison into a message —
+   * before trusting a deployment a dashboard was configured with.
+   *
+   * @returns The contract's `u32` interface version.
+   * @throws StreamsError / EscrowError when the simulation fails.
+   * @example
+   * ```typescript
+   * import { describeVersionMismatch } from '@stellar-starter-kit/sdk';
+   *
+   * const onChain = await client.getVersion();
+   * const problem = describeVersionMismatch(onChain);
+   * if (problem) throw new Error(problem);
+   * ```
+   */
+  async getVersion(): Promise<number> {
+    return (await this.simulate('version')) as number;
   }
 
   /** Simulates a read-only call on the client's contract and returns the decoded result. */
@@ -1386,6 +1491,26 @@ export class StreamsClient extends SorobanClient {
    */
   async vested(id: bigint | number | string): Promise<bigint> {
     return (await this.simulate('vested', nativeToScVal(BigInt(id), { type: 'u64' }))) as bigint;
+  }
+
+  /**
+   * Read a stream's vested and claimable amounts in one call, from a single
+   * contract read — cheaper and consistent compared with calling
+   * {@link vested} and {@link claimable} back to back.
+   *
+   * @param id - Stream id as `bigint`, `number`, or decimal string.
+   * @returns `{ vested, claimable }` as `bigint` amounts in the token's smallest unit.
+   * @throws StreamsError when the simulation fails with a contract error, e.g.
+   *   `STREAM_NOT_FOUND` (contract error `#4`) for an unknown id.
+   * @example
+   * ```typescript
+   * const { vested, claimable } = await client.getVestingSummary(stream.id);
+   * console.log(`${claimable} of ${vested} vested is withdrawable now`);
+   * ```
+   */
+  async getVestingSummary(id: bigint | number | string): Promise<VestingSummary> {
+    const raw = await this.simulate('vesting_summary', nativeToScVal(BigInt(id), { type: 'u64' }));
+    return normalizeVestingSummary(raw);
   }
 
   /**
@@ -1887,6 +2012,52 @@ export class StreamsClient extends SorobanClient {
   }
 
   /**
+   * Pause a stream so nothing further vests until it is resumed. Only the
+   * sender can authorize it; pausing an already-paused stream is a no-op.
+   *
+   * @param id - Stream id as `bigint`, `number`, or decimal string.
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns The hash of the confirmed transaction.
+   * @throws Error when no `publicKey` / `signTransaction` was configured.
+   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`
+   *   or `ALREADY_CANCELLED`.
+   * @example
+   * ```typescript
+   * await client.pause(stream.id);
+   * // withdraw() now fails with StreamsError code 'STREAM_PAUSED'.
+   * ```
+   */
+  async pause<O extends WriteOptions = WriteOptions>(
+    id: bigint | number | string,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    return this.invoke('pause', [nativeToScVal(BigInt(id), { type: 'u64' })], opts);
+  }
+
+  /**
+   * Resume a paused stream. Vesting picks up where it stopped; the time spent
+   * paused does not count toward the schedule. Only the sender can authorize
+   * it; resuming a stream that is not paused is a no-op.
+   *
+   * @param id - Stream id as `bigint`, `number`, or decimal string.
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns The hash of the confirmed transaction.
+   * @throws Error when no `publicKey` / `signTransaction` was configured.
+   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`
+   *   or `ALREADY_CANCELLED`.
+   * @example
+   * ```typescript
+   * await client.resume(stream.id);
+   * ```
+   */
+  async resume<O extends WriteOptions = WriteOptions>(
+    id: bigint | number | string,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    return this.invoke('resume', [nativeToScVal(BigInt(id), { type: 'u64' })], opts);
+  }
+
+  /**
    * Hand a stream off to `newRecipient`, e.g. after a key rotation or a sale.
    * The connected wallet signs as the contract's `caller` and must be the
    * stream's current recipient, otherwise the call fails with `UNAUTHORIZED`.
@@ -2015,6 +2186,15 @@ export class EscrowClient extends SorobanClient {
     return raw === null ? null : normalizeEscrow(raw);
   }
 
+  /** Whether the zero-based milestone index has already been released. */
+  async isMilestoneReleased(id: bigint | number | string, index: number): Promise<boolean> {
+    return (await this.simulate(
+      'is_milestone_released',
+      nativeToScVal(BigInt(id), { type: 'u64' }),
+      nativeToScVal(index, { type: 'u32' }),
+    )) as boolean;
+  }
+
   /**
    * Create an escrow in the `created` (unfunded) state. `payer` must sign for
    * it; `id` is chosen by the caller and must not exist yet.
@@ -2060,6 +2240,22 @@ export class EscrowClient extends SorobanClient {
     );
   }
 
+  /** Release one zero-based milestone to the payee. `caller` must be the payer or arbiter. */
+  async releaseMilestone<O extends WriteOptions = WriteOptions>(
+    params: ReleaseMilestoneParams,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    return this.invoke(
+      'release_milestone',
+      [
+        nativeToScVal(BigInt(params.id), { type: 'u64' }),
+        nativeToScVal(params.index, { type: 'u32' }),
+        addressToScVal(params.caller),
+      ],
+      opts,
+    );
+  }
+
   /** Refund the funds to the payer. `caller` must be the payee or the arbiter. */
   async refundEscrow<O extends WriteOptions = WriteOptions>(
     id: bigint | number | string,
@@ -2088,6 +2284,21 @@ export class EscrowClient extends SorobanClient {
       opts,
     );
   }
+}
+
+/** Validate a decoded `VestingSummary` struct and keep both amounts as `bigint`. */
+function normalizeVestingSummary(raw: unknown): VestingSummary {
+  if (typeof raw !== 'object' || raw === null) {
+    throw new ContractResponseError('vesting summary', '<response>', 'an object');
+  }
+  const { vested, claimable } = raw as Record<string, unknown>;
+  if (typeof vested !== 'bigint') {
+    throw new ContractResponseError('vesting summary', 'vested', 'a bigint');
+  }
+  if (typeof claimable !== 'bigint') {
+    throw new ContractResponseError('vesting summary', 'claimable', 'a bigint');
+  }
+  return { vested, claimable };
 }
 
 /** The configured endpoints, primary first, without duplicates or blanks. */

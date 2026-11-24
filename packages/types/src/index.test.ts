@@ -254,6 +254,28 @@ describe('domain normalizers', () => {
       status: 'funded',
     });
   });
+
+  it('normalizes pause fields for running, paused, and legacy streams', () => {
+    const running = normalizeStream({
+      ...rawStream,
+      paused_at: null,
+      total_paused: 0n,
+    });
+    expect(running.pausedAt).toBeNull();
+    expect(running.totalPaused).toBe(0);
+
+    const paused = normalizeStream({
+      ...rawStream,
+      paused_at: 1_500n,
+      total_paused: 120n,
+    });
+    expect(paused.pausedAt).toBe(1_500);
+    expect(paused.totalPaused).toBe(120);
+
+    const legacy = normalizeStream(rawStream);
+    expect(legacy.pausedAt).toBeNull();
+    expect(legacy.totalPaused).toBe(0);
+  });
 });
 
 describe('contract response guards', () => {
@@ -267,6 +289,8 @@ describe('contract response guards', () => {
   it.each([
     ['stream', isStream, { ...rawStream, recipient: undefined }],
     ['stream', isStream, { ...rawStream, cancelled: 'false' }],
+    ['stream', isStream, { ...rawStream, paused_at: 'not-a-bigint' }],
+    ['stream', isStream, { ...rawStream, total_paused: 'not-a-bigint' }],
     ['config', isConfig, { ...rawConfig, fee_bps: '100' }],
     ['config', isConfig, { admin: 'GADMIN', fee_bps: 100 }],
     ['escrow', isEscrow, { ...rawEscrow, amount: '100' }],
@@ -284,6 +308,12 @@ describe('contract response guards', () => {
   it('throws a typed error that names the invalid field at normalization', () => {
     expect(() => normalizeStream({ ...rawStream, recipient: undefined })).toThrow(
       new ContractResponseError('stream', 'recipient', 'a string'),
+    );
+    expect(() => normalizeStream({ ...rawStream, paused_at: 'invalid' })).toThrow(
+      new ContractResponseError('stream', 'paused_at', 'a bigint or null'),
+    );
+    expect(() => normalizeStream({ ...rawStream, total_paused: 'invalid' })).toThrow(
+      new ContractResponseError('stream', 'total_paused', 'a bigint'),
     );
     expect(() => normalizeConfig({ ...rawConfig, fee_bps: '100' })).toThrow(
       new ContractResponseError('config', 'fee_bps', 'an integer'),
