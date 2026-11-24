@@ -89,6 +89,8 @@ pub enum StreamError {
     /// own (`now - paused_at > MAX_PAUSE_SECONDS`). The stream is not frozen:
     /// vesting and `withdraw` have already resumed it.
     PauseWindowExceeded = 23,
+    /// Issue #298: `close_stream` called on an active or unsettled stream.
+    InvalidStateTransition = 24,
 }
 
 /// A single linear payment stream. Tokens are locked in the contract and vest

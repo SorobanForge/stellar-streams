@@ -742,7 +742,8 @@ export type StreamErrorCode =
   | 'BATCH_OVERFLOW'
   | 'STREAM_PAUSED'
   | 'NOT_PAUSED'
-  | 'SAME_RECIPIENT';
+  | 'SAME_RECIPIENT'
+  | 'INVALID_STATE_TRANSITION';
 
 /**
  * Stable identifiers for the splits contract's `SplitError` enum. They share
@@ -794,7 +795,7 @@ const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
   17: 'NOT_PAUSED',
   20: 'SAME_RECIPIENT',
   22: 'SAME_RECIPIENT',
-  23: 'INVALID_STATE_TRANSITION',
+  24: 'INVALID_STATE_TRANSITION',
 };
 
 /**
@@ -2164,6 +2165,23 @@ export class EscrowClient extends SorobanClient {
   async getEscrow(id: bigint | number | string): Promise<Escrow | null> {
     const raw = await this.simulate('get_escrow', nativeToScVal(BigInt(id), { type: 'u64' }));
     return raw === null ? null : normalizeEscrow(raw);
+  }
+
+  /**
+   * The id the next escrow will receive.
+   *
+   * @returns The pending escrow id, starting at `1n` on a fresh deployment.
+   * @throws EscrowError when the simulation fails with a contract error.
+   * @example
+   * ```typescript
+   * const nextId = await client.nextEscrowId();
+   * const { hash } = await client.createEscrow({ ...params, id: nextId });
+   * // `nextId` is the id this write consumed, so the escrow can be read back:
+   * const created = await client.getEscrow(nextId);
+   * ```
+   */
+  async nextEscrowId(): Promise<bigint> {
+    return (await this.simulate('next_escrow_id')) as bigint;
   }
 
   /** Whether the zero-based milestone index has already been released. */
