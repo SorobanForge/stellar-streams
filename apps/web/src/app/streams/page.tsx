@@ -14,6 +14,7 @@ import {
   Wallet,
   Download,
   Inbox,
+  History,
   Pause,
   Play,
 } from 'lucide-react';
@@ -50,6 +51,7 @@ import {
 import type { EnvironmentConfig } from '@stellar-starter-kit/config';
 import { environmentConfig, environmentErrors } from '../../lib/environment';
 import ConfigurationError from '../../components/ConfigurationError';
+import { VestingChart } from '../../components/VestingChart';
 import { REPO_URL } from '../../lib/constants';
 import {
   getStreamDurationSeconds,
@@ -599,6 +601,8 @@ export function StreamsDashboard({
                   </div>
                   <p className="text-[10px] text-slate-500">{streamTimeline(stream, nowSeconds)}</p>
 
+                  <VestingChart stream={stream} />
+
                   <dl className="grid grid-cols-2 gap-4 border-t border-slate-900 pt-4">
                     <div>
                       <dt className="text-[10px] text-slate-500 uppercase">Recipient</dt>
@@ -732,6 +736,12 @@ export function StreamsDashboard({
                 className="inline-flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-900 hover:text-white"
               >
                 <Inbox className="h-4 w-4" aria-hidden="true" /> My streams
+              </Link>
+              <Link
+                href="/activity"
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-900 hover:text-white"
+              >
+                <History className="h-4 w-4" aria-hidden="true" /> Activity
               </Link>
               <Button
                 type="button"

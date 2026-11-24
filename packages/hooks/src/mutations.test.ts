@@ -7,6 +7,7 @@ import {
   useCreateStream,
   usePauseStream,
   useResumeStream,
+  useTopUpStream,
   useWithdrawStream,
 } from './index';
 
@@ -17,6 +18,11 @@ function deferred<T>() {
     resolve = res;
   });
   return { promise, resolve };
+}
+
+/** A rejection shaped like the SDK's `StreamsError`, without importing the built package. */
+function streamsError(message: string, contractCode: number): Error {
+  return Object.assign(new Error(message), { name: 'StreamsError', contractCode });
 }
 
 const params: CreateStreamParams = {
@@ -190,5 +196,181 @@ describe('stream mutation hooks', () => {
     expect(onError).toHaveBeenCalledWith('unauthorized');
     expect(result.current.status).toBe('error');
     expect(result.current.error).toBe('unauthorized');
+  });
+});
+
+describe('stream control mutation hooks', () => {
+  it.each(['pause', 'resume'] as const)('%s walks idle -> pending -> success', async (method) => {
+    const gate = deferred<{ hash: string }>();
+    const call = vi.fn(() => gate.promise);
+    const client = { [method]: call } as unknown as StreamsClient;
+    const controller = new AbortController();
+
+    const { result } = renderHook(() =>
+      method === 'pause' ? usePauseStream(client) : useResumeStream(client),
+    );
+
+    expect(result.current.status).toBe('idle');
+
+    let inFlight: Promise<{ hash: string } | null> = Promise.resolve(null);
+    await act(async () => {
+      inFlight = result.current.mutate(7, { signal: controller.signal });
+    });
+
+    expect(result.current.status).toBe('pending');
+    expect(call).toHaveBeenCalledWith(7, { signal: controller.signal });
+
+    gate.resolve({ hash: `tx-${method}` });
+    await act(async () => {
+      await inFlight;
+    });
+
+    expect(result.current.status).toBe('success');
+    expect(result.current.hash).toBe(`tx-${method}`);
+    expect(result.current.error).toBeNull();
+  });
+
+  it.each(['pause', 'resume'] as const)('%s keeps the StreamsError code', async (method) => {
+    const message = `Simulation of ${method} failed: STREAM_PAUSED (contract error #16) — HostError`;
+    const call = vi.fn().mockRejectedValue(streamsError(message, 16));
+    const client = { [method]: call } as unknown as StreamsClient;
+    const onError = vi.fn();
+
+    const { result } = renderHook(() =>
+      method === 'pause'
+        ? usePauseStream(client, { onError })
+        : useResumeStream(client, { onError }),
+    );
+
+    await act(async () => {
+      expect(await result.current.mutate(3)).toBeNull();
+    });
+
+    expect(result.current.status).toBe('error');
+    expect(result.current.error).toContain('STREAM_PAUSED');
+    expect(result.current.error).toContain('contract error #16');
+    expect(onError).toHaveBeenCalledWith(message);
+  });
+
+  it('ignores a write that settles after unmount', async () => {
+    const gate = deferred<{ hash: string }>();
+    const pause = vi.fn(() => gate.promise);
+    const client = { pause } as unknown as StreamsClient;
+    const onSuccess = vi.fn();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const { result, unmount } = renderHook(() => usePauseStream(client, { onSuccess }));
+
+    let inFlight: Promise<{ hash: string } | null> = Promise.resolve(null);
+    await act(async () => {
+      inFlight = result.current.mutate(1);
+    });
+
+    unmount();
+    gate.resolve({ hash: 'tx-late' });
+    await act(async () => {
+      await inFlight;
+    });
+
+    expect(onSuccess).not.toHaveBeenCalled();
+    expect(consoleError).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+});
+
+describe('useTopUpStream', () => {
+  it('validates the amount, calls topUp, and exposes the confirmed hash', async () => {
+    const topUp = vi.fn().mockResolvedValue({ hash: 'tx-top-up' });
+    const client = { topUp } as unknown as StreamsClient;
+
+    const { result } = renderHook(() => useTopUpStream(client));
+
+    await act(async () => {
+      expect(await result.current.mutate({ id: 7, amount: '500' })).toEqual({
+        hash: 'tx-top-up',
+      });
+    });
+
+    expect(topUp).toHaveBeenCalledWith(7, 500n);
+    expect(result.current.status).toBe('success');
+    expect(result.current.hash).toBe('tx-top-up');
+  });
+
+  it.each(['0', '-5', '1.5', 'abc', 0, 1.5, 0n] as const)(
+    'rejects %s before the client call',
+    async (amount) => {
+      const topUp = vi.fn().mockResolvedValue({ hash: 'never' });
+      const client = { topUp } as unknown as StreamsClient;
+
+      const { result } = renderHook(() => useTopUpStream(client));
+
+      await act(async () => {
+        expect(await result.current.mutate({ id: 1, amount })).toBeNull();
+      });
+
+      expect(topUp).not.toHaveBeenCalled();
+      expect(result.current.status).toBe('error');
+      expect(result.current.error).toContain('Must be a positive integer');
+    },
+  );
+
+  it('surfaces STREAM_COMPLETED unchanged', async () => {
+    const message =
+      'Simulation of top_up failed: STREAM_COMPLETED (contract error #18) — HostError';
+    const topUp = vi.fn().mockRejectedValue(streamsError(message, 18));
+    const client = { topUp } as unknown as StreamsClient;
+
+    const { result } = renderHook(() => useTopUpStream(client));
+
+    await act(async () => {
+      expect(await result.current.mutate({ id: 1, amount: '100' })).toBeNull();
+    });
+
+    expect(result.current.status).toBe('error');
+    expect(result.current.error).toBe(message);
+  });
+
+  it('surfaces AMOUNT_OVERFLOW unchanged', async () => {
+    const message = 'Simulation of top_up failed: AMOUNT_OVERFLOW (contract error #19) — HostError';
+    const topUp = vi.fn().mockRejectedValue(streamsError(message, 19));
+    const client = { topUp } as unknown as StreamsClient;
+
+    const { result } = renderHook(() => useTopUpStream(client));
+
+    await act(async () => {
+      await result.current.mutate({ id: 1, amount: '999999999999999999999' });
+    });
+
+    expect(result.current.error).toBe(message);
+  });
+
+  it('ignores a double submit while the first top-up is in flight', async () => {
+    const gate = deferred<{ hash: string }>();
+    const topUp = vi.fn(() => gate.promise);
+    const client = { topUp } as unknown as StreamsClient;
+
+    const { result } = renderHook(() => useTopUpStream(client));
+
+    let inFlight: Promise<{ hash: string } | null> = Promise.resolve(null);
+    await act(async () => {
+      inFlight = result.current.mutate({ id: 5, amount: 10 });
+    });
+
+    expect(result.current.status).toBe('pending');
+
+    await act(async () => {
+      expect(await result.current.mutate({ id: 5, amount: 10 })).toBeNull();
+    });
+
+    expect(topUp).toHaveBeenCalledTimes(1);
+    expect(result.current.status).toBe('pending');
+
+    gate.resolve({ hash: 'tx-once' });
+    await act(async () => {
+      await inFlight;
+    });
+
+    expect(result.current.status).toBe('success');
+    expect(result.current.hash).toBe('tx-once');
   });
 });

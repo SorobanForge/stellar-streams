@@ -70,19 +70,22 @@ export function useContractMutation<TClient extends object, TArgs extends unknow
       setHash(null);
       try {
         const result = await run(client, ...args);
+        // A transaction that settles after unmount has no UI left to update;
+        // ignore it rather than writing state or firing another component's
+        // callback late.
         if (mounted.current) {
           setHash(result.hash);
           setStatus('success');
+          callbacks.current.onSuccess?.(result);
         }
-        callbacks.current.onSuccess?.(result);
         return result;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Transaction failed';
         if (mounted.current) {
           setError(message);
           setStatus('error');
+          callbacks.current.onError?.(message);
         }
-        callbacks.current.onError?.(message);
         return null;
       } finally {
         inFlight.current = false;
