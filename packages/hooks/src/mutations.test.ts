@@ -2,7 +2,13 @@ import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { StreamsClient } from '@stellar-starter-kit/sdk';
 import type { CreateStreamParams } from '@stellar-starter-kit/types';
-import { useCancelStream, useCreateStream, useWithdrawStream } from './index';
+import {
+  useCancelStream,
+  useCreateStream,
+  usePauseStream,
+  useResumeStream,
+  useWithdrawStream,
+} from './index';
 
 /** A promise plus its resolver, so a test can hold a mutation in flight. */
 function deferred<T>() {
@@ -133,5 +139,56 @@ describe('stream mutation hooks', () => {
 
     expect(result.current.status).toBe('idle');
     expect(result.current.error).toBeNull();
+  });
+
+  it('pauses a stream and surfaces success', async () => {
+    const pause = vi.fn().mockResolvedValue({ hash: 'tx-pause' });
+    const client = { pause } as unknown as StreamsClient;
+    const onSuccess = vi.fn();
+
+    const { result } = renderHook(() => usePauseStream(client, { onSuccess }));
+
+    await act(async () => {
+      expect(await result.current.mutate(7)).toEqual({ hash: 'tx-pause' });
+    });
+
+    expect(pause).toHaveBeenCalledWith(7);
+    expect(onSuccess).toHaveBeenCalledWith({ hash: 'tx-pause' });
+    expect(result.current.status).toBe('success');
+    expect(result.current.hash).toBe('tx-pause');
+  });
+
+  it('resumes a stream and surfaces success', async () => {
+    const resume = vi.fn().mockResolvedValue({ hash: 'tx-resume' });
+    const client = { resume } as unknown as StreamsClient;
+    const onSuccess = vi.fn();
+
+    const { result } = renderHook(() => useResumeStream(client, { onSuccess }));
+
+    await act(async () => {
+      expect(await result.current.mutate(7)).toEqual({ hash: 'tx-resume' });
+    });
+
+    expect(resume).toHaveBeenCalledWith(7);
+    expect(onSuccess).toHaveBeenCalledWith({ hash: 'tx-resume' });
+    expect(result.current.status).toBe('success');
+    expect(result.current.hash).toBe('tx-resume');
+  });
+
+  it('surfaces an error when pause fails', async () => {
+    const pause = vi.fn().mockRejectedValue(new Error('unauthorized'));
+    const client = { pause } as unknown as StreamsClient;
+    const onError = vi.fn();
+
+    const { result } = renderHook(() => usePauseStream(client, { onError }));
+
+    await act(async () => {
+      expect(await result.current.mutate(7)).toBeNull();
+    });
+
+    expect(pause).toHaveBeenCalledWith(7);
+    expect(onError).toHaveBeenCalledWith('unauthorized');
+    expect(result.current.status).toBe('error');
+    expect(result.current.error).toBe('unauthorized');
   });
 });
