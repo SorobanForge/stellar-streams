@@ -112,6 +112,14 @@ only writes snapshots, it never prunes the ones that no longer have a test.
 Full details, including how to check for stale and orphaned snapshots, are in
 the [development guide](docs/development-guide.md#test-snapshots).
 
+### Adding a wallet adapter
+
+Wallet adapters live in `packages/wallets/src/adapters/`. Read the
+[wallet adapter authoring guide](docs/wallet-adapters.md) before starting: it
+covers the interface, the registry and capability entries a new wallet needs,
+the rejection vs. cancellation error rules, and the shared test mock that keeps
+adapter suites consistent.
+
 ### Git Commit Conventions
 
 We follow the **Conventional Commits** specification. Commits must be structured as follows:

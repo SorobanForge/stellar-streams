@@ -14,21 +14,27 @@ import {
   Wallet,
   Download,
   Inbox,
+  Pause,
+  Play,
 } from 'lucide-react';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
 import {
   Button,
+  DataTable,
   Footer,
   Header,
   Input,
   ProgressBar,
   Skeleton,
   StatusBadge,
+  type DataTableColumn,
 } from '@stellar-starter-kit/ui';
 import {
   useCancelStream,
   useCreateStream,
+  usePauseStream,
+  useResumeStream,
   useStreams,
   useWithdrawStream,
 } from '@stellar-starter-kit/hooks';
@@ -65,6 +71,9 @@ const NotificationBanner = dynamic(() => import('../../components/NotificationBa
 function streamTimeline(stream: Stream, nowSeconds: number): string {
   if (stream.cancelled) {
     return 'Cancelled - the unvested balance was refunded to the sender.';
+  }
+  if (stream.pausedAt != null) {
+    return 'Paused - token accrual is temporarily suspended.';
   }
   if (nowSeconds < stream.cliffTime) {
     return `Cliff ends ${formatRelativeTime(stream.cliffTime, nowSeconds)}`;
@@ -245,12 +254,30 @@ export function StreamsDashboard({
     onError: (message) => notify('error', message),
   });
 
+  const pauseStream = usePauseStream(client, {
+    onSuccess: ({ hash }) => {
+      notify('success', `Pause submitted successfully. Tx ${formatAddress(hash, 6)}`);
+      if (stream) void loadStream(stream.id);
+    },
+    onError: (message) => notify('error', message),
+  });
+
+  const resumeStream = useResumeStream(client, {
+    onSuccess: ({ hash }) => {
+      notify('success', `Resume submitted successfully. Tx ${formatAddress(hash, 6)}`);
+      if (stream) void loadStream(stream.id);
+    },
+    onError: (message) => notify('error', message),
+  });
+
   // One mutation per hook instance is allowed at a time; `busy` mirrors that for
   // the buttons that must not start a second write.
   const busy =
     createStream.status === 'pending' ||
     withdrawStream.status === 'pending' ||
-    cancelStream.status === 'pending';
+    cancelStream.status === 'pending' ||
+    pauseStream.status === 'pending' ||
+    resumeStream.status === 'pending';
 
   const runWithdraw = () => {
     if (!stream) return;
@@ -260,6 +287,16 @@ export function StreamsDashboard({
   const runCancel = () => {
     if (!stream) return;
     void cancelStream.mutate(stream.id);
+  };
+
+  const runPause = () => {
+    if (!stream) return;
+    void pauseStream.mutate(stream.id);
+  };
+
+  const runResume = () => {
+    if (!stream) return;
+    void resumeStream.mutate(stream.id);
   };
 
   const handleCreate = async (event: React.FormEvent) => {
@@ -314,14 +351,76 @@ export function StreamsDashboard({
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   const streamMetrics = stream ? getStreamMetrics(stream, nowSeconds) : null;
-  const status = streamMetrics?.status ?? null;
+  const isPaused = Boolean(stream && stream.pausedAt != null);
+  const isSender = Boolean(activeAddress && stream && activeAddress === stream.sender);
+  const status = isPaused ? 'paused' : (streamMetrics?.status ?? null);
   const progress = streamMetrics?.progressBps ?? 0;
+  const currentPauseDuration = stream?.pausedAt ? Math.max(0, nowSeconds - stream.pausedAt) : 0;
+  const accumulatedPauseSeconds = (stream?.totalPaused ?? 0) + currentPauseDuration;
   // Net/fee math mirrors the contract's `withdraw` exactly; keep these in
   // sync with contracts/stream/src/lib.rs (see computeClaimable/computeProtocolFee
   // in packages/utils).
   const claimable = stream ? computeClaimable(stream, nowSeconds) : contractClaimable;
   const feeAmount = computeProtocolFee(claimable, feeBps ?? 0);
   const netAmount = claimable - feeAmount;
+
+  const streamStatus = (item: Stream) =>
+    item.cancelled ? 'cancelled' : getStreamMetrics(item, nowSeconds).status;
+
+  // Column order and formatting preserve the bespoke table this replaced.
+  // Amounts stay in XLM (7 decimals) as before; the base-unit listing lives in
+  // the recipient inbox.
+  const streamColumns: DataTableColumn<Stream>[] = [
+    {
+      id: 'id',
+      header: 'ID',
+      sortable: true,
+      sortValue: (item) => item.id,
+      cell: (item) => <span className="font-semibold text-white">#{item.id}</span>,
+    },
+    {
+      id: 'recipient',
+      header: 'Recipient',
+      cell: (item) => formatAddress(item.recipient, 6),
+    },
+    {
+      id: 'total',
+      header: 'Total Amount',
+      sortable: true,
+      sortValue: (item) => item.totalAmount,
+      cell: (item) => `${formatTokenAmount(item.totalAmount, 7)} XLM`,
+    },
+    {
+      id: 'withdrawn',
+      header: 'Withdrawn',
+      sortable: true,
+      sortValue: (item) => item.withdrawn,
+      cell: (item) => `${formatTokenAmount(item.withdrawn, 7)} XLM`,
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      sortable: true,
+      sortValue: streamStatus,
+      cell: (item) => <StatusBadge status={streamStatus(item)} />,
+    },
+    {
+      id: 'action',
+      header: 'Action',
+      cell: (item) => (
+        <button
+          type="button"
+          onClick={() => {
+            setLookupId(item.id);
+            void loadStream(item.id);
+          }}
+          className="text-purple-400 underline hover:text-purple-300"
+        >
+          Inspect
+        </button>
+      ),
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-[#06060c] text-slate-100 selection:bg-purple-500/30 selection:text-purple-200">
@@ -578,6 +677,12 @@ export function StreamsDashboard({
                       <dt className="text-[10px] text-slate-500 uppercase">Withdrawn</dt>
                       <dd className="mt-1 text-slate-300">{formatAmount(stream.withdrawn)}</dd>
                     </div>
+                    <div>
+                      <dt className="text-[10px] text-slate-500 uppercase">Paused time</dt>
+                      <dd className="mt-1 text-slate-300">
+                        {formatDuration(accumulatedPauseSeconds)}
+                      </dd>
+                    </div>
                     {feeBps !== null && feeBps > 0 ? (
                       <>
                         <div>
@@ -612,9 +717,43 @@ export function StreamsDashboard({
                   </dl>
 
                   <div className="flex flex-wrap gap-3 border-t border-slate-900 pt-4">
+                    {isSender && !isPaused && !stream.cancelled && (
+                      <button
+                        onClick={runPause}
+                        disabled={busy || !isConnected}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-900 disabled:pointer-events-none disabled:opacity-40"
+                      >
+                        {pauseStream.status === 'pending' ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" />
+                        ) : (
+                          <Pause className="h-3.5 w-3.5 text-amber-400" />
+                        )}
+                        Pause
+                      </button>
+                    )}
+                    {isSender && isPaused && !stream.cancelled && (
+                      <button
+                        onClick={runResume}
+                        disabled={busy || !isConnected}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-900 disabled:pointer-events-none disabled:opacity-40"
+                      >
+                        {resumeStream.status === 'pending' ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400" />
+                        ) : (
+                          <Play className="h-3.5 w-3.5 text-emerald-400" />
+                        )}
+                        Resume
+                      </button>
+                    )}
                     <button
                       onClick={runWithdraw}
-                      disabled={busy || !isConnected || contractClaimable <= 0n || stream.cancelled}
+                      disabled={
+                        busy ||
+                        !isConnected ||
+                        contractClaimable <= 0n ||
+                        stream.cancelled ||
+                        isPaused
+                      }
                       className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-900 disabled:pointer-events-none disabled:opacity-40"
                     >
                       <Droplets className="h-3.5 w-3.5 text-cyan-400" /> Withdraw
@@ -672,85 +811,49 @@ export function StreamsDashboard({
             </div>
           </div>
 
-          {listingLoading && (
-            <div className="space-y-3 rounded-2xl border border-slate-900 bg-slate-950/40 p-6">
-              <Skeleton height="1.5rem" width="30%" rounded="sm" />
-              <Skeleton height="1rem" width="60%" rounded="sm" />
-            </div>
-          )}
-
-          {!listingLoading && isConnected && loadedStreams.length === 0 && (
-            <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-8 text-center">
-              <p className="text-sm text-slate-400">No streams found for this address.</p>
-            </div>
-          )}
+          <DataTable
+            caption={
+              activeAddress
+                ? `Streams for ${formatAddress(activeAddress, 6)}`
+                : 'Streams for the connected wallet'
+            }
+            columns={streamColumns}
+            rows={loadedStreams}
+            getRowKey={(item) => item.id}
+            loading={listingLoading}
+            loadingState={
+              <div className="space-y-3 rounded-2xl border border-slate-900 bg-slate-950/40 p-6">
+                <Skeleton height="1.5rem" width="30%" rounded="sm" />
+                <Skeleton height="1rem" width="60%" rounded="sm" />
+              </div>
+            }
+            emptyState={
+              isConnected ? (
+                <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-8 text-center">
+                  <p className="text-sm text-slate-400">No streams found for this address.</p>
+                </div>
+              ) : null
+            }
+            className="font-mono"
+          />
 
           {!listingLoading && loadedStreams.length > 0 && (
-            <>
-              <div className="overflow-x-auto rounded-2xl border border-slate-900 bg-slate-950/40">
-                <table className="w-full text-left font-mono text-xs">
-                  <thead className="border-b border-slate-900 bg-slate-900/30 text-slate-400 uppercase">
-                    <tr>
-                      <th className="px-4 py-3">ID</th>
-                      <th className="px-4 py-3">Recipient</th>
-                      <th className="px-4 py-3">Total Amount</th>
-                      <th className="px-4 py-3">Withdrawn</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-900 text-slate-300">
-                    {loadedStreams.map((item) => (
-                      <tr key={item.id} className="transition-colors hover:bg-slate-900/20">
-                        <td className="px-4 py-3 font-semibold text-white">#{item.id}</td>
-                        <td className="px-4 py-3">{formatAddress(item.recipient, 6)}</td>
-                        <td className="px-4 py-3">{formatTokenAmount(item.totalAmount, 7)} XLM</td>
-                        <td className="px-4 py-3">{formatTokenAmount(item.withdrawn, 7)} XLM</td>
-                        <td className="px-4 py-3">
-                          <StatusBadge
-                            status={
-                              item.cancelled
-                                ? 'cancelled'
-                                : getStreamMetrics(item, nowSeconds).status
-                            }
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setLookupId(item.id);
-                              void loadStream(item.id);
-                            }}
-                            className="text-purple-400 underline hover:text-purple-300"
-                          >
-                            Inspect
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Pagination Controls */}
-              <div className="flex flex-col items-center justify-center pt-2">
-                {hasMore ? (
-                  <Button
-                    type="button"
-                    onClick={() => void loadMore()}
-                    disabled={loadingMore}
-                    loading={loadingMore}
-                    variant="secondary"
-                    className="px-6 py-2"
-                  >
-                    {loadingMore ? 'Loading more streams...' : 'Load more'}
-                  </Button>
-                ) : (
-                  <p className="text-xs text-slate-500">End of list — all streams loaded</p>
-                )}
-              </div>
-            </>
+            <div className="flex flex-col items-center justify-center pt-2">
+              {hasMore ? (
+                <Button
+                  type="button"
+                  onClick={() => void loadMore()}
+                  disabled={loadingMore}
+                  loading={loadingMore}
+                  variant="secondary"
+                  className="px-6 py-2"
+                >
+                  {loadingMore ? 'Loading more streams...' : 'Load more'}
+                </Button>
+              ) : (
+                <p className="text-xs text-slate-500">End of list — all streams loaded</p>
+              )}
+            </div>
           )}
         </div>
       </main>
