@@ -190,6 +190,39 @@ const client = new StreamsClient({
 client.activeRpcUrl; // 'https://rpc-primary.example'
 ```
 
+### Request Timeouts
+
+Every Soroban RPC request is bounded by `requestTimeoutMs`, which defaults to
+`DEFAULT_REQUEST_TIMEOUT_MS` (30 seconds). A request that has not settled by then
+rejects with an `RpcTimeoutError` (`error.name === 'TimeoutError'`, plus `method`,
+`timeoutMs` and `url`), so a hung host cannot leave a UI loading indefinitely.
+
+The timeout wraps the default transport, an injected `transport` (single or
+array) and every `transportFactory` result. It counts as a transport failure, so
+with `rpcUrls` configured the request is retried on the next host. Pass `0` to
+disable it. A hand-built `FailoverTransport` passed as `transport` is used as-is;
+wrap its endpoints in `TimeoutTransport` yourself.
+
+```typescript
+import { RpcTimeoutError, StreamsClient } from '@stellar-starter-kit/sdk';
+
+const client = new StreamsClient({
+  contractId,
+  rpcUrls: ['https://rpc-primary.example', 'https://rpc-backup.example'],
+  networkPassphrase,
+  requestTimeoutMs: 10_000,
+});
+
+try {
+  await client.getStream(id);
+} catch (error) {
+  if (error instanceof RpcTimeoutError) showRetryBanner(error.url);
+}
+```
+
+`requestTimeoutMs` bounds each RPC round trip; `pollTimeoutMs` still bounds how
+long a submitted transaction may take to confirm overall.
+
 ### Listing Streams with Cursors
 
 `listStreams` returns `{ streams, cursor }`. Pass the cursor back to resume an
