@@ -38,7 +38,7 @@ graph TD
 
 ## On-chain layer (`contracts/`)
 
-Rust workspaces built with [soroban-sdk](https://crates.io/crates/soroban-sdk) `27.x`.
+Rust workspaces built with [soroban-sdk](https://docs.rs/soroban-sdk) `27.x`.
 
 | Crate    | Responsibility                                                                         |
 | :------- | :------------------------------------------------------------------------------------- |
