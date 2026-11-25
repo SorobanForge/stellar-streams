@@ -32,11 +32,12 @@ renamed workflow job silently drops out of branch protection until
 These run on a pull request as well. They are not required contexts, but a
 failing check still needs a fix or an explanation on the PR.
 
-| Check                           | Workflow       | Why it is not required                                                                                   |
-| :------------------------------ | :------------- | :------------------------------------------------------------------------------------------------------- |
-| Check Dependencies (cargo-deny) | `ci.yml`       | Rust advisory/licence/source policy; can fail on an advisory with no fix available, so it stays advisory |
-| Analyze Codebase (CodeQL)       | `codeql.yml`   | Security analysis that runs on a schedule as well as on PRs                                              |
-| Validate PR Title               | `pr-check.yml` | Enforces the Conventional Commits type prefix (`feat(web): …`); convention rather than build output      |
+| Check                           | Workflow             | Why it is not required                                                                                   |
+| :------------------------------ | :------------------- | :------------------------------------------------------------------------------------------------------- |
+| Check Dependencies (cargo-deny) | `ci.yml`             | Rust advisory/licence/source policy; can fail on an advisory with no fix available, so it stays advisory |
+| Check Contract WASM Size        | `contract-sizes.yml` | Runs only when `contracts/**` (or the size scripts/budget) changes; reports sizes and fails over budget  |
+| Analyze Codebase (CodeQL)       | `codeql.yml`         | Security analysis that runs on a schedule as well as on PRs                                              |
+| Validate PR Title               | `pr-check.yml`       | Enforces the Conventional Commits type prefix (`feat(web): …`); convention rather than build output      |
 
 ## Local pre-flight
 
@@ -183,6 +184,28 @@ it, or changing a `package.json` `exports` map without rebuilding, fails here.
 are checked too, so renaming a heading breaks links that point at it. The
 workflow deliberately has no `paths:` filter: a path-filtered required check
 never reports on unrelated PRs, which would block every merge.
+
+### Check Contract WASM Size
+
+A careless contract change can inflate the WASM, raising deploy cost and
+edging toward Soroban's 65536-byte contract limit. When a PR touches
+`contracts/**`, `scripts/build-contracts.sh`, `scripts/optimize-contracts.sh`,
+`scripts/check-contract-sizes.sh`, or the workflow itself, this job builds and
+optimizes the contracts, prints each optimized size, and fails above the
+budget in [`contracts/wasm-size-budgets.json`](../contracts/wasm-size-budgets.json).
+Unrelated PRs skip the job, so they stay fast.
+
+Reproduce locally with the [Stellar CLI](https://github.com/stellar/stellar-cli/releases)
+on your `PATH` and the `wasm32v1-none` Rust target:
+
+```bash
+pnpm build:contracts
+pnpm optimize --check
+```
+
+`pnpm optimize` on its own reports the sizes without failing, which is handy
+when checking how much a change grew a contract. The budget is measured on the
+optimized `.optimized.wasm`, the same artifact `deploy-contracts.sh` deploys.
 
 ### Scan PR for Malware
 
