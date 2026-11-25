@@ -39,6 +39,9 @@ pnpm-debug.log*
 .soroban/
 target/
 Cargo.lock
+# The contract workspace commits its lockfile so Rust dependency resolution
+# is reproducible and Swatinem/rust-cache keys on a committed Cargo.lock.
+!contracts/Cargo.lock
 
 # Local binaries
 bin/
@@ -53,3 +56,6 @@ yarn.lock
 # Generated API reference (typedoc output — regenerate with `pnpm --filter @stellar-starter-kit/sdk docs`)
 docs/api/
 config.bat
+
+# Vitest coverage output
+coverage

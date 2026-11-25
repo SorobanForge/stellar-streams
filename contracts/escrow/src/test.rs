@@ -3,7 +3,7 @@
 use super::*;
 use soroban_sdk::{
     testutils::{storage::Instance as _, Events as _, Ledger},
-    vec, Env, Event, IntoVal,
+    vec, Env, Event, IntoVal, TryIntoVal,
 };
 
 #[path = "../../test-support/test_support.rs"]
@@ -936,4 +936,161 @@ fn test_milestone_schedule_must_sum_to_escrow_amount() {
         Err(Ok(EscrowError::MilestoneScheduleInvalid))
     );
     assert_eq!(client.get_milestones(&1), None);
+}
+
+#[test]
+fn test_remaining_amount_without_milestone_schedule_is_full_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    token.mint(&payer, 1000);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+    assert_eq!(client.remaining_amount(&1), 1000);
+
+    client.fund_escrow(&1);
+    assert_eq!(client.remaining_amount(&1), 1000);
+    assert_eq!(client.get_milestones(&1), None);
+}
+
+#[test]
+fn test_remaining_amount_unknown_escrow_fails() {
+    let env = Env::default();
+    let client = register(&env);
+    assert_eq!(client.try_remaining_amount(&7), Err(Ok(EscrowError::EscrowNotFound)));
+}
+
+#[test]
+fn test_remaining_amount_partially_released_schedule() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    token.mint(&payer, 1000);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+    client.set_milestones(&1, &payer, &vec![&env, 200, 300, 500]);
+    assert_eq!(client.remaining_amount(&1), 1000);
+
+    client.fund_escrow(&1);
+    client.release_milestone(&1, &1, &arbiter);
+    assert_eq!(client.remaining_amount(&1), 700);
+
+    client.release_milestone(&1, &0, &payer);
+    assert_eq!(client.remaining_amount(&1), 500);
+    assert_eq!(client.get_escrow(&1).unwrap().status, EscrowStatus::Funded);
+}
+
+#[test]
+fn test_remaining_amount_fully_released_schedule_is_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    token.mint(&payer, 1000);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+    client.set_milestones(&1, &payer, &vec![&env, 400, 600]);
+    client.fund_escrow(&1);
+    client.release_milestone(&1, &0, &arbiter);
+    client.release_milestone(&1, &1, &arbiter);
+
+    assert_eq!(client.get_escrow(&1).unwrap().status, EscrowStatus::Released);
+    assert_eq!(client.remaining_amount(&1), 0);
+}
+
+#[test]
+fn test_remaining_amount_schedule_without_release_flags_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+    client.set_milestones(&1, &payer, &vec![&env, 400, 600]);
+
+    // A schedule whose release flags are gone cannot be summed.
+    env.as_contract(&client.address, || {
+        env.storage().persistent().remove(&DataKey::MilestoneReleased(1));
+    });
+    assert_eq!(client.try_remaining_amount(&1), Err(Ok(EscrowError::MilestoneScheduleNotFound)));
+}
+
+#[test]
+fn test_set_milestones_emits_milestones_configured() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+    let amounts = vec![&env, 250i128, 750];
+    client.set_milestones(&1, &payer, &amounts);
+
+    let events = env.events().all().filter_by_contract(&client.address);
+    assert_eq!(
+        events,
+        [MilestonesConfigured { id: 1, payer: payer.clone(), amounts: amounts.clone() }
+            .to_xdr(&env, &client.address)]
+    );
+
+    // Check the raw topics and payload, as an indexer would decode them.
+    let event = &events.events()[0];
+    let soroban_sdk::xdr::ContractEventBody::V0(body) = &event.body;
+    let topics: soroban_sdk::Vec<soroban_sdk::Val> = body.topics.try_into_val(&env).unwrap();
+    assert_eq!(
+        topics,
+        vec![
+            &env,
+            soroban_sdk::Symbol::new(&env, "escrow").into_val(&env),
+            soroban_sdk::Symbol::new(&env, "milestones_configured").into_val(&env),
+            1u64.into_val(&env),
+        ]
+    );
+    let data: soroban_sdk::Map<soroban_sdk::Symbol, soroban_sdk::Val> =
+        body.data.try_into_val(&env).unwrap();
+    assert_eq!(data.len(), 2);
+    let event_payer: Address =
+        data.get(soroban_sdk::Symbol::new(&env, "payer")).unwrap().into_val(&env);
+    let event_amounts: soroban_sdk::Vec<i128> =
+        data.get(soroban_sdk::Symbol::new(&env, "amounts")).unwrap().into_val(&env);
+    assert_eq!(event_payer, payer);
+    assert_eq!(event_amounts, amounts);
+
+    // The schedule the event describes is already persisted.
+    assert_eq!(client.get_milestones(&1).unwrap(), amounts);
+}
+
+#[test]
+fn test_rejected_set_milestones_emits_no_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let payer = account(&env);
+    let payee = account(&env);
+    let arbiter = account(&env);
+    let client = register(&env);
+
+    client.create_escrow(&payer, &payee, &arbiter, &token.id, &1000, &1000);
+    assert_eq!(
+        client.try_set_milestones(&1, &payer, &vec![&env, 400, 500]),
+        Err(Ok(EscrowError::MilestoneScheduleInvalid))
+    );
+    assert_eq!(env.events().all().filter_by_contract(&client.address).events().len(), 0);
 }

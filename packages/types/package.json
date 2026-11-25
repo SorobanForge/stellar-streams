@@ -20,15 +20,19 @@
   },
   "sideEffects": false,
   "scripts": {
-    "build": "node init && tsc --project tsconfig.build.json",
+    "build": "tsc --project tsconfig.build.json",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+
+    "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
     "@stellar-starter-kit/tsconfig": "workspace:*",
     "@stellar-starter-kit/eslint-config": "workspace:*",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.12",
+
+    "@vitest/coverage-v8": "^4.1.12"
   }
 }

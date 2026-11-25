@@ -486,6 +486,12 @@
                   },
                   {
                     "key": {
+                      "symbol": "paused_at"
+                    },
+                    "val": "void"
+                  },
+                  {
+                    "key": {
                       "symbol": "recipient"
                     },
                     "val": {
@@ -530,6 +536,14 @@
                     },
                     "val": {
                       "i128": "1000"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "total_paused"
+                    },
+                    "val": {
+                      "u64": "0"
                     }
                   },
                   {
@@ -610,6 +624,12 @@
                   },
                   {
                     "key": {
+                      "symbol": "paused_at"
+                    },
+                    "val": "void"
+                  },
+                  {
+                    "key": {
                       "symbol": "recipient"
                     },
                     "val": {
@@ -654,6 +674,14 @@
                     },
                     "val": {
                       "i128": "2000"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "total_paused"
+                    },
+                    "val": {
+                      "u64": "0"
                     }
                   },
                   {
@@ -770,6 +798,12 @@
                   },
                   {
                     "key": {
+                      "symbol": "paused_at"
+                    },
+                    "val": "void"
+                  },
+                  {
+                    "key": {
                       "symbol": "recipient"
                     },
                     "val": {
@@ -814,6 +848,14 @@
                     },
                     "val": {
                       "i128": "1000"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "total_paused"
+                    },
+                    "val": {
+                      "u64": "0"
                     }
                   },
                   {
@@ -894,6 +936,12 @@
                   },
                   {
                     "key": {
+                      "symbol": "paused_at"
+                    },
+                    "val": "void"
+                  },
+                  {
+                    "key": {
                       "symbol": "recipient"
                     },
                     "val": {
@@ -938,6 +986,14 @@
                     },
                     "val": {
                       "i128": "2000"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "total_paused"
+                    },
+                    "val": {
+                      "u64": "0"
                     }
                   },
                   {

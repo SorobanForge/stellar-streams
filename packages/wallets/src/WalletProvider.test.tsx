@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { render, act, screen, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { WalletProvider, useWallet } from './WalletProvider';
 import * as freighter from '@stellar/freighter-api';
 import albedo from '@albedo-link/intent';
@@ -41,6 +41,19 @@ vi.mock('@ledgerhq/hw-app-str', () => ({
     }
   },
 }));
+
+// The provider loads each adapter with `import()` the first time a provider is
+// used, so without this the first click in each test would spend its time on
+// Vitest's on-demand transform of that module rather than on the provider.
+beforeAll(async () => {
+  await Promise.all([
+    import('./adapters/freighter.js'),
+    import('./adapters/albedo.js'),
+    import('./adapters/rabe.js'),
+    import('./adapters/hana.js'),
+    import('./adapters/ledger.js'),
+  ]);
+});
 
 // Helper component to access useWallet hooks in tests
 function TestComponent() {
@@ -346,10 +359,296 @@ describe('WalletProvider', () => {
       screen.getByText('Disconnect').click();
     });
 
+    expect(ledgerMocks.close).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('connected').textContent).toBe('false');
+
+    delete (navigator as Navigator & { hid?: unknown }).hid;
+  });
+
+  it('should surface a missing Freighter extension without persisting a session', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: false });
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Freighter').click();
+    });
+
+    expect(screen.getByTestId('error').textContent).toBe(
+      'Freighter wallet extension is not installed or enabled.',
+    );
     expect(screen.getByTestId('connected').textContent).toBe('false');
     expect(localStorage.getItem('stellar_starter_kit_wallet_provider')).toBeNull();
-    await waitFor(() => {
-      expect(ledgerMocks.close).toHaveBeenCalled();
+    expect(localStorage.getItem('stellar_starter_kit_wallet_address')).toBeNull();
+  });
+
+  it('should surface a missing Rabet extension', async () => {
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Rabet').click();
     });
+
+    expect(screen.getByTestId('error').textContent).toBe(
+      'Rabet wallet extension is not installed.',
+    );
+    expect(screen.getByTestId('connected').textContent).toBe('false');
+  });
+
+  it('should disconnect successfully', async () => {
+    localStorage.setItem('stellar_starter_kit_wallet_provider', 'freighter');
+    localStorage.setItem('stellar_starter_kit_wallet_address', 'GA123...');
+
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.getAddress).mockResolvedValue({ address: 'GA123...' });
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('connected').textContent).toBe('true');
+    });
+
+    await act(async () => {
+      screen.getByText('Disconnect').click();
+    });
+
+    expect(screen.getByTestId('address').textContent).toBe('null');
+    expect(screen.getByTestId('provider').textContent).toBe('null');
+    expect(screen.getByTestId('connected').textContent).toBe('false');
+    expect(localStorage.getItem('stellar_starter_kit_wallet_provider')).toBeNull();
+    expect(localStorage.getItem('stellar_starter_kit_wallet_address')).toBeNull();
+  });
+
+  it('should end the Rabet extension session on disconnect', async () => {
+    const rabetDisconnect = vi.fn().mockResolvedValue(undefined);
+    (window as Window & { rabet?: unknown }).rabet = {
+      connect: vi.fn().mockResolvedValue({ publicKey: 'GB_RABET' }),
+      sign: vi.fn(),
+      disconnect: rabetDisconnect,
+    };
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Rabet').click();
+    });
+
+    expect(screen.getByTestId('address').textContent).toBe('GB_RABET');
+
+    await act(async () => {
+      screen.getByText('Disconnect').click();
+    });
+
+    expect(rabetDisconnect).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('connected').textContent).toBe('false');
+    expect(localStorage.getItem('stellar_starter_kit_wallet_provider')).toBeNull();
+  });
+
+  it('should clear both storage keys and the error state on disconnect', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockRejectedValue(new Error('Popup closed'));
+    vi.mocked(freighter.getAddress).mockRejectedValue(new Error('Popup closed'));
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Freighter').click();
+    });
+
+    expect(screen.getByTestId('error').textContent).toBe('Popup closed');
+    localStorage.setItem('stellar_starter_kit_wallet_provider', 'freighter');
+    localStorage.setItem('stellar_starter_kit_wallet_address', 'GA123...');
+
+    await act(async () => {
+      screen.getByText('Disconnect').click();
+    });
+
+    expect(screen.getByTestId('error').textContent).toBe('null');
+    expect(screen.getByTestId('address').textContent).toBe('null');
+    expect(screen.getByTestId('provider').textContent).toBe('null');
+    expect(localStorage.getItem('stellar_starter_kit_wallet_provider')).toBeNull();
+    expect(localStorage.getItem('stellar_starter_kit_wallet_address')).toBeNull();
+  });
+
+  it('should delegate signTransaction to active wallet provider', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER' });
+    vi.mocked(freighter.signTransaction).mockResolvedValue({
+      signedTxXdr: 'signed-freighter-xdr',
+      signerAddress: 'GB_FREIGHTER',
+    });
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Freighter').click();
+    });
+
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+
+    expect(freighter.signTransaction).toHaveBeenCalledWith('mock-xdr', {
+      networkPassphrase: 'Test SDF Network ; September 2015',
+      address: 'GB_FREIGHTER',
+    });
+  });
+
+  it('should surface a user rejection without logging a scary error', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER' });
+    vi.mocked(freighter.signTransaction).mockRejectedValue(new Error('User rejected the request.'));
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Freighter').click();
+    });
+
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+
+    expect(screen.getByTestId('sign-error').textContent).toBe('User rejected the request.');
+    expect(warnSpy).toHaveBeenCalledWith(
+      'transaction signing cancelled by user:',
+      expect.any(Error),
+    );
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
+  it('should surface a Rabet rejection as a typed rejection error', async () => {
+    (window as Window & { rabet?: unknown }).rabet = {
+      connect: vi.fn().mockResolvedValue({ publicKey: 'GB_RABET' }),
+      sign: vi.fn().mockRejectedValue({ error: 'User rejected the request.' }),
+    };
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Rabet').click();
+    });
+
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+
+    expect(screen.getByTestId('sign-error-name').textContent).toBe('WalletRejectedError');
+    expect(screen.getByTestId('sign-error').textContent).toBe('User rejected the request.');
+    expect(warnSpy).toHaveBeenCalledWith(
+      'transaction signing cancelled by user:',
+      expect.any(Error),
+    );
+  });
+
+  it('should surface a Rabet cancellation distinctly from a rejection', async () => {
+    (window as Window & { rabet?: unknown }).rabet = {
+      connect: vi.fn().mockResolvedValue({ publicKey: 'GB_RABET' }),
+      sign: vi.fn().mockRejectedValue(new Error('Request cancelled by the user.')),
+    };
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Rabet').click();
+    });
+
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+
+    expect(screen.getByTestId('sign-error-name').textContent).toBe('WalletCancelledError');
+    expect(screen.getByTestId('sign-error').textContent).toBe('Request cancelled by the user.');
+  });
+
+  it('should delegate signAuthEntry to Freighter', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER' });
+    vi.mocked(freighter.signAuthEntry).mockResolvedValue({
+      signedAuthEntry: 'signed-auth-entry-xdr',
+      signerAddress: 'GB_FREIGHTER',
+    });
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Freighter').click();
+    });
+
+    await act(async () => {
+      screen.getByText('Sign Auth Entry').click();
+    });
+
+    expect(screen.getByTestId('auth-result').textContent).toBe('signed-auth-entry-xdr');
+    expect(freighter.signAuthEntry).toHaveBeenCalledWith('mock-entry-xdr', {
+      networkPassphrase: 'Test SDF Network ; September 2015',
+      address: 'GB_FREIGHTER',
+    });
+  });
+
+  it('should throw NotSupportedError for wallets without auth-entry signing', async () => {
+    vi.mocked(albedo.publicKey).mockResolvedValue({
+      pubkey: 'GB_ALBEDO',
+      signature: '',
+      signed_message: '',
+    });
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Albedo').click();
+    });
+
+    await act(async () => {
+      screen.getByText('Sign Auth Entry').click();
+    });
+
+    expect(screen.getByTestId('auth-error').textContent).toBe(
+      'NotSupportedError: Albedo does not support signAuthEntry.',
+    );
   });
 });
