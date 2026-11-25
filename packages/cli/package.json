@@ -1,0 +1,42 @@
+{
+  "name": "@stellar-starter-kit/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Command line tool for creating, inspecting and withdrawing Stellar Streams",
+  "type": "module",
+  "bin": {
+    "streams": "./dist/bin.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "dev": "tsx src/bin.ts",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@stellar-starter-kit/config": "workspace:*",
+    "@stellar-starter-kit/sdk": "workspace:*",
+    "@stellar/stellar-sdk": "^14.5.0"
+  },
+  "devDependencies": {
+    "@stellar-starter-kit/eslint-config": "workspace:*",
+    "@stellar-starter-kit/tsconfig": "workspace:*",
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}
