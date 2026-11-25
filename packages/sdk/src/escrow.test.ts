@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Address, Keypair, nativeToScVal, scValToNative, xdr } from '@stellar/stellar-sdk';
 import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
@@ -20,6 +21,29 @@ const { GetTransactionStatus } = SorobanRpc.Api;
 
 const PAYEE = Keypair.random().publicKey();
 const ARBITER = Keypair.random().publicKey();
+
+it('maps every live discriminant in the Rust escrow error enum', () => {
+  const source = readFileSync(
+    new URL('../../../contracts/escrow/src/lib.rs', import.meta.url),
+    'utf8',
+  );
+  const enumBody = source.match(/pub enum EscrowError\s*\{([\s\S]*?)^\}/m)?.[1];
+  if (!enumBody) {
+    throw new Error('EscrowError enum not found in contracts/escrow/src/lib.rs');
+  }
+
+  const variants = [...enumBody.matchAll(/^\s*(\w+)(?:\s*=\s*(\d+))?,\s*$/gm)];
+  expect(variants.length).toBeGreaterThan(0);
+
+  for (const [, variant, discriminant] of variants) {
+    if (!variant || !discriminant) {
+      throw new Error('Every EscrowError variant must have an explicit discriminant');
+    }
+
+    const expectedCode = variant.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toUpperCase();
+    expect(new EscrowError('', Number(discriminant)).code).toBe(expectedCode);
+  }
+});
 
 /** The contract arguments of the first operation of `tx`. */
 function callArgs(tx: unknown): xdr.ScVal[] {
