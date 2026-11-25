@@ -19,6 +19,13 @@ export interface MutationResult<TArgs extends unknown[]> {
   mutate: (...args: TArgs) => Promise<{ hash: string } | null>;
   status: MutationStatus;
   error: string | null;
+  /**
+   * Stable identifier carried by the failure, e.g. `EscrowError.code`
+   * (`'UNAUTHORIZED_OPERATION'`) or `StreamsError.code` (`'ALREADY_CANCELLED'`).
+   * `null` when the failure did not expose a string `code`, so a UI can branch
+   * on the contract outcome without parsing the message.
+   */
+  errorCode: string | null;
   /** Hash of the last confirmed transaction; cleared by `reset`. */
   hash: string | null;
   /** Returns the hook to `idle` and clears `error` and `hash`. */
@@ -29,6 +36,17 @@ export type MutationRunner<TClient extends object, TArgs extends unknown[]> = (
   client: TClient,
   ...args: TArgs
 ) => Promise<{ hash: string }>;
+
+/**
+ * Reads the stable code a typed contract error exposes. The SDK's
+ * `StreamsError` and `EscrowError` both set a string `code`, so the state
+ * machine can carry it without depending on either class.
+ */
+function errorCodeOf(err: unknown): string | null {
+  if (typeof err !== 'object' || err === null) return null;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'string' && code.length > 0 ? code : null;
+}
 
 /**
  * Shared state machine behind every mutation hook: one call in flight per hook
@@ -42,6 +60,7 @@ export function useContractMutation<TClient extends object, TArgs extends unknow
 ): MutationResult<TArgs> {
   const [status, setStatus] = useState<MutationStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [hash, setHash] = useState<string | null>(null);
   const inFlight = useRef(false);
   const mounted = useRef(true);
@@ -67,6 +86,7 @@ export function useContractMutation<TClient extends object, TArgs extends unknow
       inFlight.current = true;
       setStatus('pending');
       setError(null);
+      setErrorCode(null);
       setHash(null);
       try {
         const result = await run(client, ...args);
@@ -78,8 +98,10 @@ export function useContractMutation<TClient extends object, TArgs extends unknow
         return result;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Transaction failed';
+        const code = errorCodeOf(err);
         if (mounted.current) {
           setError(message);
+          setErrorCode(code);
           setStatus('error');
         }
         callbacks.current.onError?.(message);
@@ -94,8 +116,9 @@ export function useContractMutation<TClient extends object, TArgs extends unknow
   const reset = useCallback(() => {
     setStatus('idle');
     setError(null);
+    setErrorCode(null);
     setHash(null);
   }, []);
 
-  return { mutate, status, error, hash, reset };
+  return { mutate, status, error, errorCode, hash, reset };
 }
