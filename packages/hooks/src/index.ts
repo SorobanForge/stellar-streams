@@ -15,6 +15,7 @@ import {
 } from './optimistic.js';
 
 export * from './splits.js';
+export * from './useEscrow.js';
 export type { MutationOptions, MutationResult, MutationStatus } from './mutation.js';
 
 /** Tracks browser connectivity as a lightweight proxy for network status. */
