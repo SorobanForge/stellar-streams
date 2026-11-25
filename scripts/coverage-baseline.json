@@ -1,6 +1,12 @@
 {
   "note": "Baseline recorded when coverage reporting landed (issue #162). Deltas in the PR summary compare against these numbers.",
   "packages": {
+    "cli": {
+      "statements": 94.73,
+      "branches": 93.33,
+      "functions": 100,
+      "lines": 94.59
+    },
     "config": {
       "statements": 95.5,
       "branches": 93.25,
