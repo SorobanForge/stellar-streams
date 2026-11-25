@@ -27,8 +27,10 @@ Everything runs on [Soroban](https://soroban.stellar.org) smart contracts writte
 typed TypeScript SDK and an open web dashboard.
 
 > **Project status:** pre-1.0. The contracts are implemented, unit-tested, and build clean under
-> `clippy` / `rustfmt`. They have **not** been audited or deployed to Mainnet. See the
-> [Roadmap](ROADMAP.md) for what's next.
+> `clippy` / `rustfmt`. They have **not** been audited or deployed to Mainnet. Before integrating,
+> read the [security model and trust assumptions](SECURITY.md#threat-model) — who can cancel,
+> who holds fees, what the arbiter may do, and the inherent risks (no upgradeability, unaudited
+> contracts, admin key custody, TTL expiry). See the [Roadmap](ROADMAP.md) for what's next.
 
 ---
 
@@ -41,6 +43,17 @@ typed TypeScript SDK and an open web dashboard.
 | **Grants & bounties** | Milestone cliffs release funds as work completes.                |
 | **Revenue sharing**   | Route a payment to many contributors via a single split.         |
 | **OTC / services**    | Optional escrow with an arbiter and deadline refunds.            |
+
+---
+
+## Documentation
+
+The [`docs/`](docs/README.md) directory carries an index of every page — start there. Highlights:
+
+- [Contract reference](docs/contracts.md) — entry points, error codes, and event shapes.
+- [Local development guide](docs/development-guide.md) — toolchain versions, contracts workflow.
+- [Deployments](docs/deployments.md) — contract ids per network.
+- [Admin Runbook](docs/admin-runbook.md) — secure procedures for protocol fee and treasury changes.
 
 ---
 
@@ -57,14 +70,14 @@ stellar/
 │   ├── types/                # @stellar-starter-kit/types   — shared domain types
 │   ├── utils/                # @stellar-starter-kit/utils   — precise stroop & vesting math
 │   ├── hooks/                # @stellar-starter-kit/hooks   — React hooks (useStream)
-│   ├── wallets/              # @stellar-starter-kit/wallets — Freighter/Albedo/Rabet/Hana
+│   ├── wallets/              # @stellar-starter-kit/wallets — Freighter/Albedo/Rabet/Hana/Ledger
 │   ├── contracts/            # generated Soroban TS bindings
 │   ├── ui/                   # shared UI primitives + toast notifications
 │   └── testing/              # @stellar-starter-kit/testing — test-only RPC fakes
 ├── apps/
 │   └── web/                  # Next.js dashboard (/streams, /escrow, /docs)
 ├── scripts/                  # cross-platform build/deploy/invoke scripts
-└── docs/                     # development guide + contract reference
+└── docs/                     # development guide + contract reference + migration guide
 ```
 
 ---
@@ -74,7 +87,7 @@ stellar/
 ```mermaid
 graph TD
     Web["apps/web (Next.js 15)"] --> SDK["packages/sdk (StreamsClient)"]
-    Web --> Hooks["packages/hooks (useStream)"]
+    Web --> Hooks["packages/hooks (useStream, mutations)"]
     Web --> Wallets["packages/wallets"]
     SDK --> Types["packages/types"]
     Hooks --> SDK
@@ -100,14 +113,20 @@ The flagship contract locks tokens up front and releases them linearly.
 | :------------------------------------------------------------------- | :------------------------------------------------------------------------ |
 | `initialize(admin, treasury, fee_bps)`                               | Configure the optional protocol fee (cap 10%).                            |
 | `create_stream(sender, recipient, token, amount, start, end, cliff)` | Lock tokens and open a stream. Returns the stream id.                     |
+| `create_streams(sender, token, entries)`                             | Lock a whole batch atomically. Returns the new ids, in input order.       |
 | `withdraw(id)`                                                       | Recipient claims the vested, unclaimed balance.                           |
+| `preview_withdraw(id)`                                               | Gross claimable, protocol fee and net a `withdraw` would pay right now.   |
 | `cancel(id)`                                                         | Sender cancels; unvested funds are refunded, vested funds stay claimable. |
-| `claimable(id)` / `vested(id)`                                       | View helpers.                                                             |
+| `transfer_recipient(id, caller, new_recipient)`                      | Recipient hands the unwithdrawn balance off to a new address.             |
+| `set_metadata(id, sender, label, reference)`                         | Sender replaces the stream's label and invoice/grant reference.           |
+| `pause(id)` / `resume(id)`                                           | Sender freezes and unfreezes accrual (one pause lasts at most 30 days).   |
+| `claimable(id)` / `vested(id)` / `unvested(id)`                      | View helpers.                                                             |
 | `get_stream(id)` / `get_config()` / `next_stream_id()`               | Read helpers.                                                             |
 
 Safety properties enforced on-chain: `end > start`, `start ≤ cliff ≤ end`, `amount > 0`,
-authenticated sender/recipient, and idempotent cancel. See
-[`contracts/stream/src/lib.rs`](contracts/stream/src/lib.rs).
+authenticated sender/recipient, and idempotent cancel. `create_streams` applies every one of
+those checks to every entry before it moves a token, so a batch either fully lands or changes
+nothing. See [`contracts/stream/src/lib.rs`](contracts/stream/src/lib.rs).
 
 ### Vesting math
 
@@ -140,16 +159,48 @@ See [`contracts/splits/src/lib.rs`](contracts/splits/src/lib.rs).
 
 ---
 
+## The `escrow` contract
+
+The `escrow` contract holds a single payment between a payer and a payee until an arbiter or one of
+the parties releases or refunds it. The `deadline` decides when a **funded** escrow becomes
+refundable to the payer.
+
+| Function                                                            | Description                                                                                               |
+| :------------------------------------------------------------------ | :-------------------------------------------------------------------------------------------------------- |
+| `create_escrow(id, payer, payee, arbiter, token, amount, deadline)` | Register an escrow. `amount > 0` and the deadline must be in the future. Status `Created`.                |
+| `fund_escrow(id)`                                                   | Payer transfers `amount` into the contract. Status → `Funded`.                                            |
+| `release_escrow(id, caller)`                                        | Payer or arbiter sends the locked funds to the payee. Status → `Released`.                                |
+| `refund_escrow(id, caller)`                                         | Payee or arbiter returns the locked funds to the payer. Status → `Refunded`.                              |
+| `cancel_escrow(id, caller)`                                         | Payer cancels: always while `Created`, and once `Funded` only at or after the deadline (refund to payer). |
+| `get_escrow(id)`                                                    | Read helper.                                                                                              |
+
+**Deadline rule:** `create_escrow` requires `deadline > env.ledger().timestamp()` at call time and
+returns `EscrowError::InvalidDeadline` (code `9`) when `deadline <= now` — a deadline in the past, or
+exactly the current ledger timestamp, is rejected. Without this check a funded escrow could be
+cancelled by the payer the moment it was funded, since `cancel_escrow` releases the funds back to
+the payer as soon as the deadline has passed. Note that only `cancel_escrow` consults the deadline:
+`release_escrow` and `refund_escrow` work at any time before finalization, including after the
+deadline.
+See [`contracts/escrow/src/lib.rs`](contracts/escrow/src/lib.rs).
+
+---
+
 ## Contract reference
 
 Every entry point with its argument and return types, every error variant with its numeric code and
 the condition that raises it, and every event topic with its payload shape, for all three contracts:
 **[docs/contracts.md](docs/contracts.md)**.
 
+For upgrading existing projects and mapping package imports, see the **[Migration Guide](docs/migration.md)**.
+For the complete list of technical documentation, see the **[Documentation Index](docs/README.md)**.
+
 The sections above are orientation. That page is what an integrator mapping a failure to a
 user-facing message, or an indexer decoding an event, should actually be reading — including the
 cases the Rust does not advertise: two error codes that are defined but never returned, and an
 `escrow` `cancelled` event that carries no amount.
+
+For copy-pasteable client examples covering SSR-safe construction, stream reads, config reads,
+write methods, and typed error handling, see the [SDK guide](docs/sdk.md).
 
 ---
 
@@ -157,7 +208,7 @@ cases the Rust does not advertise: two error codes that are defined but never re
 
 ### Prerequisites
 
-- Node.js ≥ 18 and pnpm ≥ 8
+- Node.js 22 (pinned in [`.nvmrc`](.nvmrc); `engines` requires ≥ 22) and pnpm ≥ 9
 - Rust toolchain with the `wasm32v1-none` target (for contracts)
 - Docker (optional, for a local Stellar node)
 
@@ -194,9 +245,18 @@ pnpm deploy:splits
 pnpm run node:local     # docker compose up -d (Stellar Quickstart)
 ```
 
+### End-to-end walkthrough
+
+Want the complete path — local node → deploy `stream` → fund accounts → create a stream →
+advance time → withdraw — with every command and its expected output? Follow the
+[end-to-end walkthrough](docs/development-guide.md)
+in the development guide (verified on Linux).
+
 ---
 
 ## SDK usage
+
+> **Migrating from `@stellar-starter-kit/*`?** See the **[Migration Guide](docs/migration.md)** for a complete import mapping table and codemod snippets.
 
 ```typescript
 import { StreamsClient } from '@stellar-starter-kit/sdk';
@@ -270,6 +330,21 @@ formatStroopsToXlm(123_456_789n); // "12.3456789" — shorthand for 7-decimal XL
 computeVestedAmount(schedule, now); // bigint
 ```
 
+### Runnable example
+
+See [examples/basic-payment](examples/basic-payment) for a complete, runnable example that creates a stream on Testnet and prints the transaction hash and stream id. Clone it to get started:
+
+```bash
+# Setup
+pnpm install
+cd examples/basic-payment
+lp .env.example .env
+# Edit .env with your contract id, sender key, and recipient address
+
+# Run
+pnpm run dev
+```
+
 ---
 
 ## Configuration
@@ -299,12 +374,19 @@ Copy `.env.example` to `.env.local` and set:
 
 ## Community
 
-Questions, ideas, and show-and-tell live in [GitHub Discussions](https://github.com/SorobanForge/stellar-streams/discussions).
+Questions, ideas, and show-and-tell live in [GitHub Issues](https://github.com/SorobanForge/stellar-streams/issues).
 Security reports go through [SECURITY.md](SECURITY.md), not public issues.
 
 ## Deployments
 
 Testnet contract ids and explorer links are recorded in [docs/deployments.md](docs/deployments.md).
+
+## Troubleshooting
+
+Seeing `Freighter wallet extension is not installed or enabled.`, `No stream contract id
+configured.`, `Account not found`, or `RPC kept answering TRY_AGAIN_LATER ...`? Each known
+symptom with its cause and fix is listed in [docs/troubleshooting.md](docs/troubleshooting.md),
+along with how to confirm the deployment state via the contract ids page.
 
 ## Contributing
 

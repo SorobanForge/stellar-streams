@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "scenario": "health",
+  "description": "RPC health and ledger retention.",
+  "recordedAt": "2026-10-18T08:32:57.307Z",
+  "request": {
+    "jsonrpc": "2.0",
+    "id": "health",
+    "method": "getHealth",
+    "params": {}
+  },
+  "response": {
+    "jsonrpc": "2.0",
+    "id": "health",
+    "result": {
+      "status": "healthy",
+      "latestLedger": 5257753,
+      "latestLedgerCloseTime": "1792312352",
+      "oldestLedger": 5136794,
+      "oldestLedgerCloseTime": "1791707557",
+      "ledgerRetentionWindow": 120960
+    }
+  }
+}

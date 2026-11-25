@@ -1,19 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Keypair, scValToNative, xdr } from '@stellar/stellar-sdk';
+import * as SorobanRpc from '@stellar/stellar-sdk/rpc';
 import type { CreateStreamParams } from '@stellar-starter-kit/types';
 import {
   CONTRACT_ID,
   PUBLIC_KEY,
-  createTestClient,
-  type FakeTransport,
-  type TestClientHarness,
-} from '@stellar-starter-kit/testing';
-import { StreamsClient, type StreamsClientOptions } from './index';
+  makeClient,
+  mockRpc,
+  sendResponse,
+  simulationSuccess,
+  txResponse,
+} from './test-helpers';
 
-let harness: TestClientHarness<StreamsClient>;
-let rpc: FakeTransport;
-
-const makeClient = (overrides: Partial<StreamsClientOptions> = {}) => harness.withClient(overrides);
+const { GetTransactionStatus } = SorobanRpc.Api;
 
 /** Params that pass every client-side check, with per-test overrides. */
 function validParams(overrides: Partial<CreateStreamParams> = {}): CreateStreamParams {
@@ -30,16 +29,17 @@ function validParams(overrides: Partial<CreateStreamParams> = {}): CreateStreamP
 }
 
 /** The ScVals of the `create_stream` invocation built for the first submission. */
-function createStreamArgs(rpc: FakeTransport): xdr.ScVal[] {
+function createStreamArgs(rpc: ReturnType<typeof mockRpc>): xdr.ScVal[] {
   const [tx] = rpc.prepareTransaction.mock.calls[0]!;
   const op = (tx as unknown as { operations: Array<{ func: xdr.HostFunction }> }).operations[0]!;
   return op.func.invokeContract().args();
 }
 
 describe('createStream input validation', () => {
+  let rpc: ReturnType<typeof mockRpc>;
+
   beforeEach(() => {
-    harness = createTestClient((config) => new StreamsClient(config));
-    rpc = harness.transport;
+    rpc = mockRpc();
   });
 
   afterEach(() => {
@@ -82,6 +82,22 @@ describe('createStream input validation', () => {
     const client = makeClient();
     await expect(client.createStream(validParams({ amount: 'ten' }))).rejects.toThrow(
       'Expected a decimal integer string',
+    );
+    expect(rpc.calls()).toBe(0);
+  });
+
+  it('rejects a bigint above the i128 range with the invalid-amount error', async () => {
+    const client = makeClient();
+    await expect(client.createStream(validParams({ amount: 2n ** 127n }))).rejects.toThrow(
+      'Invalid amount',
+    );
+    expect(rpc.calls()).toBe(0);
+  });
+
+  it('rejects a bigint below the i128 range with the invalid-amount error', async () => {
+    const client = makeClient();
+    await expect(client.createStream(validParams({ amount: -(2n ** 127n) - 1n }))).rejects.toThrow(
+      'Invalid amount',
     );
     expect(rpc.calls()).toBe(0);
   });
@@ -142,11 +158,14 @@ describe('createStream input validation', () => {
 });
 
 describe('createStream metadata', () => {
+  let rpc: ReturnType<typeof mockRpc>;
+
   beforeEach(() => {
-    // The fake transport answers every simulation with a void success and then
-    // reports the submission as PENDING, confirming on the first poll.
-    harness = createTestClient((config) => new StreamsClient(config));
-    rpc = harness.transport;
+    rpc = mockRpc();
+    // Writes are simulated before being prepared; void is a valid result.
+    rpc.simulateTransaction.mockResolvedValue(simulationSuccess(xdr.ScVal.scvVoid()));
+    rpc.sendTransaction.mockResolvedValue(sendResponse('PENDING'));
+    rpc.getTransaction.mockResolvedValue(txResponse(GetTransactionStatus.SUCCESS));
   });
 
   afterEach(() => {
@@ -180,5 +199,11 @@ describe('createStream metadata', () => {
     const args = createStreamArgs(rpc);
     expect(scValToNative(args[7]!)).toBe(label);
     expect(scValToNative(args[8]!)).toBe(reference);
+  });
+
+  it('accepts a bigint amount and sends the same value a string would', async () => {
+    await makeClient().createStream(validParams({ amount: 1_000_000_000n }));
+
+    expect(scValToNative(createStreamArgs(rpc)[3]!)).toBe(1_000_000_000n);
   });
 });

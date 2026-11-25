@@ -4,8 +4,21 @@ export const WALLET_PROVIDERS = {
   ALBEDO: 'albedo',
   RABE: 'rabe',
   HANA: 'hana',
+  LEDGER: 'ledger',
 } as const;
 
 export type WalletProviderType = (typeof WALLET_PROVIDERS)[keyof typeof WALLET_PROVIDERS];
 
-export * from './WalletProvider';
+// Explicit extensions: the emitted dist keeps specifiers as written, and
+// Node's ESM resolver rejects extensionless relative imports.
+export * from './WalletProvider.js';
+export * from './adapters/index.js';
+export { WALLET_CAPABILITIES, getWalletCapabilities } from './capabilities.js';
+export type { WalletCapabilities } from './capabilities.js';
+export {
+  NotSupportedError,
+  WalletCancelledError,
+  WalletRejectedError,
+  isUserRejection,
+  toSigningError,
+} from './errors.js';

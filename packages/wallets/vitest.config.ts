@@ -12,5 +12,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // Only collect source tests; the compiled copies in dist/ would otherwise
+    // be picked up by Vitest 4's narrower default excludes.
+    include: ['src/**/*.test.{ts,tsx}'],
   },
 });

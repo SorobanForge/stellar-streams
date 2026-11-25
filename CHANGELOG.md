@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `escrow` contract id allocation: `create_escrow` now takes no `id`, assigns one from a `NextId`
+  counter in instance storage and returns it, and a new `next_escrow_id()` view reports the id the
+  next creation will receive. Every creation TTL-bumps the instance entry holding the counter.
+- `transfer_recipient` on the `stream` contract, letting the current recipient hand an active stream
+  to a new address (key rotation, sale). Emits a `("stream", "transferred")` event and adds the
+  `SameRecipient` error (code `20`); exposed in the SDK as `StreamsClient.transferRecipient`.
 - Flagship modular Counter smart contract containing `initialize(owner)`, `increment()`, `decrement()`, `reset()`, `get_count()`, and `get_owner()` across dedicated files (`lib.rs`, `storage.rs`, `event.rs`, `error.rs`).
 - Robust unit tests in `contracts/counter/src/test.rs` verifying contract errors, bounds limits, state manipulation, and event audits.
 - CLI automation command scripts `scripts/invoke-counter.ps1` and `scripts/invoke-counter.sh` to initialize, query, and mutate contract states on Testnet.
@@ -52,9 +58,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI automation scripts `scripts/invoke-escrow.sh` and `scripts/invoke-escrow.ps1` supporting deployment, validation, and full execution lifecycles on Stellar Testnet.
 - Added Next.js 15 Escrow dashboard page (`apps/web/src/app/escrow/page.tsx`) with integrated Freighter connection, creation forms, lifecycle management controls, and real-time execution event logs.
 - Added `EscrowClient` exports in `@stellar-starter-kit/contracts` package.
+- `create_streams` on the `stream` contract: create up to `MAX_BATCH` (`14`) streams in one
+  all-or-nothing call, reusing `create_stream`'s per-stream validation and returning the new ids in
+  input order. New `StreamError` codes: `EmptyBatch` (`13`), `BatchTooLarge` (`14`) and
+  `BatchOverflow` (`15`).
 
 ### Changed
 
+- **Breaking:** `create_escrow` no longer accepts a caller-supplied `id`; it returns
+  `Result<u64, EscrowError>` with the id it assigned. `EscrowAlreadyExists` (code `2`) was removed
+  because creation can no longer collide — the code is retired, not reused, so every other
+  `EscrowError` keeps its value. Escrow tests, generated bindings, the web dashboard and the
+  `invoke-escrow` scripts were updated for the new signature.
 - Migrated frontend counter demo (`apps/web/src/app/counter/page.tsx`) to compile-safe `client.get_count()` calls.
 - Overhauled code playground (`CodePlayground.tsx`) on the landing page to showcase `CounterClient` integration snippet.
 - Synchronized smart contract build, test, optimize, and deploy guides across `README.md` and `docs/development-guide.md`.

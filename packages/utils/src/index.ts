@@ -9,6 +9,33 @@ export const XLM_DECIMALS = 7;
 /** Number of stroops in one XLM (1 XLM = 10^7 stroops). */
 export const STROOPS_PER_XLM = 10_000_000n;
 
+/** `Number.MAX_SAFE_INTEGER` as a bigint, for safe-conversion bounds checks. */
+const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+const MIN_SAFE_BIGINT = -MAX_SAFE_BIGINT;
+
+/**
+ * Serializes records as RFC 4180 CSV with a header row in the requested order.
+ * Bigints are written as base-10 integers, and string amounts stay strings, so
+ * callers can export on-chain values without passing them through a float.
+ */
+export function toCsv<T extends object>(
+  streams: readonly T[],
+  columns: readonly (keyof T & string)[],
+): string {
+  const escape = (value: unknown): string => {
+    const text = value == null ? '' : typeof value === 'bigint' ? value.toString() : String(value);
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const rows = [
+    columns.map(escape).join(','),
+    ...streams.map((stream) => {
+      const record = stream as Record<string, unknown>;
+      return columns.map((column) => escape(record[column])).join(',');
+    }),
+  ];
+  return rows.join('\r\n');
+}
+
 /** Shortens a public key/address for display purposes (e.g. GABC...XYZ1). */
 export function formatAddress(address: string, chars = 4): string {
   if (!address || address.length < chars * 2 + 2) return address;
@@ -75,30 +102,254 @@ export function formatStroopsToXlm(stroops: bigint | number | string): string {
 }
 
 /**
+ * Expands a number's exponential notation into a plain decimal string so number
+ * inputs parse exactly like the equivalent string input. `Number#toString`
+ * switches to exponent form for very small/large magnitudes (e.g. `1e-8`);
+ * passing that text to `parseTokenAmount` would otherwise reject a valid value.
+ */
+function numberToDecimalString(value: number): string {
+  const text = value.toString();
+  const match = /^(-?)(\d+)(?:\.(\d+))?e([+-]?\d+)$/.exec(text);
+  if (!match) return text;
+
+  const [, sign, whole, fraction = '', exponentText] = match;
+  const exponent = Number(exponentText);
+  const digits = whole + fraction;
+  const point = whole.length + exponent;
+
+  if (point <= 0) return `${sign}0.${'0'.repeat(-point)}${digits}`;
+  if (point >= digits.length) return `${sign}${digits}${'0'.repeat(point - digits.length)}`;
+  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
+}
+
+/**
  * Parses a human-readable XLM amount into stroops. Equivalent to
  * `parseTokenAmount(xlm, XLM_DECIMALS)`; use that for non-XLM tokens.
+ *
+ * Accepted input is a plain decimal number (an optional `-`, digits, and at
+ * most one `.`) with optional surrounding whitespace: `'1'`, `' 1.2 '`, `'.5'`
+ * and `'1.'` all parse. Number inputs are first expanded from any exponential
+ * notation, so `0.0000001` behaves exactly like `'0.0000001'`.
+ *
+ * Fractional digits beyond seven places are truncated toward zero, so any
+ * amount smaller than one stroop — including `0.00000001` and
+ * `-0.00000001` — parses to `0n` instead of throwing. Callers that require a
+ * positive amount should check the result themselves.
+ *
+ * Scientific notation (`'1e7'`), `NaN`, `Infinity`, and other non-decimal
+ * shapes throw an `Invalid XLM amount` error that names the offending input.
  */
 export function parseXlmToStroops(xlm: string | number): bigint {
+  // Reject non-finite numbers up front so the message explains the real
+  // problem rather than complaining about their string form.
+  if (typeof xlm === 'number' && !Number.isFinite(xlm)) {
+    throw new Error(
+      `Invalid XLM amount: ${String(xlm)}. Expected a finite decimal number (e.g. "1.5").`,
+    );
+  }
+
+  const decimal = typeof xlm === 'number' ? numberToDecimalString(xlm) : xlm;
   try {
-    return parseTokenAmount(xlm, XLM_DECIMALS);
+    return parseTokenAmount(decimal, XLM_DECIMALS);
   } catch {
-    throw new Error(`Invalid XLM amount: ${String(xlm)}`);
+    throw new Error(
+      `Invalid XLM amount: ${JSON.stringify(xlm)}. Expected a plain decimal number such as "1.5" (scientific notation, NaN and Infinity are not supported).`,
+    );
   }
 }
 
-/** Formats a duration in seconds into a compact human string (e.g. "2d 3h 4m"). */
+const SECOND = 1;
+const MINUTE = 60 * SECOND;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+const WEEK = 7 * DAY;
+/** A "month" is a flat 30 days so schedules stay deterministic. */
+const MONTH = 30 * DAY;
+/** A "year" is a flat 365 days so schedules stay deterministic. */
+const YEAR = 365 * DAY;
+
+/**
+ * Formats a duration in seconds into a compact human string (e.g. "2d 3h 4m").
+ *
+ * Durations up to and including 7 days keep the exact day/hour/minute/second
+ * rendering (falling back to seconds when nothing larger applies). Longer
+ * durations add weeks, months and years and show only the **two most
+ * significant non-zero units**: a year counts as exactly 365 days, a month as
+ * exactly 30 days, and zero units between them are skipped rather than shown
+ * (e.g. 382 days renders as `1y 2w`, never `1y 0mo 2w 3d`).
+ *
+ * Rounding: every unit truncates toward zero (whole units only) and the
+ * remainder below the second displayed unit is dropped, never rounded up —
+ * 400 days renders `1y 1mo` and silently drops the remaining 5 days.
+ * Negative input clamps to `0s`.
+ */
 export function formatDuration(seconds: number): string {
   const total = Math.max(0, Math.floor(seconds));
-  const days = Math.floor(total / 86_400);
-  const hours = Math.floor((total % 86_400) / 3_600);
-  const minutes = Math.floor((total % 3_600) / 60);
+
+  if (total <= WEEK) {
+    const days = Math.floor(total / DAY);
+    const hours = Math.floor((total % DAY) / HOUR);
+    const minutes = Math.floor((total % HOUR) / MINUTE);
+
+    const parts: string[] = [];
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0) parts.push(`${hours}h`);
+    if (minutes > 0) parts.push(`${minutes}m`);
+    if (parts.length === 0) parts.push(`${total}s`);
+    return parts.join(' ');
+  }
+
+  const units: Array<readonly [size: number, suffix: string]> = [
+    [YEAR, 'y'],
+    [MONTH, 'mo'],
+    [WEEK, 'w'],
+    [DAY, 'd'],
+    [HOUR, 'h'],
+    [MINUTE, 'm'],
+  ];
 
   const parts: string[] = [];
-  if (days > 0) parts.push(`${days}d`);
-  if (hours > 0) parts.push(`${hours}h`);
-  if (minutes > 0) parts.push(`${minutes}m`);
-  if (parts.length === 0) parts.push(`${total}s`);
+  let rest = total;
+  for (const [size, suffix] of units) {
+    if (parts.length === 2) break;
+    const value = Math.floor(rest / size);
+    if (value > 0) {
+      parts.push(`${value}${suffix}`);
+      rest -= value * size;
+    }
+  }
   return parts.join(' ');
+}
+
+/** Seconds per unit, shared by `formatDuration` and `parseDuration`. */
+const DURATION_UNIT_SECONDS: Readonly<Record<string, number>> = {
+  s: SECOND,
+  m: MINUTE,
+  h: HOUR,
+  d: DAY,
+  w: WEEK,
+  mo: MONTH,
+  y: YEAR,
+};
+
+/**
+ * Parses a human-readable duration back into seconds, the inverse of
+ * `formatDuration`.
+ *
+ * Units are case-insensitive and match the formatter: `s`, `m`, `h`, `d`, `w`,
+ * `mo` (a flat 30 days) and `y` (a flat 365 days). Tokens may be separated by
+ * whitespace or written back to back, so `"30d"`, `" 12H "`, `"1d 2h"` and
+ * `"1d2h"` all parse. Values are whole numbers and must be non-negative.
+ *
+ * Throws for negative, empty, unit-less or otherwise unparseable input; the
+ * error names every accepted unit.
+ *
+ *      parseDuration('30d')   // 2_592_000
+ *      parseDuration('12h')   // 43_200
+ *      parseDuration('1d 2h') // 93_600
+ */
+export function parseDuration(input: string): number {
+  const accepted = 's, m, h, d, w, mo, y';
+  const invalid = (reason: string): Error =>
+    new Error(
+      `Invalid duration: ${JSON.stringify(input)}. ${reason} Accepted units are ${accepted} (e.g. "30d", "12h", "1d 2h").`,
+    );
+
+  if (typeof input !== 'string') throw invalid('Expected a string.');
+  const text = input.trim();
+  if (text === '') throw invalid('Duration is empty.');
+  if (text.startsWith('-')) throw invalid('Durations must not be negative.');
+  if (text.startsWith('+')) throw invalid('Expected a positive duration.');
+
+  // A hand-written scanner instead of a regex: the input is user provided and
+  // a pattern like /(\d+)\s*(mo|[smhdwy])/ can backtrack quadratically on long
+  // runs of digits, which CodeQL reports as a ReDoS risk. This walk is linear
+  // and accepts the same grammar.
+  const isDigit = (char: string): boolean => char >= '0' && char <= '9';
+  const isWhitespace = (char: string): boolean => char.trim() === '';
+
+  let cursor = 0;
+  let total = 0;
+
+  while (cursor < text.length) {
+    while (cursor < text.length && isWhitespace(text[cursor])) cursor++;
+    if (cursor >= text.length) break;
+
+    if (!isDigit(text[cursor])) {
+      throw invalid(
+        cursor === 0 ? 'Expected at least one value and unit.' : 'Unexpected characters.',
+      );
+    }
+
+    const numberStart = cursor;
+    while (cursor < text.length && isDigit(text[cursor])) cursor++;
+    const digits = text.slice(numberStart, cursor);
+
+    while (cursor < text.length && isWhitespace(text[cursor])) cursor++;
+
+    // Longest unit first so `mo` is not read as `m` followed by stray text.
+    let unitKey: string;
+    if (text.slice(cursor, cursor + 2).toLowerCase() === 'mo') {
+      unitKey = 'mo';
+      cursor += 2;
+    } else {
+      unitKey = text.slice(cursor, cursor + 1).toLowerCase();
+      cursor += unitKey === '' ? 0 : 1;
+    }
+
+    const value = Number(digits);
+    const unit = DURATION_UNIT_SECONDS[unitKey];
+    if (!Number.isSafeInteger(value) || unit === undefined) {
+      throw invalid('Expected whole numbers followed by a unit.');
+    }
+
+    const seconds = value * unit;
+    if (!Number.isSafeInteger(seconds) || !Number.isSafeInteger(total + seconds)) {
+      throw invalid('Duration is too large to represent in seconds.');
+    }
+    total += seconds;
+  }
+
+  return total;
+}
+
+const MINUTE_SECONDS = 60;
+const HOUR_SECONDS = 3_600;
+const DAY_SECONDS = 86_400;
+
+/**
+ * Formats the gap between two unix timestamps (seconds) as a short relative
+ * string: `in 3d`, `2h ago`, or `just now` for anything under a minute (and for
+ * a zero delta). Deltas larger than a day are kept in days so the output stays
+ * unambiguous for long vesting schedules.
+ *
+ * `now` is always passed in — the helper never reads the clock itself, so the
+ * output is deterministic and cheap to test. Negative deltas describe the past
+ * (`ago`), positive ones the future (`in`). Non-finite inputs fall back to
+ * `just now` instead of rendering `NaN` into the UI.
+ *
+ *      formatRelativeTime(cliffTime, now) // "in 3d"
+ *      formatRelativeTime(startTime, now) // "2h ago"
+ */
+export function formatRelativeTime(from: number, now: number): string {
+  const delta = Math.trunc(from) - Math.trunc(now);
+  if (!Number.isFinite(delta)) return 'just now';
+
+  const magnitude = Math.abs(delta);
+  if (magnitude < MINUTE_SECONDS) return 'just now';
+
+  let unit = 'd';
+  let secondsPerUnit = DAY_SECONDS;
+  if (magnitude < HOUR_SECONDS) {
+    unit = 'm';
+    secondsPerUnit = MINUTE_SECONDS;
+  } else if (magnitude < DAY_SECONDS) {
+    unit = 'h';
+    secondsPerUnit = HOUR_SECONDS;
+  }
+  const value = Math.floor(magnitude / secondsPerUnit);
+
+  return delta > 0 ? `in ${value}${unit}` : `${value}${unit} ago`;
 }
 
 /** A linear vesting schedule, mirroring the on-chain `Stream` time fields. */
@@ -107,20 +358,150 @@ export interface VestingSchedule {
   startTime: number;
   endTime: number;
   cliffTime: number;
+  /** Seconds the stream has already spent paused (contract `total_paused`). */
+  totalPaused?: number;
+  /** Unix second the stream was paused at, when it is paused now (`paused_at`). */
+  pausedAt?: number | null;
+}
+
+/** Saturating `a - b` for non-negative seconds counts. */
+function saturatingSub(a: number, b: number): number {
+  return a > b ? a - b : 0;
 }
 
 /**
  * Computes the amount vested at `now`, using the same integer math as the
  * `stream` Soroban contract. Keep this in sync with `vested_amount` in Rust.
+ *
+ * Paused time is folded out of the schedule exactly like the contract: past
+ * pause windows via `totalPaused`, and a still-open window via `pausedAt`, which
+ * counts from the pause timestamp up to `now` (capped at `endTime`). Callers
+ * that omit both fields get the plain linear result they always had.
+ *
+ * Note that pausing does not push `endTime` out, so a stream that spent time
+ * paused vests proportionally less by `endTime` — precisely the contract's
+ * behaviour, which is why a UI preview needs these fields to agree on-chain.
  */
 export function computeVestedAmount(schedule: VestingSchedule, now: number): bigint {
-  const { totalAmount, startTime, endTime, cliffTime } = schedule;
+  const { totalAmount, startTime, endTime, cliffTime, totalPaused = 0, pausedAt } = schedule;
   if (now < startTime || now < cliffTime) return 0n;
-  if (now >= endTime) return totalAmount;
 
-  const elapsed = BigInt(now - startTime);
-  const duration = BigInt(endTime - startTime);
-  return (totalAmount * elapsed) / duration;
+  const cappedNow = Math.min(now, endTime);
+  const elapsed = cappedNow - startTime;
+  const activePause = pausedAt != null && now > pausedAt ? cappedNow - pausedAt : 0;
+  const effectiveElapsed = saturatingSub(saturatingSub(elapsed, totalPaused), activePause);
+
+  const duration = endTime - startTime;
+  if (duration === 0) return totalAmount;
+
+  const vested = (totalAmount * BigInt(effectiveElapsed)) / BigInt(duration);
+  return vested > totalAmount ? totalAmount : vested;
+}
+
+/**
+ * Computes the amount claimable by the recipient at `now`, mirroring the
+ * `claimable` view and the claimable calculation inside `withdraw` in the
+ * `stream` Soroban contract (contracts/stream/src/lib.rs):
+ *
+ * claimable = max(vested - withdrawn, 0)
+ *
+ * The vested amount uses the same integer arithmetic as `computeVestedAmount`.
+ *
+ * The parameter is structural rather than an import of `Stream` from
+ * `@stellar-starter-kit/types` so this package stays dependency-free and the
+ * types -> utils dependency never becomes a cycle.
+ */
+export interface ClaimableStream {
+  totalAmount: string | bigint | number;
+  startTime: number;
+  endTime: number;
+  cliffTime: number;
+  withdrawn: string | bigint | number;
+  /** Seconds the stream has already spent paused (contract `total_paused`). */
+  totalPaused?: number;
+  /** Unix second the stream was paused at, when it is paused now (`paused_at`). */
+  pausedAt?: number | null;
+}
+
+export function computeClaimable(stream: ClaimableStream, now: number): bigint {
+  const vested = computeVestedAmount(
+    {
+      totalAmount: BigInt(stream.totalAmount),
+      startTime: stream.startTime,
+      endTime: stream.endTime,
+      cliffTime: stream.cliffTime,
+      totalPaused: stream.totalPaused,
+      pausedAt: stream.pausedAt,
+    },
+    now,
+  );
+  const withdrawn = BigInt(stream.withdrawn);
+  const claimable = vested - withdrawn;
+  return claimable > 0n ? claimable : 0n;
+}
+
+/**
+ * Splits `amount` across weighted `shares`, mirroring `recipient_portion` in
+ * `contracts/splits`: every entry but the last is `amount * share / totalShares`
+ * with bigint truncation, and the **final entry absorbs the rounding dust** so
+ * the results always sum to `amount` exactly.
+ *
+ * A UI preview built with this helper therefore matches the on-chain transfers
+ * stroop for stroop. Throws for a negative amount, empty shares, negative or
+ * non-integer shares, and a total weight of zero.
+ *
+ *      splitAmounts(100n, [1, 1, 1]) // [33n, 33n, 34n]
+ *      splitAmounts(10n, [3, 7])     // [3n, 7n]
+ */
+export function splitAmounts(amount: bigint, shares: readonly (number | bigint)[]): bigint[] {
+  if (amount < 0n) {
+    throw new Error(`splitAmounts: amount must not be negative (received ${amount.toString()})`);
+  }
+  if (shares.length === 0) {
+    throw new Error('splitAmounts: shares must not be empty');
+  }
+
+  const weights = shares.map((share, index) => {
+    if (typeof share === 'number') {
+      if (!Number.isSafeInteger(share)) {
+        throw new Error(`splitAmounts: share at index ${index} must be a safe integer`);
+      }
+      if (share < 0) {
+        throw new Error(`splitAmounts: share at index ${index} must not be negative`);
+      }
+      return BigInt(share);
+    }
+    if (share < 0n) {
+      throw new Error(`splitAmounts: share at index ${index} must not be negative`);
+    }
+    return share;
+  });
+
+  const totalShares = weights.reduce((sum, share) => sum + share, 0n);
+  if (totalShares === 0n) {
+    throw new Error('splitAmounts: total shares must be greater than zero');
+  }
+
+  const amounts: bigint[] = [];
+  let distributed = 0n;
+  for (let i = 0; i < weights.length - 1; i++) {
+    const portion = (amount * weights[i]) / totalShares;
+    amounts.push(portion);
+    distributed += portion;
+  }
+  // `recipient_portion` hands the remainder to the final recipient.
+  amounts.push(amount - distributed);
+  return amounts;
+}
+
+/**
+ * Computes the protocol fee on a claimable amount, mirroring the `withdraw`
+ * logic in the `stream` Soroban contract (contracts/stream/src/lib.rs):
+ *
+ * fee = claimable * feeBps / 10_000   (integer division, truncated toward zero)
+ */
+export function computeProtocolFee(claimable: bigint, feeBps: number): bigint {
+  return (claimable * BigInt(feeBps)) / 10_000n;
 }
 
 /** How much of the stream has vested, expressed in basis points (0–10000). */
@@ -139,4 +520,140 @@ export function computeProgressBps(schedule: VestingSchedule, now: number): numb
 export function formatBps(bps: number): string {
   const clamped = Math.max(0, Math.min(10_000, bps));
   return `${(clamped / 100).toFixed(clamped % 100 === 0 ? 0 : 1)}%`;
+}
+
+/**
+ * Converts a `bigint` to a `number`, throwing instead of silently losing
+ * precision outside the safe integer range (`±(2^53 − 1)`).
+ *
+ * Use this at the boundary where a bigint has to feed a `number` API (chart
+ * scales, CSS sizes, percentages). Values that do not fit are a bug in the
+ * caller, never something to round.
+ *
+ *      toSafeNumber(9_007_199_254_740_991n); // 9007199254740991
+ *      toSafeNumber(9_007_199_254_740_992n); // throws
+ *      toSafeNumber(-9_007_199_254_740_992n); // throws
+ */
+export function toSafeNumber(value: bigint): number {
+  if (value > MAX_SAFE_BIGINT || value < MIN_SAFE_BIGINT) {
+    throw new Error(
+      `toSafeNumber: ${value.toString()} is outside the safe integer range (±${Number.MAX_SAFE_INTEGER}).`,
+    );
+  }
+  return Number(value);
+}
+
+const RATIO_SCALE = 1_000_000_000n;
+
+/**
+ * Returns `part / whole` as a `number` in `[0, 1]`, computed with integer-safe
+ * scaling so huge bigint balances never turn into `Infinity` or lose their
+ * leading digits the way `Number(part) / Number(whole)` can.
+ *
+ * The quotient is truncated to nine decimal places before becoming a double;
+ * values at or above `whole` clamp to `1`, and non-positive parts clamp to `0`.
+ * Throws when `whole` is not positive.
+ *
+ *      bigintRatio(1n, 4n);                          // 0.25
+ *      bigintRatio(2n ** 127n - 1n, 2n ** 127n - 1n); // 1
+ */
+export function bigintRatio(part: bigint, whole: bigint): number {
+  if (whole <= 0n) {
+    throw new Error('bigintRatio: whole must be greater than zero');
+  }
+  if (part <= 0n) return 0;
+  if (part >= whole) return 1;
+
+  // `part < whole`, so the scaled quotient is below 10^9 and always a safe
+  // integer to hand back to `Number`.
+  return Number((part * RATIO_SCALE) / whole) / Number(RATIO_SCALE);
+}
+
+/**
+ * Returns floor(a * b / c) for bigint inputs.
+ *
+ * Matches the contract's integer math: multiplication happens in bigint (no
+ * i128 overflow risk at the call site), then floor division. Throws if c === 0n.
+ */
+export function mulDiv(a: bigint, b: bigint, c: bigint): bigint {
+  if (c === 0n) throw new Error('mulDiv: division by zero');
+  return (a * b) / c;
+}
+
+/** A single point on a vesting curve suitable for plotting on a chart. */
+export interface VestingPoint {
+  t: number;
+  vested: bigint;
+}
+
+/** Accepted stream input for vesting curve generation. Supports both shorthand and formal types. */
+export interface VestingStreamInput {
+  start?: number;
+  startTime?: number;
+  cliff?: number;
+  cliffTime?: number;
+  end?: number;
+  endTime?: number;
+  deposit?: bigint | number | string;
+  totalAmount?: bigint | number | string;
+  amount?: bigint | number | string;
+}
+
+/**
+ * Generates N sample points along a stream's vesting schedule suitable for charting.
+ *
+ * Guarantees:
+ * - Always includes both endpoints (`t = start` and `t = end`).
+ * - Always includes the exact cliff timestamp (`t = cliff`).
+ * - Vested amounts are monotonically non-decreasing and never exceed the total deposit.
+ * - Pure and deterministic: identical inputs always produce the exact same points.
+ */
+export function vestingCurve(stream: VestingStreamInput, samples: number = 20): VestingPoint[] {
+  const start = stream.start ?? stream.startTime ?? 0;
+  const rawEnd = stream.end ?? stream.endTime ?? start;
+  const end = Math.max(start, rawEnd);
+  const rawCliff = stream.cliff ?? stream.cliffTime ?? start;
+  const cliff = Math.min(Math.max(start, rawCliff), end);
+
+  const rawDeposit = stream.deposit ?? stream.totalAmount ?? stream.amount ?? 0n;
+  let deposit: bigint;
+  if (typeof rawDeposit === 'bigint') {
+    deposit = rawDeposit;
+  } else if (typeof rawDeposit === 'number') {
+    deposit = BigInt(Math.floor(rawDeposit));
+  } else {
+    deposit = BigInt(String(rawDeposit));
+  }
+  if (deposit < 0n) {
+    deposit = 0n;
+  }
+
+  const schedule: VestingSchedule = {
+    startTime: start,
+    endTime: end,
+    cliffTime: cliff,
+    totalAmount: deposit,
+  };
+
+  if (end === start) {
+    return [{ t: start, vested: deposit }];
+  }
+
+  const times = new Set<number>();
+  times.add(start);
+  times.add(end);
+  times.add(cliff);
+
+  const n = Math.max(2, Math.floor(samples));
+  for (let i = 0; i < n; i++) {
+    const t = Math.round(start + (i * (end - start)) / (n - 1));
+    times.add(t);
+  }
+
+  const sortedTimes = Array.from(times).sort((a, b) => a - b);
+
+  return sortedTimes.map((t) => ({
+    t,
+    vested: computeVestedAmount(schedule, t),
+  }));
 }

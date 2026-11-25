@@ -48,20 +48,19 @@ ARBITER_ADDRESS=$($STELLAR_CLI keys address arbiter | tr -d '\r' | xargs)
 # Native XLM token contract ID on testnet
 TOKEN_CONTRACT="CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
 
-# Generate a unique escrow ID based on current timestamp
-ESCROW_ID=$(date +%s)
+# The contract assigns the escrow ID on creation; the deadline is one hour out.
 AMOUNT=10000000 # 1 XLM (in stroops)
 DEADLINE=$(($(date +%s) + 3600)) # 1 hour from now
 
 echo "Payer (Deployer): $DEPLOYER_ADDRESS"
 echo "Payee:            $PAYEE_ADDRESS"
 echo "Arbiter:          $ARBITER_ADDRESS"
-echo "Escrow ID:        $ESCROW_ID"
 
 # 1. Create Escrow
 echo ""
 echo "1. Creating escrow agreement..."
-$STELLAR_CLI contract invoke --id "$CONTRACT_ID" --source-account deployer --network testnet -- create_escrow --id "$ESCROW_ID" --payer "$DEPLOYER_ADDRESS" --payee "$PAYEE_ADDRESS" --arbiter "$ARBITER_ADDRESS" --token "$TOKEN_CONTRACT" --amount "$AMOUNT" --deadline "$DEADLINE"
+ESCROW_ID=$($STELLAR_CLI contract invoke --id "$CONTRACT_ID" --source-account deployer --network testnet -- create_escrow --payer "$DEPLOYER_ADDRESS" --payee "$PAYEE_ADDRESS" --arbiter "$ARBITER_ADDRESS" --token "$TOKEN_CONTRACT" --amount "$AMOUNT" --deadline "$DEADLINE" | tr -d '\r' | tail -n 1 | xargs)
+echo "Assigned Escrow ID: $ESCROW_ID"
 
 # 2. Get Escrow (Created Status)
 echo ""

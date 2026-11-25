@@ -1,6 +1,7 @@
 {
   "extends": "../../packages/tsconfig/nextjs.json",
   "compilerOptions": {
+    "jsx": "react-jsx",
     "plugins": [
       {
         "name": "next"

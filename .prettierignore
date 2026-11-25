@@ -12,7 +12,16 @@ pnpm-lock.yaml
 **/generated/**
 **/test_snapshots/**
 
+# Rewritten by `next build` / `next dev` on every run
+apps/web/next-env.d.ts
+
+# Generated API reference (typedoc output)
+docs/api
+
 # Third-party patches
 contracts/patches/
+
+# Markdown — including docs/ — is intentionally NOT ignored: CI's
+# format:check ("Lint Codebase" job) covers every *.md. See issue #145.
 
 

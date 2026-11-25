@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "scenario": "network",
+  "description": "Network passphrase and protocol version.",
+  "recordedAt": "2026-10-18T08:33:06.673Z",
+  "request": {
+    "jsonrpc": "2.0",
+    "id": "network",
+    "method": "getNetwork",
+    "params": {}
+  },
+  "response": {
+    "jsonrpc": "2.0",
+    "id": "network",
+    "result": {
+      "friendbotUrl": "https://friendbot.stellar.org/",
+      "passphrase": "Test SDF Network ; September 2015",
+      "protocolVersion": 29
+    }
+  }
+}

@@ -53,19 +53,19 @@ $ArbiterAddress = (& $StellarCli keys address arbiter).Trim()
 # Native XLM token contract ID on testnet
 $TokenContract = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
 
-$EscrowId = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+# The contract assigns the escrow ID on creation; the deadline is one hour out.
 $Amount = 10000000
-$Deadline = $EscrowId + 3600
+$Deadline = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 3600
 
 Write-Host "Invoking Escrow contract (ID: $ContractId)..." -ForegroundColor Green
 Write-Host "Payer: $DeployerAddress"
 Write-Host "Payee: $PayeeAddress"
 Write-Host "Arbiter: $ArbiterAddress"
-Write-Host "Escrow ID: $EscrowId"
 
 # 1. Create Escrow
 Write-Host "`n1. Creating escrow agreement..."
-& $StellarCli contract invoke --id $ContractId --source-account deployer --network testnet -- create_escrow --id $EscrowId --payer $DeployerAddress --payee $PayeeAddress --arbiter $ArbiterAddress --token $TokenContract --amount $Amount --deadline $Deadline
+$EscrowId = (& $StellarCli contract invoke --id $ContractId --source-account deployer --network testnet -- create_escrow --payer $DeployerAddress --payee $PayeeAddress --arbiter $ArbiterAddress --token $TokenContract --amount $Amount --deadline $Deadline).Trim()
+Write-Host "Assigned Escrow ID: $EscrowId"
 
 # 2. Get Escrow (Created)
 Write-Host "`n2. Fetching escrow status (expecting Created)..."

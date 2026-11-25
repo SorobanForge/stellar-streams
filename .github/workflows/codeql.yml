@@ -20,19 +20,39 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ['javascript-typescript']
+        # CodeQL currently accepts only `none` for both languages: JS/TS is
+        # extracted as source, and Rust analysis is buildless (the extractor runs
+        # `build.rs` and macros itself). Anything else fails `codeql database init`.
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: rust
+            build-mode: none
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v7
 
+      - name: Install Rust toolchain
+        if: matrix.language == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache Cargo
+        if: matrix.language == 'rust'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts
+
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
 
-      - name: Auto Build
-        uses: github/codeql-action/autobuild@v4
+      # No build step: with `build-mode: none` there is nothing to build, so the
+      # manual cargo build and codeql-action/autobuild are intentionally absent.
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4

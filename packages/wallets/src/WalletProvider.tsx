@@ -1,52 +1,38 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import {
-  isConnected as checkFreighterConnected,
-  getAddress as getFreighterAddress,
-  signTransaction as signFreighterTransaction,
-  requestAccess as requestFreighterAccess,
-} from '@stellar/freighter-api';
-import albedo from '@albedo-link/intent';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import type { WalletAdapter } from './adapters/adapter.js';
+import { isUserRejection, NotSupportedError, toSigningError } from './errors.js';
+import { getWalletCapabilities, type WalletCapabilities } from './capabilities.js';
 
-interface RabetInterface {
-  connect: () => Promise<{ publicKey: string }>;
-  sign: (xdr: string, network: string) => Promise<string>;
-}
-
-interface HanaInterface {
-  send: (
-    method: string,
-    params?: { xdr: string; network: string },
-  ) => Promise<{ publicKey?: string; signedTransaction?: string } | string>;
-}
-
-declare global {
-  interface Window {
-    rabet?: RabetInterface;
-    hanaWallet?: HanaInterface;
-  }
-}
-
-export type WalletType = 'freighter' | 'albedo' | 'rabe' | 'hana';
+export type WalletType = 'freighter' | 'albedo' | 'rabe' | 'hana' | 'ledger';
 
 export interface WalletContextType {
   activeAddress: string | null;
   activeProvider: WalletType | null;
+  /**
+   * Capabilities of the active wallet, or `null` when no wallet is connected.
+   * Read this before offering a wallet-specific action (for example an
+   * auth-entry signature) instead of waiting for the call to fail.
+   */
+  capabilities: WalletCapabilities | null;
   isConnected: boolean;
   isConnecting: boolean;
-  /**
-   * True while a stored session is being re-authorized on load. While it is
-   * true the wallet is neither connected nor known to be unavailable, so
-   * connect buttons should stay disabled instead of flashing.
-   */
-  isCheckingWallet: boolean;
+  isRestoring: boolean;
   network: string;
   error: string | null;
   connect: (provider: WalletType) => Promise<void>;
   disconnect: () => void;
   signTransaction: (
     xdr: string,
+    opts?: { network?: string; networkPassphrase?: string },
+  ) => Promise<string>;
+  /**
+   * Sign a Soroban authorization entry. Rejects with `NotSupportedError` when
+   * the active wallet cannot sign auth entries.
+   */
+  signAuthEntry: (
+    entryXdr: string,
     opts?: { network?: string; networkPassphrase?: string },
   ) => Promise<string>;
   setNetwork: (network: string) => void;
@@ -58,51 +44,44 @@ const LOCAL_STORAGE_KEY_PROVIDER = 'stellar_starter_kit_wallet_provider';
 const LOCAL_STORAGE_KEY_ADDRESS = 'stellar_starter_kit_wallet_address';
 
 /**
- * Asks a wallet for an address for this session and returns it, or an empty
- * string when the wallet answered without granting access.
- *
- * Granting access can prompt the user (Freighter's `requestAccess`, Albedo's
- * `publicKey`, Rabet's `connect`, Hana's `getPublicKey`); every failure mode —
- * extension missing, request refused, request errored — throws, so callers can
- * treat "not granted" uniformly. This is the single place an address is read
- * from a wallet, shared by `connect` and the session re-authorization on load.
+ * Loads an adapter — and with it the wallet SDK that adapter wraps — only when
+ * a page actually uses that provider. A static registry here would pull
+ * Freighter's and Albedo's clients into the chunk every page downloads on
+ * mount; `import()` makes each one a separate chunk instead. Ledger's device
+ * transports are deferred further, inside the adapter's own connect path.
  */
-async function requestAddress(provider: WalletType): Promise<string> {
-  if (provider === 'freighter') {
-    const connection = await checkFreighterConnected();
-    if (!connection.isConnected) {
-      throw new Error('Freighter wallet extension is not installed or enabled.');
-    }
-    try {
-      const access = await requestFreighterAccess();
-      return access.address ?? '';
-    } catch {
-      // Older Freighter builds reject when access was already granted.
-      const address = await getFreighterAddress();
-      return address.address ?? '';
-    }
-  }
-  if (provider === 'albedo') {
-    const res = await albedo.publicKey({});
-    return res.pubkey ?? '';
-  }
-  if (provider === 'rabe') {
-    const rabet = window.rabet;
-    if (!rabet) {
-      throw new Error('Rabet wallet extension is not installed.');
-    }
-    const res = await rabet.connect();
-    return res.publicKey ?? '';
-  }
-  if (provider === 'hana') {
-    const hana = window.hanaWallet;
-    if (!hana) {
-      throw new Error('Hana wallet extension is not installed.');
-    }
-    const res = await hana.send('stellar:getPublicKey');
-    return (typeof res === 'string' ? res : res.publicKey) ?? '';
-  }
-  throw new Error(`Unsupported wallet provider: ${provider}`);
+const ADAPTER_LOADERS: Record<WalletType, () => Promise<WalletAdapter>> = {
+  freighter: async () => new (await import('./adapters/freighter.js')).FreighterAdapter(),
+  albedo: async () => new (await import('./adapters/albedo.js')).AlbedoAdapter(),
+  rabe: async () => new (await import('./adapters/rabe.js')).RabetAdapter(),
+  hana: async () => new (await import('./adapters/hana.js')).HanaAdapter(),
+  ledger: async () => new (await import('./adapters/ledger.js')).LedgerAdapter(),
+};
+
+/**
+ * One adapter instance per provider, created on first use and reused: adapters
+ * hold session state on the instance (the account a signature is made for,
+ * Ledger's open transport), so connecting, signing and disconnecting have to
+ * share one object.
+ */
+const adapterInstances = new Map<WalletType, Promise<WalletAdapter>>();
+
+/** Resolves the adapter for a provider, loading its module on first use. */
+function adapterFor(provider: WalletType): Promise<WalletAdapter> {
+  const cached = adapterInstances.get(provider);
+  if (cached) return cached;
+  // A failed load (an offline client cannot fetch its chunk) must not stick.
+  const pending = ADAPTER_LOADERS[provider]().catch((err: unknown) => {
+    if (adapterInstances.get(provider) === pending) adapterInstances.delete(provider);
+    throw err;
+  });
+  adapterInstances.set(provider, pending);
+  return pending;
+}
+
+/** Whether a persisted provider id names a wallet this package can load. */
+function isWalletProvider(value: string): value is WalletType {
+  return value in ADAPTER_LOADERS;
 }
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
@@ -110,59 +89,19 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [activeProvider, setActiveProvider] = useState<WalletType | null>(null);
   const [network, setNetwork] = useState<string>('TESTNET');
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
-  const [isCheckingWallet, setIsCheckingWallet] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-
-  const clearSession = useCallback(() => {
-    setActiveAddress(null);
-    setActiveProvider(null);
-    localStorage.removeItem(LOCAL_STORAGE_KEY_PROVIDER);
-    localStorage.removeItem(LOCAL_STORAGE_KEY_ADDRESS);
-  }, []);
-
-  // Re-authorize the stored session on mount: a saved address is evidence the
-  // user connected once, not proof the wallet still grants access in this
-  // session. The address is only shown as connected once the wallet actually
-  // grants it; a denial or a missing extension falls back to disconnected
-  // without an error banner, because the user never asked to connect.
-  useEffect(() => {
-    const savedProvider = localStorage.getItem(LOCAL_STORAGE_KEY_PROVIDER) as WalletType | null;
-    const savedAddress = localStorage.getItem(LOCAL_STORAGE_KEY_ADDRESS);
-
-    if (!savedProvider || !savedAddress) return;
-
-    let cancelled = false;
-    setIsCheckingWallet(true);
-
-    void (async () => {
-      try {
-        const granted = await requestAddress(savedProvider);
-        if (cancelled) return;
-        if (!granted) {
-          clearSession();
-          return;
-        }
-        setActiveProvider(savedProvider);
-        setActiveAddress(granted);
-        localStorage.setItem(LOCAL_STORAGE_KEY_ADDRESS, granted);
-      } catch {
-        if (cancelled) return;
-        clearSession();
-      } finally {
-        if (!cancelled) setIsCheckingWallet(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [clearSession]);
+  /** True while a persisted session is being verified against the extension. */
+  const [isRestoring, setIsRestoring] = useState<boolean>(false);
+  /** Monotonically increasing id used to discard stale restore results. */
+  const restoreId = useRef(0);
 
   const connect = useCallback(async (provider: WalletType) => {
     setIsConnecting(true);
     setError(null);
     try {
-      const publicKey = await requestAddress(provider);
+      const adapter = await adapterFor(provider);
+      const publicKey = await adapter.connect();
+
       if (!publicKey) {
         throw new Error('Failed to retrieve public key from wallet.');
       }
@@ -183,14 +122,97 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const disconnect = useCallback(() => {
+    // Invalidate any in-flight restore so it cannot resurrect this session.
+    restoreId.current++;
+    const provider = activeProvider;
+    setActiveAddress(null);
+    setActiveProvider(null);
     setError(null);
-    clearSession();
-  }, [clearSession]);
+    localStorage.removeItem(LOCAL_STORAGE_KEY_PROVIDER);
+    localStorage.removeItem(LOCAL_STORAGE_KEY_ADDRESS);
 
-  const signTransaction = useCallback(
-    async (xdr: string, opts?: { network?: string; networkPassphrase?: string }) => {
+    // Best-effort: adapters without a revoke API (and extensions that are no
+    // longer installed) must not keep the local session alive.
+    if (provider) {
+      void adapterFor(provider)
+        .then((adapter) => adapter.disconnect?.())
+        .catch((err: unknown) => {
+          console.warn('Wallet disconnect failed:', err);
+        });
+    }
+  }, [activeProvider]);
+
+  // Auto-reconnect from localStorage on mount. A persisted session is only
+  // reported as connected once the extension confirms it, so an uninstalled
+  // wallet or a different browser profile cannot fake a live session.
+  useEffect(() => {
+    const savedProvider = localStorage.getItem(LOCAL_STORAGE_KEY_PROVIDER) as WalletType | null;
+    const savedAddress = localStorage.getItem(LOCAL_STORAGE_KEY_ADDRESS);
+
+    if (!savedProvider || !savedAddress) return;
+
+    const knownProvider = isWalletProvider(savedProvider) ? savedProvider : null;
+    const id = ++restoreId.current;
+    let active = true;
+    setIsRestoring(true);
+
+    (async () => {
+      try {
+        if (!knownProvider) {
+          throw new Error(`Unsupported wallet provider: ${savedProvider}`);
+        }
+        // Only the persisted provider's module is loaded here; the other
+        // adapters and their SDKs stay out of this page's initial chunk.
+        const adapter = await adapterFor(knownProvider);
+        if (!(await adapter.isAvailable().catch(() => false))) {
+          throw new Error(`${adapter.name} wallet extension is not available.`);
+        }
+        const currentKey = await adapter.getPublicKey();
+
+        if (!active || id !== restoreId.current) return;
+        if (!currentKey || currentKey !== savedAddress) {
+          throw new Error('Stored address does not match the wallet.');
+        }
+
+        setActiveProvider(savedProvider);
+        setActiveAddress(savedAddress);
+      } catch {
+        if (!active || id !== restoreId.current) return;
+        // Extension missing, disconnected, or unverifiable: clear the stale
+        // persisted session and expose the disconnected state. This mirrors
+        // `disconnect` without bumping restoreId, so the finally block below
+        // can still settle isRestoring.
+        setActiveAddress(null);
+        setActiveProvider(null);
+        setError(null);
+        localStorage.removeItem(LOCAL_STORAGE_KEY_PROVIDER);
+        localStorage.removeItem(LOCAL_STORAGE_KEY_ADDRESS);
+      } finally {
+        if (active && id === restoreId.current) setIsRestoring(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  /** Signs through the active adapter and logs failures at the right level. */
+  const signWith = useCallback(
+    async (
+      method: 'signTransaction' | 'signAuthEntry',
+      xdr: string,
+      opts?: { network?: string; networkPassphrase?: string },
+    ): Promise<string> => {
+      const noun = method === 'signTransaction' ? 'transaction' : 'auth entry';
       if (!activeProvider || !activeAddress) {
-        throw new Error('No active wallet session to sign transaction.');
+        throw new Error(`No active wallet session to sign ${noun}.`);
+      }
+
+      const adapter = await adapterFor(activeProvider);
+      const sign = adapter[method];
+      if (!sign) {
+        throw new NotSupportedError(method, adapter.name);
       }
 
       const passphrase =
@@ -200,68 +222,51 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
           : 'Public Global Stellar Network ; September 2015');
 
       try {
-        if (activeProvider === 'freighter') {
-          const { signedTxXdr } = await signFreighterTransaction(xdr, {
-            networkPassphrase: passphrase,
-            address: activeAddress,
-          });
-          return signedTxXdr;
-        } else if (activeProvider === 'albedo') {
-          const res = await albedo.tx({
-            xdr,
-            network: network.toLowerCase(),
-          });
-          return res.signed_envelope_xdr;
-        } else if (activeProvider === 'rabe') {
-          const rabet = window.rabet;
-          if (!rabet) throw new Error('Rabet extension is missing.');
-          return await rabet.sign(xdr, network.toLowerCase());
-        } else if (activeProvider === 'hana') {
-          const hana = window.hanaWallet;
-          if (!hana) throw new Error('Hana extension is missing.');
-          const res = await hana.send('stellar:signTransaction', {
-            xdr,
-            network: network.toLowerCase(),
-          });
-          return typeof res === 'string' ? res : res.signedTransaction || '';
-        } else {
-          throw new Error(`Signer not implemented for: ${activeProvider}`);
-        }
+        return await sign.call(adapter, xdr, { networkPassphrase: passphrase, network });
       } catch (err) {
-        let message = 'Failed to sign transaction.';
-        if (err instanceof Error) {
-          message = err.message;
-        } else if (typeof err === 'string') {
-          message = err;
-        }
-
-        if (
-          message.toLowerCase().includes('user rejected') ||
-          message.toLowerCase().includes('declined')
-        ) {
-          console.warn('Transaction signing cancelled by user:', err);
+        const error = toSigningError(err, `Failed to sign ${noun}.`);
+        if (isUserRejection(error.message)) {
+          console.warn(`${noun} signing cancelled by user:`, err);
         } else {
-          console.error('Transaction signing failed:', err);
+          console.error(`${noun} signing failed:`, err);
         }
-        throw new Error(message);
+        throw error;
       }
     },
     [activeProvider, activeAddress, network],
   );
+
+  const signTransaction = useCallback(
+    (xdr: string, opts?: { network?: string; networkPassphrase?: string }) =>
+      signWith('signTransaction', xdr, opts),
+    [signWith],
+  );
+
+  const signAuthEntry = useCallback(
+    (entryXdr: string, opts?: { network?: string; networkPassphrase?: string }) =>
+      signWith('signAuthEntry', entryXdr, opts),
+    [signWith],
+  );
+
+  // Derived from the active provider so the context value can never drift from
+  // the adapter that actually signs.
+  const capabilities = getWalletCapabilities(activeProvider);
 
   return (
     <WalletContext.Provider
       value={{
         activeAddress,
         activeProvider,
+        capabilities,
         isConnected: !!activeAddress,
         isConnecting,
-        isCheckingWallet,
+        isRestoring,
         network,
         error,
         connect,
         disconnect,
         signTransaction,
+        signAuthEntry,
         setNetwork,
       }}
     >
