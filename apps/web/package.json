@@ -9,7 +9,9 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@stellar-starter-kit/ui": "workspace:*",
@@ -41,6 +43,8 @@
     "@tailwindcss/postcss": "^4.3.2",
     "tailwindcss": "^4.3.2",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.12",
+
+    "@vitest/coverage-v8": "^4.1.12"
   }
 }

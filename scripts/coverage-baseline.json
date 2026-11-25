@@ -1,0 +1,65 @@
+{
+  "note": "Baseline recorded when coverage reporting landed (issue #162). Deltas in the PR summary compare against these numbers.",
+  "packages": {
+    "config": {
+      "statements": 95.5,
+      "branches": 93.25,
+      "functions": 92.85,
+      "lines": 96.55
+    },
+    "core": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "hooks": {
+      "statements": 83.22,
+      "branches": 67.77,
+      "functions": 86.66,
+      "lines": 86.97
+    },
+    "sdk": {
+      "statements": 87.54,
+      "branches": 75.14,
+      "functions": 88.67,
+      "lines": 88.66
+    },
+    "testing": {
+      "statements": 87.93,
+      "branches": 96,
+      "functions": 76.66,
+      "lines": 87.03
+    },
+    "types": {
+      "statements": 92.41,
+      "branches": 91.6,
+      "functions": 100,
+      "lines": 96.87
+    },
+    "ui": {
+      "statements": 93.51,
+      "branches": 82.7,
+      "functions": 100,
+      "lines": 96.87
+    },
+    "utils": {
+      "statements": 96.1,
+      "branches": 90.21,
+      "functions": 100,
+      "lines": 97.73
+    },
+    "wallets": {
+      "statements": 93,
+      "branches": 80.61,
+      "functions": 95.65,
+      "lines": 93.59
+    },
+    "web": {
+      "statements": 63.77,
+      "branches": 71.95,
+      "functions": 51.28,
+      "lines": 66.93
+    }
+  }
+}
