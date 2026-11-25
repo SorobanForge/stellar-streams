@@ -15,7 +15,16 @@ import {
   TriangleAlert,
   Wallet,
 } from 'lucide-react';
-import { cn, Footer, Header, Modal } from '@stellar-starter-kit/ui';
+import {
+  cn,
+  DataTable,
+  Footer,
+  Header,
+  Modal,
+  Skeleton,
+  StatusBadge,
+  type DataTableColumn,
+} from '@stellar-starter-kit/ui';
 import {
   formatAddress,
   formatBps,
@@ -144,6 +153,67 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// DataTable demo data
+// ---------------------------------------------------------------------------
+
+type GalleryStream = {
+  id: string;
+  recipient: string;
+  totalAmount: bigint;
+  status: 'streaming' | 'scheduled' | 'completed';
+};
+
+const galleryStreams: GalleryStream[] = [
+  {
+    id: '101',
+    recipient: 'GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ',
+    totalAmount: 5_000_000_000n,
+    status: 'streaming',
+  },
+  {
+    id: '42',
+    recipient: 'GC2B262OCPB4IA7CBZ77GLL7CQK7747754S727772656372657424242',
+    totalAmount: 1_234_567_000n,
+    status: 'scheduled',
+  },
+  {
+    id: '7',
+    recipient: 'GDMOCKRECIPIENTZQ4Q7M4M6Q4M6Q4M6Q4M6Q4M6Q4M6Q4M6Q4M6',
+    totalAmount: 250_000_000n,
+    status: 'completed',
+  },
+];
+
+const galleryColumns: DataTableColumn<GalleryStream>[] = [
+  {
+    id: 'id',
+    header: 'ID',
+    sortable: true,
+    sortValue: (row) => row.id,
+    cell: (row) => <span className="font-mono font-semibold text-white">#{row.id}</span>,
+  },
+  {
+    id: 'recipient',
+    header: 'Recipient',
+    cell: (row) => <span className="font-mono">{formatAddress(row.recipient, 6)}</span>,
+  },
+  {
+    id: 'total',
+    header: 'Total amount',
+    sortable: true,
+    sortValue: (row) => row.totalAmount.toString(),
+    cell: (row) => <span className="font-mono">{formatTokenAmount(row.totalAmount, 7)} XLM</span>,
+  },
+  {
+    id: 'status',
+    header: 'Status',
+    sortable: true,
+    sortValue: (row) => row.status,
+    cell: (row) => <StatusBadge status={row.status} />,
+  },
+];
 
 // ---------------------------------------------------------------------------
 // Gallery
@@ -379,39 +449,53 @@ export default function UiGallery() {
             </Row>
           </GallerySection>
 
-          {/* -------------------------------------------------- Overlays */}
+          {/* -------------------------------------------------- Data table */}
           <GallerySection
-            title="Tooltip & popover"
-            description="Reveal and copy the full value behind a truncated contract address. The tooltip opens on hover or keyboard focus; the popover closes on Escape or an outside click."
+            title="Data table"
+            description="Typed columns with internal sorting. Sortable headers cycle ascending/descending and publish aria-sort; loading and empty states are caller-provided slots."
           >
-            <Row label="Tooltip">
-              <Tooltip content={sampleContractAddress} className="font-mono text-sm text-cyan-300">
-                {formatAddress(sampleContractAddress, 6)}
-              </Tooltip>
-              <span className="text-xs text-slate-500">Hover or Tab to the value.</span>
-            </Row>
-            <div className="border-t border-slate-900" />
-            <Row label="Popover">
-              <Popover label="Contract address" trigger="Show full address" align="start">
-                <p className="font-mono text-xs leading-relaxed break-all text-slate-200">
-                  {sampleContractAddress}
+            <DataTable
+              caption="Example streams"
+              columns={galleryColumns}
+              rows={galleryStreams}
+              getRowKey={(row) => row.id}
+            />
+            <div className="mt-6 grid gap-4 sm:grid-cols-2">
+              <div>
+                <p className="mb-2 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                  Empty slot
                 </p>
-                <CopyValue value={sampleContractAddress} />
-              </Popover>
-              <span className="text-xs text-slate-500">Escape or click outside to dismiss.</span>
-            </Row>
-            <div className="border-t border-slate-900" />
-            <Row label="Edge clamping">
-              <Popover label="Contract address" trigger="Open at edge" align="end" className="w-80">
-                <p className="font-mono text-xs leading-relaxed break-all text-slate-200">
-                  {sampleContractAddress}
+                <DataTable
+                  caption="Empty streams table"
+                  columns={galleryColumns}
+                  rows={[]}
+                  getRowKey={(row) => row.id}
+                  emptyState={
+                    <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-6 text-center text-sm text-slate-400">
+                      No streams found for this address.
+                    </div>
+                  }
+                />
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                  Loading slot
                 </p>
-                <CopyValue value={sampleContractAddress} />
-              </Popover>
-              <span className="text-xs text-slate-500">
-                Clamped horizontally and vertically, so it stays on screen.
-              </span>
-            </Row>
+                <DataTable
+                  caption="Loading streams table"
+                  columns={galleryColumns}
+                  rows={[]}
+                  getRowKey={(row) => row.id}
+                  loading
+                  loadingState={
+                    <div className="space-y-3 rounded-2xl border border-slate-900 bg-slate-950/40 p-6">
+                      <Skeleton height="1.25rem" width="30%" rounded="sm" />
+                      <Skeleton height="0.75rem" width="60%" rounded="sm" />
+                    </div>
+                  }
+                />
+              </div>
+            </div>
           </GallerySection>
 
           {/* -------------------------------------------------- Alerts */}
