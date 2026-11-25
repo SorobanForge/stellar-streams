@@ -983,6 +983,7 @@ const ESCROW_ERROR_CODES: Record<number, EscrowErrorCode> = {
   6: 'DEADLINE_NOT_REACHED',
   7: 'DEADLINE_EXPIRED',
   8: 'ALREADY_FINALIZED',
+  // Code 2 is intentionally absent; it is retired in the contract enum.
   9: 'INVALID_DEADLINE',
   10: 'MILESTONE_SCHEDULE_NOT_FOUND',
   11: 'MILESTONE_INDEX_OUT_OF_RANGE',
