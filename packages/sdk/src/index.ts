@@ -181,6 +181,22 @@ export interface StreamsClientOptions {
    * failover without a network.
    */
   transportFactory?: (rpcUrl: string) => StreamsTransport;
+  /**
+   * How long a single Soroban RPC request may take, in milliseconds, before it
+   * rejects with an {@link RpcTimeoutError}. Defaults to
+   * {@link DEFAULT_REQUEST_TIMEOUT_MS} (30s). Set `0` (or `Infinity`) to disable.
+   *
+   * Applies to every request, through the default transport, an injected
+   * `transport` (single or array) and every `transportFactory` result. A
+   * timeout counts as a transport failure, so with several {@link rpcUrls} the
+   * request is retried on the next host. A {@link FailoverTransport} passed as
+   * `transport` is used unchanged; wrap its endpoints in a
+   * {@link TimeoutTransport} yourself.
+   *
+   * This bounds each RPC round trip; {@link pollTimeoutMs} still bounds how
+   * long a submitted transaction may take to confirm overall.
+   */
+  requestTimeoutMs?: number;
   /** Default signal for write calls. A per-call signal takes precedence over it. */
   signal?: AbortSignal;
   /**
@@ -339,6 +355,133 @@ export class FailoverTransport implements StreamsTransport {
 }
 
 /**
+ * Default for {@link StreamsClientOptions.requestTimeoutMs}: how long a single
+ * Soroban RPC request may take before it is abandoned. Long enough for a slow
+ * simulation of a full batch, short enough that a hung host does not leave a UI
+ * spinning until the browser gives up on its own.
+ */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+/** The {@link StreamsTransport} methods a {@link TimeoutTransport} can time out. */
+export type StreamsTransportMethod = keyof StreamsTransport;
+
+/**
+ * Thrown when a single Soroban RPC request does not settle within
+ * {@link StreamsClientOptions.requestTimeoutMs}.
+ *
+ * Its `name` is `'TimeoutError'`, so it is recognisable with either
+ * `error instanceof RpcTimeoutError` or `error.name === 'TimeoutError'`, and the
+ * client treats it as a transport failure: with several {@link
+ * StreamsClientOptions.rpcUrls} configured, a timed-out request rotates to the
+ * next host exactly like a refused connection or a 5xx response.
+ */
+export class RpcTimeoutError extends Error {
+  override readonly name = 'TimeoutError';
+
+  constructor(
+    /** The transport method that timed out, e.g. `'simulateTransaction'`. */
+    readonly method: StreamsTransportMethod,
+    /** The timeout that elapsed, in milliseconds. */
+    readonly timeoutMs: number,
+    /** The RPC host the request was sent to, when known. */
+    readonly url?: string,
+  ) {
+    super(
+      `Soroban RPC ${method} timed out after ${timeoutMs}ms` +
+        (url === undefined ? '.' : ` (${url}).`),
+    );
+  }
+}
+
+/**
+ * Wraps a {@link StreamsTransport} so every call rejects with an
+ * {@link RpcTimeoutError} once `timeoutMs` elapses without an answer.
+ *
+ * The client applies it automatically, to both the default
+ * `SorobanRpc.Server` transport and injected ones, using
+ * {@link StreamsClientOptions.requestTimeoutMs}. It is exported for callers that
+ * build their own {@link FailoverTransport}, which the client uses as-is.
+ *
+ * The underlying request is not cancelled (the transport interface carries no
+ * abort signal); its eventual result is simply ignored. A `timeoutMs` of `0`,
+ * a negative number or `Infinity` disables the timeout and returns calls
+ * unchanged.
+ *
+ * @example
+ * ```typescript
+ * const transport = new TimeoutTransport(new SorobanRpc.Server(url), 10_000, url);
+ * ```
+ */
+export class TimeoutTransport implements StreamsTransport {
+  constructor(
+    private readonly inner: StreamsTransport,
+    /** Per-request timeout in milliseconds. */
+    readonly timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS,
+    /** Host label included in timeout errors. */
+    private readonly url?: string,
+  ) {}
+
+  private run<T>(method: StreamsTransportMethod, call: () => Promise<T>): Promise<T> {
+    const { timeoutMs } = this;
+    if (!(timeoutMs > 0) || timeoutMs === Infinity) return call();
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new RpcTimeoutError(method, timeoutMs, this.url)),
+        timeoutMs,
+      );
+      let pending: Promise<T>;
+      try {
+        pending = Promise.resolve(call());
+      } catch (error) {
+        clearTimeout(timer);
+        reject(error);
+        return;
+      }
+      pending.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error: unknown) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
+  }
+
+  getAccount(address: string): Promise<Account> {
+    return this.run('getAccount', () => this.inner.getAccount(address));
+  }
+
+  simulateTransaction(tx: Transaction): Promise<SorobanRpc.Api.SimulateTransactionResponse> {
+    return this.run('simulateTransaction', () => this.inner.simulateTransaction(tx));
+  }
+
+  prepareTransaction(tx: Transaction): Promise<Transaction> {
+    return this.run('prepareTransaction', () => this.inner.prepareTransaction(tx));
+  }
+
+  sendTransaction(
+    tx: Transaction | FeeBumpTransaction,
+  ): Promise<SorobanRpc.Api.SendTransactionResponse> {
+    return this.run('sendTransaction', () => this.inner.sendTransaction(tx));
+  }
+
+  getTransaction(hash: string): Promise<SorobanRpc.Api.GetTransactionResponse> {
+    return this.run('getTransaction', () => this.inner.getTransaction(hash));
+  }
+
+  getLatestLedger(): Promise<SorobanRpc.Api.GetLatestLedgerResponse> {
+    return this.run('getLatestLedger', () => this.inner.getLatestLedger());
+  }
+
+  getEvents(request: SorobanRpc.Api.GetEventsRequest): Promise<SorobanRpc.Api.GetEventsResponse> {
+    return this.run('getEvents', () => this.inner.getEvents(request));
+  }
+}
+
+/**
  * Whether an error came from reaching an RPC host rather than from the
  * application response it returned. Both `fetch`/axios and the Stellar SDK
  * report host failures with different shapes, so the classifier accepts the
@@ -346,6 +489,7 @@ export class FailoverTransport implements StreamsTransport {
  */
 function isTransportFailure(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
+  if (error instanceof RpcTimeoutError) return true;
   if (error.name === 'AbortError' || error.name === 'StreamsError') return false;
   const status = httpStatus(error);
   if (status !== undefined) return status >= 500 || status === 408 || status === 429;
@@ -598,7 +742,8 @@ export type StreamErrorCode =
   | 'BATCH_OVERFLOW'
   | 'STREAM_PAUSED'
   | 'NOT_PAUSED'
-  | 'SAME_RECIPIENT';
+  | 'SAME_RECIPIENT'
+  | 'INVALID_STATE_TRANSITION';
 
 /**
  * Stable identifiers for the splits contract's `SplitError` enum. They share
@@ -649,6 +794,8 @@ const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
   16: 'STREAM_PAUSED',
   17: 'NOT_PAUSED',
   20: 'SAME_RECIPIENT',
+  22: 'SAME_RECIPIENT',
+  24: 'INVALID_STATE_TRANSITION',
 };
 
 /**
@@ -880,6 +1027,13 @@ abstract class SorobanClient {
   constructor(options: StreamsClientOptions) {
     this.options = options;
     const urls = configuredRpcUrls(options);
+    const timeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    // Every per-host transport gets its own timeout, inside the failover
+    // layer, so a hung host rotates to the next one like any other failure.
+    const endpoint = (url: string, transport: StreamsTransport) => ({
+      url,
+      transport: new TimeoutTransport(transport, timeoutMs, url),
+    });
     if (options.transport instanceof FailoverTransport) {
       this.rpc = options.transport;
     } else if (Array.isArray(options.transport)) {
@@ -887,18 +1041,14 @@ abstract class SorobanClient {
         throw new Error('Pass at least one injected transport, or leave `transport` unset.');
       }
       this.rpc = new FailoverTransport(
-        options.transport.map((transport, index) => ({
-          url: urls[index] ?? `injected transport ${index + 1}`,
-          transport,
-        })),
+        options.transport.map((transport, index) =>
+          endpoint(urls[index] ?? `injected transport ${index + 1}`, transport),
+        ),
         options.onRpcFailover,
       );
     } else if (options.transport) {
       const url = urls[0] ?? 'injected transport';
-      this.rpc = new FailoverTransport(
-        [{ url, transport: options.transport }],
-        options.onRpcFailover,
-      );
+      this.rpc = new FailoverTransport([endpoint(url, options.transport)], options.onRpcFailover);
     } else {
       if (urls.length === 0) {
         throw new Error('Configure at least one RPC endpoint with `rpcUrl` or `rpcUrls`.');
@@ -907,7 +1057,7 @@ abstract class SorobanClient {
         options.transportFactory ??
         ((url: string) => new SorobanRpc.Server(url) as StreamsTransport);
       this.rpc = new FailoverTransport(
-        urls.map((url) => ({ url, transport: create(url) })),
+        urls.map((url) => endpoint(url, create(url))),
         options.onRpcFailover,
       );
     }
@@ -1992,6 +2142,14 @@ export class StreamsClient extends SorobanClient {
   }
 }
 
+/** An escrow's milestone schedule, as returned by {@link EscrowClient.getMilestones}. */
+export interface EscrowMilestones {
+  /** Each milestone's amount in the token's smallest unit, as a decimal string. */
+  amounts: string[];
+  /** `released[i]` is `true` once milestone `i` has been paid to the payee. */
+  released: boolean[];
+}
+
 /**
  * A typed client for the escrow contract, mirroring `StreamsClient`: reads
  * simulate against Soroban RPC, writes run through the same pre-flight, sign,
@@ -2010,6 +2168,23 @@ export class EscrowClient extends SorobanClient {
     return raw === null ? null : normalizeEscrow(raw);
   }
 
+  /**
+   * The id the next escrow will receive.
+   *
+   * @returns The pending escrow id, starting at `1n` on a fresh deployment.
+   * @throws EscrowError when the simulation fails with a contract error.
+   * @example
+   * ```typescript
+   * const nextId = await client.nextEscrowId();
+   * const { hash } = await client.createEscrow({ ...params, id: nextId });
+   * // `nextId` is the id this write consumed, so the escrow can be read back:
+   * const created = await client.getEscrow(nextId);
+   * ```
+   */
+  async nextEscrowId(): Promise<bigint> {
+    return (await this.simulate('next_escrow_id')) as bigint;
+  }
+
   /** Whether the zero-based milestone index has already been released. */
   async isMilestoneReleased(id: bigint | number | string, index: number): Promise<boolean> {
     return (await this.simulate(
@@ -2017,6 +2192,47 @@ export class EscrowClient extends SorobanClient {
       nativeToScVal(BigInt(id), { type: 'u64' }),
       nativeToScVal(index, { type: 'u32' }),
     )) as boolean;
+  }
+
+  /**
+   * Fetch an escrow's milestone schedule and which milestones have been paid.
+   *
+   * Returns `null` when the escrow has no schedule (a plain, single-release
+   * escrow, or an unknown id). Otherwise `amounts[i]` is milestone `i`'s amount
+   * in the token's smallest unit, as a decimal string, and `released[i]` says
+   * whether it has been paid out. The released flags are read in parallel, one
+   * `is_milestone_released` simulation per milestone.
+   *
+   * @example
+   * ```typescript
+   * const schedule = await escrowClient.getMilestones(7);
+   * // => { amounts: ['250', '750'], released: [true, false] }
+   * ```
+   */
+  async getMilestones(id: bigint | number | string): Promise<EscrowMilestones | null> {
+    const escrowId = nativeToScVal(BigInt(id), { type: 'u64' });
+    const raw = await this.simulate('get_milestones', escrowId);
+    if (raw === null || raw === undefined) return null;
+    if (!Array.isArray(raw)) {
+      throw new Error('Unexpected get_milestones response: expected a list of amounts.');
+    }
+    const amounts = raw.map((amount) => {
+      if (typeof amount !== 'bigint') {
+        throw new Error('Unexpected get_milestones response: expected i128 amounts.');
+      }
+      return amount.toString();
+    });
+    const released = await Promise.all(
+      amounts.map(
+        async (_, index) =>
+          (await this.simulate(
+            'is_milestone_released',
+            escrowId,
+            nativeToScVal(index, { type: 'u32' }),
+          )) === true,
+      ),
+    );
+    return { amounts, released };
   }
 
   /**

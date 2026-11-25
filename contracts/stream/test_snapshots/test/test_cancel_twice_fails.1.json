@@ -306,6 +306,12 @@
                   },
                   {
                     "key": {
+                      "symbol": "paused_at"
+                    },
+                    "val": "void"
+                  },
+                  {
+                    "key": {
                       "symbol": "recipient"
                     },
                     "val": {
@@ -350,6 +356,14 @@
                     },
                     "val": {
                       "i128": "300"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "total_paused"
+                    },
+                    "val": {
+                      "u64": "0"
                     }
                   },
                   {
