@@ -227,6 +227,40 @@ await withdraw.mutate(id, claimable);
 
 ---
 
+## `useReduceStream`
+
+Partially cancels a stream (`reduce_stream`): the sender lowers the total
+without cancelling the schedule, and the contract refunds the difference less
+anything already vested.
+
+- `client` — a `ReduceStreamsClientLike | null` exposing
+  `reduceStream(id, newTotal)`. Pass `null` to disable writes.
+- `options` — optional `onSuccess` / `onError` callbacks, like the other hooks.
+
+`mutate({ id, newTotal })` submits the reduction. `newTotal` is in the token's
+smallest unit and may be a `bigint`, number or string. A negative total is
+rejected locally (the contract can never accept it); every other rule —
+`ReductionBelowVested`, `InvalidReduction`, sender-only — is enforced by the
+contract and surfaces through `error` and `errorCode`.
+
+While the write is in flight every mounted `useStream` for the id shows the new
+`totalAmount`. A confirmed transaction refetches those readers before the
+optimistic value is dropped, and a failed one rolls the display back.
+
+```tsx
+const reduce = useReduceStream(client, {
+  onSuccess: () => setNotice('Stream reduced'),
+});
+
+await reduce.mutate({ id: streamId, newTotal: 250_000_000n });
+```
+
+The SDK does not expose `reduce_stream` yet, so the hook accepts a structural
+client (`ReduceStreamsClientLike`); nothing changes here once
+`StreamsClient.reduceStream(id, newTotal)` ships.
+
+---
+
 ## Splits
 
 `packages/hooks` mirrors the stream data layer for the `splits` contract. The
@@ -251,6 +285,35 @@ const { data: splits, loading } = useSplits(client, address);
 const { mutate, status } = useCreateSplit(client);
 
 await mutate({ creator: address, recipients: ['GA…', 'GB…'], shares: [60, 40] });
+```
+
+---
+
+## Escrow
+
+`packages/hooks` wraps every escrow write behind the same mutation state as the
+stream hooks. The generated `EscrowClient.Client` from
+`@stellar-starter-kit/contracts` satisfies `EscrowClientLike` directly, so a
+page can pass it without a wrapper.
+
+- `useCreateEscrow` — `mutate({ payer, payee, arbiter, token, amount, deadline })`
+- `useFundEscrow` — `mutate({ id })`
+- `useReleaseEscrow` — `mutate({ id, caller })`
+- `useRefundEscrow` — `mutate({ id, caller })`
+- `useCancelEscrow` — `mutate({ id, caller })`
+
+Each returns `{ mutate, status, error, errorCode, hash, reset }`. `errorCode`
+carries `EscrowError.code` (for example `UNAUTHORIZED_OPERATION` or
+`ALREADY_FINALIZED`) when the failure is a contract error, so the UI can branch
+without matching on message text. Ids and amounts accept `bigint`, number or
+string and are converted to `bigint` before submission.
+
+```tsx
+const fund = useFundEscrow(client, {
+  onSuccess: ({ hash }) => addLog('fund', hash),
+});
+
+await fund.mutate({ id: 1n });
 ```
 
 ---
@@ -314,9 +377,11 @@ import { useStream, useStreams, useStellarNetworkStatus } from '@stellar-starter
 
 The package has no default exports or additional entry points. Its named
 exports are the stream hooks (`useStream`, `useStreams`, `useCreateStream`,
-`useWithdrawStream`, `useCancelStream`), the split hooks (`useSplit`,
-`useSplits`, `useCreateSplit`, `useDistributeSplit`), and
-`useStellarNetworkStatus`. The dashboard does not currently import these hooks.
+`useWithdrawStream`, `useCancelStream`, `useReduceStream`), the split hooks
+(`useSplit`, `useSplits`, `useCreateSplit`, `useDistributeSplit`), the escrow
+hooks (`useCreateEscrow`, `useFundEscrow`, `useReleaseEscrow`,
+`useRefundEscrow`, `useCancelEscrow`), and `useStellarNetworkStatus`. The
+dashboard does not currently import these hooks.
 
 ---
 

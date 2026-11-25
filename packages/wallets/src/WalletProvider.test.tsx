@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { render, act, screen, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { WalletProvider, useWallet } from './WalletProvider';
 import * as freighter from '@stellar/freighter-api';
 import albedo from '@albedo-link/intent';
@@ -41,6 +41,19 @@ vi.mock('@ledgerhq/hw-app-str', () => ({
     }
   },
 }));
+
+// The provider loads each adapter with `import()` the first time a provider is
+// used, so without this the first click in each test would spend its time on
+// Vitest's on-demand transform of that module rather than on the provider.
+beforeAll(async () => {
+  await Promise.all([
+    import('./adapters/freighter.js'),
+    import('./adapters/albedo.js'),
+    import('./adapters/rabe.js'),
+    import('./adapters/hana.js'),
+    import('./adapters/ledger.js'),
+  ]);
+});
 
 // Helper component to access useWallet hooks in tests
 function TestComponent() {

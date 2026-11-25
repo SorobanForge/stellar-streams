@@ -1,21 +1,19 @@
-// @stellar/freighter-api ships CommonJS, so a default import is the only form
-// Node's ESM resolver can load; named imports from it work under a bundler but
-// throw at runtime everywhere else.
-import freighterApi from '@stellar/freighter-api';
-
-const {
-  isConnected: checkFreighterConnected,
-  getAddress: getFreighterAddress,
-  signTransaction: signFreighterTransaction,
-  signAuthEntry: signFreighterAuthEntry,
-  requestAccess: requestFreighterAccess,
-} = freighterApi;
 import {
   resolveNetworkPassphrase,
   type WalletAdapter,
   type SignTransactionOptions,
 } from './adapter.js';
 import type { WalletType } from '../WalletProvider';
+
+// @stellar/freighter-api ships CommonJS, so its functions are only reachable
+// through the namespace's `default`: a named import works under a bundler but
+// throws at runtime everywhere else. Importing it here (at module scope) would
+// also put the client in the chunk every page loads before a wallet is chosen,
+// so it is awaited on first use instead.
+async function freighterApi() {
+  const { default: api } = await import('@stellar/freighter-api');
+  return api;
+}
 
 /** Adapter for the Freighter wallet extension (@stellar/freighter-api v6). */
 export class FreighterAdapter implements WalletAdapter {
@@ -25,22 +23,24 @@ export class FreighterAdapter implements WalletAdapter {
   private publicKey: string | null = null;
 
   async isAvailable(): Promise<boolean> {
-    const { isConnected } = await checkFreighterConnected();
-    return isConnected === true;
+    const api = await freighterApi();
+    const { isConnected: connected } = await api.isConnected();
+    return connected === true;
   }
 
   async connect(): Promise<string> {
-    const connection = await checkFreighterConnected();
+    const api = await freighterApi();
+    const connection = await api.isConnected();
     if (!connection.isConnected) {
       throw new Error('Freighter wallet extension is not installed or enabled.');
     }
 
     let address: string;
     try {
-      const access = await requestFreighterAccess();
+      const access = await api.requestAccess();
       address = access.address;
     } catch {
-      const res = await getFreighterAddress();
+      const res = await api.getAddress();
       address = res.address;
     }
 
@@ -56,7 +56,8 @@ export class FreighterAdapter implements WalletAdapter {
     // Always ask the extension — a cached key could belong to a different
     // account or browser profile, which is exactly what session restore has
     // to detect. The result is still cached for the signing methods.
-    const res = await getFreighterAddress();
+    const api = await freighterApi();
+    const res = await api.getAddress();
     if (!res.address) {
       throw new Error('Failed to retrieve public key from wallet.');
     }
@@ -65,7 +66,8 @@ export class FreighterAdapter implements WalletAdapter {
   }
 
   async signTransaction(xdr: string, opts?: SignTransactionOptions): Promise<string> {
-    const { signedTxXdr } = await signFreighterTransaction(xdr, {
+    const { signTransaction } = await freighterApi();
+    const { signedTxXdr } = await signTransaction(xdr, {
       networkPassphrase: resolveNetworkPassphrase(opts),
       address: this.publicKey ?? '',
     });
@@ -73,7 +75,8 @@ export class FreighterAdapter implements WalletAdapter {
   }
 
   async signAuthEntry(entryXdr: string, opts?: SignTransactionOptions): Promise<string> {
-    const { signedAuthEntry } = await signFreighterAuthEntry(entryXdr, {
+    const { signAuthEntry } = await freighterApi();
+    const { signedAuthEntry } = await signAuthEntry(entryXdr, {
       networkPassphrase: resolveNetworkPassphrase(opts),
       address: this.publicKey ?? '',
     });
