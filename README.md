@@ -403,6 +403,29 @@ Good places to start:
 - Add an integration test that exercises a full stream lifecycle on a local node.
 - Implement the `splits` dashboard page.
 
+### Continuous integration
+
+Every pull request runs the workflows in `.github/workflows/`:
+
+- **CI** (`ci.yml`) — lint/format, TypeScript, unit tests, Soroban contracts, generated
+  bindings, dependency licenses (`cargo-deny`), and a production build. On pull requests it also
+  runs `vitest --coverage` for each package, uploads the report as the `coverage-report`
+  artifact, and posts a per-package summary with deltas against
+  `scripts/coverage-baseline.json`; packages without tests are listed as "not covered".
+  Run it locally with `pnpm run coverage`.
+- **Dependency Review** (`dependency-review.yml`) — `actions/dependency-review-action` blocks a
+  PR that adds a dependency with a high-severity advisory, and a weekly job runs
+  `pnpm audit --prod --audit-level=high`, so a vulnerability published after a dependency lands
+  still fails rather than being skipped.
+- **Secret Scan** (`secret-scan.yml`) and **Malware Scan** (`malware-scan.yml`) — scan PRs for
+  committed secrets, known malware, and supply-chain attack patterns; the malware scan also
+  re-scans `main` nightly.
+- **Docs** (`docs.yml`) — checks documentation links, and **PR Commit Check** (`pr-check.yml`)
+  enforces a conventional PR title.
+
+Maintainers apply these job names as required status checks on `main` with
+`./scripts/setup-branch-protection.sh`.
+
 ### Testing packages
 
 `@stellar-starter-kit/testing` is a private, test-only workspace package: an in-memory Soroban RPC

@@ -9,7 +9,9 @@
     "build": "tsc",
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@stellar-starter-kit/types": "workspace:*",
@@ -19,6 +21,8 @@
     "@stellar-starter-kit/eslint-config": "workspace:*",
     "@stellar-starter-kit/tsconfig": "workspace:*",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.12",
+
+    "@vitest/coverage-v8": "^4.1.12"
   }
 }
