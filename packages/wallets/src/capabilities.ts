@@ -20,6 +20,8 @@ export interface WalletCapabilities {
   wallet: WalletType;
   /** Human-readable wallet name, matching the adapter's `name`. */
   name: string;
+  /** Whether the adapter can only observe and never sign (a watched address). */
+  readOnly: boolean;
   /** Whether the adapter implements Soroban auth-entry signing. */
   signAuthEntry: boolean;
   /** Whether the wallet is a hardware device (Ledger) rather than an extension. */
@@ -38,11 +40,22 @@ export interface WalletCapabilities {
  *   wallets, and Ledger additionally requires WebHID.
  * - `deepLink`: Albedo is used through the `@albedo-link/intent` web intent,
  *   which opens Albedo rather than relying on an injected `window` provider.
+ * - `readOnly`: only the watch adapter can observe but never sign; write
+ *   buttons should be disabled while it is active.
  */
 export const WALLET_CAPABILITIES: Record<WalletType, WalletCapabilities> = {
+  watch: {
+    wallet: 'watch',
+    name: 'Watch address',
+    readOnly: true,
+    signAuthEntry: false,
+    hardware: false,
+    deepLink: false,
+  },
   freighter: {
     wallet: 'freighter',
     name: 'Freighter',
+    readOnly: false,
     signAuthEntry: true,
     hardware: false,
     deepLink: false,
@@ -50,6 +63,7 @@ export const WALLET_CAPABILITIES: Record<WalletType, WalletCapabilities> = {
   albedo: {
     wallet: 'albedo',
     name: 'Albedo',
+    readOnly: false,
     signAuthEntry: false,
     hardware: false,
     deepLink: true,
@@ -57,6 +71,7 @@ export const WALLET_CAPABILITIES: Record<WalletType, WalletCapabilities> = {
   rabe: {
     wallet: 'rabe',
     name: 'Rabet',
+    readOnly: false,
     signAuthEntry: false,
     hardware: false,
     deepLink: false,
@@ -64,6 +79,7 @@ export const WALLET_CAPABILITIES: Record<WalletType, WalletCapabilities> = {
   hana: {
     wallet: 'hana',
     name: 'Hana',
+    readOnly: false,
     signAuthEntry: false,
     hardware: false,
     deepLink: false,
@@ -71,6 +87,7 @@ export const WALLET_CAPABILITIES: Record<WalletType, WalletCapabilities> = {
   ledger: {
     wallet: 'ledger',
     name: 'Ledger',
+    readOnly: false,
     signAuthEntry: false,
     hardware: true,
     deepLink: false,

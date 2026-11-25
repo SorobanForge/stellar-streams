@@ -326,6 +326,9 @@ importers:
       '@stellar-starter-kit/types':
         specifier: workspace:*
         version: link:../types
+      '@stellar-starter-kit/utils':
+        specifier: workspace:*
+        version: link:../utils
       '@stellar-starter-kit/wallets':
         specifier: workspace:*
         version: link:../wallets
