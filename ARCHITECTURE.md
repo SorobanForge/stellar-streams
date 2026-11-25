@@ -38,7 +38,7 @@ graph TD
 
 ## On-chain layer (`contracts/`)
 
-Rust workspaces built with [soroban-sdk](https://crates.io/crates/soroban-sdk) `27.x`.
+Rust workspaces built with [soroban-sdk](https://docs.rs/soroban-sdk) `27.x`.
 
 | Crate    | Responsibility                                                                         |
 | :------- | :------------------------------------------------------------------------------------- |
@@ -97,6 +97,7 @@ dashboard footer shows the version next to the network name.
 | `wallets`   | Unified React context over Freighter, Albedo, Rabet, Hana, and Ledger.                                                          |
 | `ui`        | Shared UI primitives and the Tailwind class helper.                                                                             |
 | `contracts` | Generated Soroban TypeScript bindings plus network constants.                                                                   |
+| `testing`   | Test-only in-memory RPC transport, protocol fixtures, client harness.                                                           |
 
 The SDK never assumes a wallet is present: read methods need only `publicKey`, write methods
 require injected `signTransaction`.

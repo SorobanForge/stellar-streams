@@ -146,6 +146,18 @@ export interface Client {
   set_milestones: ({id, caller, amounts}: {id: u64, caller: string, amounts: Array<i128>}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
 
   /**
+   * Construct and simulate a remaining_amount transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * The amount of the escrow that has not yet been released to the payee.
+   * 
+   * For a milestone escrow this is the sum of every unreleased milestone, so
+   * it reaches zero once the final milestone is released. An escrow without
+   * a milestone schedule always reports its full amount. Fails with
+   * `MilestoneScheduleNotFound` only when a schedule is attached but its
+   * release flags are missing.
+   */
+  remaining_amount: ({id}: {id: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Result<i128>>>
+
+  /**
    * Construct and simulate a release_milestone transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    * Release a single milestone to the payee.
    * 
@@ -189,6 +201,7 @@ export class Client extends ContractClient {
         "AAAABQAAADZFbWl0dGVkIHdoZW4gZXNjcm93ZWQgZnVuZHMgYXJlIHJlbGVhc2VkIHRvIHRoZSBwYXllZS4AAAAAAAAAAAAORXNjcm93UmVsZWFzZWQAAAAAAAIAAAAGZXNjcm93AAAAAAAIcmVsZWFzZWQAAAAEAAAAAAAAAAJpZAAAAAAABgAAAAEAAAAAAAAABmNhbGxlcgAAAAAAEwAAAAAAAAAAAAAABXBheWVlAAAAAAAAEwAAAAAAAAAAAAAABmFtb3VudAAAAAAACwAAAAAAAAAC",
         "AAAABQAAACRFbWl0dGVkIHdoZW4gYW4gZXNjcm93IGlzIGNhbmNlbGxlZC4AAAAAAAAAD0VzY3Jvd0NhbmNlbGxlZAAAAAACAAAABmVzY3JvdwAAAAAACWNhbmNlbGxlZAAAAAAAAAIAAAAAAAAAAmlkAAAAAAAGAAAAAQAAAAAAAAAFcGF5ZXIAAAAAAAATAAAAAAAAAAI=",
         "AAAABQAAADRFbWl0dGVkIHdoZW4gb25lIG1pbGVzdG9uZSBpcyByZWxlYXNlZCB0byB0aGUgcGF5ZWUuAAAAAAAAABFNaWxlc3RvbmVSZWxlYXNlZAAAAAAAAAIAAAAGZXNjcm93AAAAAAASbWlsZXN0b25lX3JlbGVhc2VkAAAAAAAFAAAAAAAAAAJpZAAAAAAABgAAAAEAAAAAAAAABWluZGV4AAAAAAAABAAAAAAAAAAAAAAABmNhbGxlcgAAAAAAEwAAAAAAAAAAAAAABXBheWVlAAAAAAAAEwAAAAAAAAAAAAAABmFtb3VudAAAAAAACwAAAAAAAAAC",
+        "AAAABQAAADtFbWl0dGVkIHdoZW4gYSBtaWxlc3RvbmUgc2NoZWR1bGUgaXMgYXR0YWNoZWQgdG8gYW4gZXNjcm93LgAAAAAAAAAAFE1pbGVzdG9uZXNDb25maWd1cmVkAAAAAgAAAAZlc2Nyb3cAAAAAABVtaWxlc3RvbmVzX2NvbmZpZ3VyZWQAAAAAAAADAAAAAAAAAAJpZAAAAAAABgAAAAEAAAAAAAAABXBheWVyAAAAAAAAEwAAAAAAAAAAAAAAB2Ftb3VudHMAAAAD6gAAAAsAAAAAAAAAAg==",
         "AAAAAAAAAEpUaGUgY29udHJhY3QgaW50ZXJmYWNlIHZlcnNpb24sIHNoYXJlZCBieSBldmVyeSBjb250cmFjdCBpbiB0aGUKd29ya3NwYWNlLgAAAAAAB3ZlcnNpb24AAAAAAAAAAAEAAAAE",
         "AAAAAAAAABlHZXQgZXNjcm93IGRldGFpbHMgYnkgSUQuAAAAAAAACmdldF9lc2Nyb3cAAAAAAAEAAAAAAAAAAmlkAAAAAAAGAAAAAQAAA+gAAAfQAAAABkVzY3JvdwAA",
         "AAAAAAAAAFtGdW5kIHRoZSBlc2Nyb3cgYnkgdHJhbnNmZXJyaW5nIHRoZSBzcGVjaWZpZWQgYW1vdW50IG9mIHRva2VucyBmcm9tIHBheWVyIHRvIHRoaXMgY29udHJhY3QuAAAAAAtmdW5kX2VzY3JvdwAAAAABAAAAAAAAAAJpZAAAAAAABgAAAAEAAAPpAAAAAgAAB9AAAAALRXNjcm93RXJyb3IA",
@@ -199,6 +212,7 @@ export class Client extends ContractClient {
         "AAAAAAAAADBUaGUgaWQgdGhhdCB3aWxsIGJlIGFzc2lnbmVkIHRvIHRoZSBuZXh0IGVzY3Jvdy4AAAAObmV4dF9lc2Nyb3dfaWQAAAAAAAAAAAABAAAABg==",
         "AAAAAAAAAEpSZWxlYXNlIGZ1bmRzIHRvIHRoZSBwYXllZS4gQXV0aG9yaXplZCBieSBlaXRoZXIgdGhlIHBheWVyIG9yIHRoZSBhcmJpdGVyLgAAAAAADnJlbGVhc2VfZXNjcm93AAAAAAACAAAAAAAAAAJpZAAAAAAABgAAAAAAAAAGY2FsbGVyAAAAAAATAAAAAQAAA+kAAAACAAAH0AAAAAtFc2Nyb3dFcnJvcgA=",
         "AAAAAAAAANdBdHRhY2ggYSBtaWxlc3RvbmUgc2NoZWR1bGUgdG8gYW4gdW5mdW5kZWQgZXNjcm93LgoKYGFtb3VudHNgIG11c3QgY29udGFpbiBhdCBsZWFzdCB0d28gcG9zaXRpdmUgZW50cmllcyBhbmQgc3VtIHRvIHRoZQplc2Nyb3cgYW1vdW50LiBPbmx5IHRoZSBwYXllciBtYXkgY29uZmlndXJlIHRoZSBzY2hlZHVsZSwgYW5kIG9ubHkKYmVmb3JlIHRoZSBlc2Nyb3cgaXMgZnVuZGVkLgAAAAAOc2V0X21pbGVzdG9uZXMAAAAAAAMAAAAAAAAAAmlkAAAAAAAGAAAAAAAAAAZjYWxsZXIAAAAAABMAAAAAAAAAB2Ftb3VudHMAAAAD6gAAAAsAAAABAAAD6QAAAAIAAAfQAAAAC0VzY3Jvd0Vycm9yAA==",
+        "AAAAAAAAAXdUaGUgYW1vdW50IG9mIHRoZSBlc2Nyb3cgdGhhdCBoYXMgbm90IHlldCBiZWVuIHJlbGVhc2VkIHRvIHRoZSBwYXllZS4KCkZvciBhIG1pbGVzdG9uZSBlc2Nyb3cgdGhpcyBpcyB0aGUgc3VtIG9mIGV2ZXJ5IHVucmVsZWFzZWQgbWlsZXN0b25lLCBzbwppdCByZWFjaGVzIHplcm8gb25jZSB0aGUgZmluYWwgbWlsZXN0b25lIGlzIHJlbGVhc2VkLiBBbiBlc2Nyb3cgd2l0aG91dAphIG1pbGVzdG9uZSBzY2hlZHVsZSBhbHdheXMgcmVwb3J0cyBpdHMgZnVsbCBhbW91bnQuIEZhaWxzIHdpdGgKYE1pbGVzdG9uZVNjaGVkdWxlTm90Rm91bmRgIG9ubHkgd2hlbiBhIHNjaGVkdWxlIGlzIGF0dGFjaGVkIGJ1dCBpdHMKcmVsZWFzZSBmbGFncyBhcmUgbWlzc2luZy4AAAAAEHJlbWFpbmluZ19hbW91bnQAAAABAAAAAAAAAAJpZAAAAAAABgAAAAEAAAPpAAAACwAAB9AAAAALRXNjcm93RXJyb3IA",
         "AAAAAAAAAPZSZWxlYXNlIGEgc2luZ2xlIG1pbGVzdG9uZSB0byB0aGUgcGF5ZWUuCgpUaGUgcGF5ZXIgb3IgYXJiaXRlciBtYXkgcmVsZWFzZSBtaWxlc3RvbmVzIHdoaWxlIHRoZSBlc2Nyb3cgaXMgZnVuZGVkCmFuZCB0aGUgZGVhZGxpbmUgaGFzIG5vdCBwYXNzZWQuIEEgbWlsZXN0b25lIGNhbiBvbmx5IGJlIHJlbGVhc2VkIG9uY2U7CnJlbGVhc2luZyB0aGUgZmluYWwgbWlsZXN0b25lIG1hcmtzIHRoZSBlc2Nyb3cgYXMgYFJlbGVhc2VkYC4AAAAAABFyZWxlYXNlX21pbGVzdG9uZQAAAAAAAAMAAAAAAAAAAmlkAAAAAAAGAAAAAAAAAA9taWxlc3RvbmVfaW5kZXgAAAAABAAAAAAAAAAGY2FsbGVyAAAAAAATAAAAAQAAA+kAAAACAAAH0AAAAAtFc2Nyb3dFcnJvcgA=",
         "AAAAAAAAAC9XaGV0aGVyIGEgc3BlY2lmaWMgbWlsZXN0b25lIGhhcyBiZWVuIHJlbGVhc2VkLgAAAAAVaXNfbWlsZXN0b25lX3JlbGVhc2VkAAAAAAAAAgAAAAAAAAACaWQAAAAAAAYAAAAAAAAAD21pbGVzdG9uZV9pbmRleAAAAAAEAAAAAQAAAAE=" ]),
       options
@@ -215,6 +229,7 @@ export class Client extends ContractClient {
         next_escrow_id: this.txFromJSON<u64>,
         release_escrow: this.txFromJSON<Result<void>>,
         set_milestones: this.txFromJSON<Result<void>>,
+        remaining_amount: this.txFromJSON<Result<i128>>,
         release_milestone: this.txFromJSON<Result<void>>,
         is_milestone_released: this.txFromJSON<boolean>
   }
