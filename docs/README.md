@@ -15,6 +15,7 @@ Welcome to the Stellar Streams protocol documentation. Use this index to navigat
 | **[Wallet Adapters](wallet-adapters.md)**           | Implementing `WalletAdapter` from scratch, registering a wallet, the rejection vs. cancellation error contract, and testing with the shared wallet mock.                           |
 | **[Deployments](deployments.md)**                   | Testnet and Mainnet contract IDs, deployment ledger sequences, and explorer links.                                                                                                 |
 | **[Good First Issues](good-first-issues.md)**       | Curated roadmap of beginner and contributor tasks across contracts, SDK, and web dashboard.                                                                                        |
+| **[CLI (`streams`)](cli.md)**                       | Creating, inspecting, and withdrawing streams from the terminal, including network selection and dry runs.                                                                         |
 
 ---
 
