@@ -1,0 +1,14 @@
+{
+  "$comment": "Maximum optimized WASM size per contract, in bytes. Soroban caps a contract at 65536 bytes. Measured on 2026-11-25: stream 45090, splits 14105, escrow 25561; each budget adds roughly 15% headroom so a careless change fails before it reaches the on-chain limit. Update a budget deliberately in the same PR that explains the growth.",
+  "contracts": {
+    "stream": {
+      "maxBytes": 52000
+    },
+    "splits": {
+      "maxBytes": 16500
+    },
+    "escrow": {
+      "maxBytes": 30000
+    }
+  }
+}

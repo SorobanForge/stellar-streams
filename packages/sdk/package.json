@@ -20,6 +20,8 @@
     "lint": "eslint src --ext .ts,.tsx",
     "typecheck": "tsc --noEmit",
     "test": "tsx scripts/record-rpc-fixtures.ts --check && vitest run",
+
+    "test:coverage": "vitest run --coverage",
     "fixtures:record": "node scripts/record-rpc-fixtures.ts",
     "fixtures:check": "node scripts/record-rpc-fixtures.ts --check",
     "docs": "typedoc"
@@ -30,11 +32,14 @@
     "@stellar/stellar-sdk": "^14.5.0"
   },
   "devDependencies": {
+    "@stellar-starter-kit/testing": "workspace:*",
     "@stellar-starter-kit/tsconfig": "workspace:*",
     "@stellar-starter-kit/eslint-config": "workspace:*",
     "typedoc": "^0.28.20",
     "typescript": "^6.0.3",
     "tsx": "^4.23.15",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.12",
+
+    "@vitest/coverage-v8": "^4.1.12"
   }
 }
