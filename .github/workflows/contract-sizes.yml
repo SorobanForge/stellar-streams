@@ -1,0 +1,52 @@
+name: Contract Size Budget
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - 'scripts/build-contracts.sh'
+      - 'scripts/optimize-contracts.sh'
+      - 'scripts/check-contract-sizes.sh'
+      - '.github/workflows/contract-sizes.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wasm-size:
+    name: Check Contract WASM Size
+    runs-on: ubuntu-latest
+    env:
+      # Pinned to match the bindings job so optimization is reproducible.
+      STELLAR_CLI_VERSION: '30.0.1'
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts
+
+      - name: Install Stellar CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset="stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSL -o /tmp/stellar-cli.tar.gz \
+            "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/${asset}"
+          tar -xzf /tmp/stellar-cli.tar.gz -C /tmp stellar
+          sudo install -m 0755 /tmp/stellar /usr/local/bin/stellar
+          stellar --version
+
+      - name: Build Contracts
+        run: bash scripts/build-contracts.sh
+
+      - name: Optimize and Check Sizes
+        run: bash scripts/optimize-contracts.sh --check
