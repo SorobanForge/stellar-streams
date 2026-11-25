@@ -15,6 +15,7 @@ import {
 } from './optimistic.js';
 
 export * from './splits.js';
+export * from './useEscrow.js';
 export type { MutationOptions, MutationResult, MutationStatus } from './mutation.js';
 
 /** Tracks browser connectivity as a lightweight proxy for network status. */
@@ -350,6 +351,68 @@ export function useCancelStream(
     const opId = pushOptimistic(streams, key, () => ({ cancelled: true }));
     try {
       const result = await streams.cancel(id);
+      settleOptimistic(streams, key, opId);
+      void notifyOptimisticRefresh(streams, key);
+      return result;
+    } catch (err) {
+      rollbackOptimistic(streams, key, opId);
+      throw err;
+    }
+  }, []);
+  return useContractMutation<StreamsClient, [StreamId]>(client, run, options);
+}
+
+/**
+ * Pauses accrual for a stream. Only the sender can authorize it.
+ *
+ * The stream is marked paused optimistically in every mounted
+ * `useStream` for the id, then reconciled by a refetch on success or rolled
+ * back on failure.
+ */
+export function usePauseStream(
+  client: StreamsClient | null,
+  options: StreamMutationOptions = {},
+): StreamMutationResult<[StreamId]> {
+  const run = useCallback(async (streams: StreamsClient, id: StreamId) => {
+    const key = String(id);
+    const now = Math.floor(Date.now() / 1000);
+    const opId = pushOptimistic(streams, key, () => ({ pausedAt: now }));
+    try {
+      const result = await streams.pause(id);
+      settleOptimistic(streams, key, opId);
+      void notifyOptimisticRefresh(streams, key);
+      return result;
+    } catch (err) {
+      rollbackOptimistic(streams, key, opId);
+      throw err;
+    }
+  }, []);
+  return useContractMutation<StreamsClient, [StreamId]>(client, run, options);
+}
+
+/**
+ * Resumes accrual for a stream. Only the sender can authorize it.
+ *
+ * The stream is marked resumed optimistically in every mounted
+ * `useStream` for the id, then reconciled by a refetch on success or rolled
+ * back on failure.
+ */
+export function useResumeStream(
+  client: StreamsClient | null,
+  options: StreamMutationOptions = {},
+): StreamMutationResult<[StreamId]> {
+  const run = useCallback(async (streams: StreamsClient, id: StreamId) => {
+    const key = String(id);
+    const now = Math.floor(Date.now() / 1000);
+    const opId = pushOptimistic(streams, key, (stream) => {
+      const added = stream.pausedAt ? Math.max(0, now - stream.pausedAt) : 0;
+      return {
+        pausedAt: null,
+        totalPaused: (stream.totalPaused ?? 0) + added,
+      };
+    });
+    try {
+      const result = await streams.resume(id);
       settleOptimistic(streams, key, opId);
       void notifyOptimisticRefresh(streams, key);
       return result;
