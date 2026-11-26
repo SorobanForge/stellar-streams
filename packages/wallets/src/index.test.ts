@@ -9,7 +9,6 @@ describe('Stellar Wallet Providers', () => {
     expect(WALLET_PROVIDERS.RABE).toBe('rabe');
     expect(WALLET_PROVIDERS.HANA).toBe('hana');
     expect(WALLET_PROVIDERS.LEDGER).toBe('ledger');
-    expect(WALLET_PROVIDERS.WALLETCONNECT).toBe('walletconnect');
   });
 
   it('should list every supported provider in the wallet picker options', () => {

@@ -14,7 +14,6 @@ export const WALLET_PROVIDERS = {
   RABE: 'rabe',
   HANA: 'hana',
   LEDGER: 'ledger',
-  WALLETCONNECT: 'walletconnect',
 } as const;
 
 export type WalletProviderType = WalletType;

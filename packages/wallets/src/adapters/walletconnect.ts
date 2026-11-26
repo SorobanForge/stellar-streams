@@ -7,7 +7,6 @@
  */
 import {
   PUBLIC_NETWORK_PASSPHRASE,
-  TESTNET_PASSPHRASE,
   resolveNetworkPassphrase,
   type SignTransactionOptions,
   type WalletAdapter,
@@ -117,14 +116,17 @@ export class WalletConnectAdapter implements WalletAdapter {
     // Dynamic loader for production bundlers
     try {
       const { SignClient } = await import('@walletconnect/sign-client');
-      const client = await (SignClient as unknown as {
-        init: (opts: { projectId: string; metadata?: unknown }) => Promise<WalletConnectClient>;
-      }).init({
+      const client = await (
+        SignClient as unknown as {
+          init: (opts: { projectId: string; metadata?: unknown }) => Promise<WalletConnectClient>;
+        }
+      ).init({
         projectId: this.projectId,
         metadata: {
           name: 'Stellar Streams',
           description: 'Payment streaming and vesting on Stellar & Soroban',
-          url: typeof window !== 'undefined' ? window.location.origin : 'https://stellar-streams.app',
+          url:
+            typeof window !== 'undefined' ? window.location.origin : 'https://stellar-streams.app',
           icons: ['https://stellar-streams.app/icon.png'],
         },
       });
@@ -278,7 +280,9 @@ export class WalletConnectAdapter implements WalletAdapter {
     const chainId = toStellarChainId(opts);
 
     try {
-      const response = await client.request<{ signedAuthEntry?: string; entryXdr?: string } | string>({
+      const response = await client.request<
+        { signedAuthEntry?: string; entryXdr?: string } | string
+      >({
         topic: this.session.topic,
         chainId,
         request: {
