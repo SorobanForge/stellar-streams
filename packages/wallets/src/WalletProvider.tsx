@@ -16,6 +16,28 @@ export type WalletType = 'watch' | 'freighter' | 'albedo' | 'rabe' | 'hana' | 'l
 export { networkMismatchMessage, PUBLIC_NETWORK_PASSPHRASE, TESTNET_PASSPHRASE };
 export const MAINNET_PASSPHRASE = PUBLIC_NETWORK_PASSPHRASE;
 
+/** Provider operations that can fail and be reported. */
+export type WalletOperation = 'connect' | 'signTransaction' | 'signAuthEntry';
+
+/**
+ * Failure handed to the injectable reporter. It deliberately carries only the
+ * adapter id, the operation and the error: never the XDR being signed, a
+ * signature or any other secret.
+ */
+export interface WalletErrorContext {
+  adapter: WalletType;
+  operation: WalletOperation;
+  error: unknown;
+}
+
+export type WalletErrorReporter = (context: WalletErrorContext) => void;
+
+export interface WalletProviderProps {
+  children: React.ReactNode;
+  /** Receives adapter failures for telemetry. Falls back to a console warning. */
+  onError?: WalletErrorReporter;
+}
+
 export interface WalletContextType {
   activeAddress: string | null;
   activeProvider: WalletType | null;
@@ -104,7 +126,7 @@ function isWalletProvider(value: string): value is WalletType {
   return value in ADAPTER_LOADERS;
 }
 
-export function WalletProvider({ children }: { children: React.ReactNode }) {
+export function WalletProvider({ children, onError }: WalletProviderProps) {
   const [activeAddress, setActiveAddress] = useState<string | null>(null);
   const [activeProvider, setActiveProvider] = useState<WalletType | null>(null);
   const [network, setNetworkState] = useState<string>('TESTNET');
@@ -121,31 +143,58 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   /** Monotonically increasing id used to discard stale restore results. */
   const restoreId = useRef(0);
 
-  const connect = useCallback(async (provider: WalletType, address?: string) => {
-    setIsConnecting(true);
-    setError(null);
-    try {
-      const adapter = await adapterFor(provider);
-      const publicKey = await adapter.connect(address);
-
-      if (!publicKey) {
-        throw new Error('Failed to retrieve public key from wallet.');
+  const reportError = useCallback(
+    ({ adapter, operation, error }: WalletErrorContext) => {
+      if (onError) {
+        onError({ adapter, operation, error });
+        return;
       }
 
-      setActiveAddress(publicKey);
-      setActiveProvider(provider);
-      localStorage.setItem(LOCAL_STORAGE_KEY_PROVIDER, provider);
-      localStorage.setItem(LOCAL_STORAGE_KEY_ADDRESS, publicKey);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'An unknown error occurred connecting to the wallet.';
-      setError(message);
-      console.error('Wallet connection error:', err);
-      throw err;
-    } finally {
-      setIsConnecting(false);
-    }
-  }, []);
+      if (operation === 'connect') {
+        console.warn('Wallet connection error:', error);
+        return;
+      }
+
+      const noun = operation === 'signTransaction' ? 'transaction' : 'auth entry';
+      if (isUserRejection(error instanceof Error ? error.message : '')) {
+        console.warn(`${noun} signing cancelled by user:`, error);
+      } else {
+        console.warn(`${noun} signing failed:`, error);
+      }
+    },
+    [onError],
+  );
+
+  const connect = useCallback(
+    async (provider: WalletType, address?: string) => {
+      setIsConnecting(true);
+      setError(null);
+      try {
+        const adapter = await adapterFor(provider);
+        const publicKey = await adapter.connect(address);
+
+        if (!publicKey) {
+          throw new Error('Failed to retrieve public key from wallet.');
+        }
+
+        setActiveAddress(publicKey);
+        setActiveProvider(provider);
+        localStorage.setItem(LOCAL_STORAGE_KEY_PROVIDER, provider);
+        localStorage.setItem(LOCAL_STORAGE_KEY_ADDRESS, publicKey);
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'An unknown error occurred connecting to the wallet.';
+        setError(message);
+        reportError({ adapter: provider, operation: 'connect', error: err });
+        throw err;
+      } finally {
+        setIsConnecting(false);
+      }
+    },
+    [reportError],
+  );
 
   const disconnect = useCallback(() => {
     // Invalidate any in-flight restore so it cannot resurrect this session.
@@ -279,15 +328,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         });
       } catch (err) {
         const error = toSigningError(err, `Failed to sign ${noun}.`);
-        if (isUserRejection(error.message)) {
-          console.warn(`${noun} signing cancelled by user:`, err);
-        } else {
-          console.error(`${noun} signing failed:`, err);
-        }
+        reportError({ adapter: activeProvider, operation: method, error });
         throw error;
       }
     },
-    [activeProvider, activeAddress, walletNetworkPassphrase],
+    [activeProvider, activeAddress, network, walletNetworkPassphrase, reportError],
   );
 
   const signTransaction = useCallback(

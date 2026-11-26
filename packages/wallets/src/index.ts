@@ -47,7 +47,10 @@ export type { WalletCapabilities } from './capabilities.js';
 export {
   NotSupportedError,
   WalletCancelledError,
+  WalletLockedError,
   WalletRejectedError,
   isUserRejection,
+  isWalletLockedError,
   toSigningError,
+  toWalletLockedError,
 } from './errors.js';
