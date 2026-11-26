@@ -16,13 +16,17 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "vitest",
+    "test": "vitest --run",
+
+    "test:coverage": "vitest run --coverage",
     "test:run": "vitest run"
   },
   "dependencies": {},
   "devDependencies": {
     "@stellar-starter-kit/tsconfig": "workspace:*",
     "typescript": "^6.0.3",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.12",
+
+    "@vitest/coverage-v8": "^4.1.12"
   }
 }

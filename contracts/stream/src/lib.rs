@@ -45,6 +45,12 @@ pub const MAX_PAUSE_SECONDS: u64 = 2_592_000;
 /// and leaves room for [`StreamCreated`] to grow without silently pushing a
 /// maximum batch over a network limit. Larger payroll runs are submitted as
 /// multiple batches.
+///
+/// A full batch writes `MAX_BATCH + 4` ledger entries in total: one per stream,
+/// plus the contract instance (whose TTL is extended once per call, see issue
+/// #303), the sender's and the contract's token balances, and the sender's
+/// auth nonce. The same 14 streams created by individual `create_stream` calls
+/// write 5 entries each (70 in total).
 pub const MAX_BATCH: u32 = 14;
 
 #[contracterror]
@@ -83,6 +89,8 @@ pub enum StreamError {
     /// own (`now - paused_at > MAX_PAUSE_SECONDS`). The stream is not frozen:
     /// vesting and `withdraw` have already resumed it.
     PauseWindowExceeded = 23,
+    /// Issue #298: `close_stream` called on an active or unsettled stream.
+    InvalidStateTransition = 24,
 }
 
 /// A single linear payment stream. Tokens are locked in the contract and vest
@@ -255,6 +263,14 @@ pub struct StreamRecipientTransferred {
     pub id: u64,
     pub old_recipient: Address,
     pub new_recipient: Address,
+}
+
+/// Emitted when a fully settled stream is closed and its storage reclaimed.
+#[contractevent(topics = ["stream", "closed"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamClosed {
+    #[topic]
+    pub id: u64,
 }
 
 #[contract]
@@ -433,6 +449,13 @@ impl StreamContract {
         // Reserve the whole id range once, mirroring `create_stream`'s
         // allocate-then-store order.
         env.storage().instance().set(&DataKey::NextId, &after_batch);
+        // Issue #303: the instance is one ledger entry no matter how many
+        // streams the batch creates, so its TTL is extended exactly once per
+        // call, here, rather than once per stream inside the loop below. Every
+        // stream entry still gets its own `extend_ttl`, so no entry outlives its
+        // budget. Bumping the instance per stream cost a `MAX_BATCH` batch
+        // ~80k extra CPU instructions for no change in footprint;
+        // `test_create_streams_bumps_instance_once_and_every_entry` pins this.
         env.storage().instance().extend_ttl(LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
 
         let token_client = token::Client::new(&env, &token);
@@ -598,9 +621,14 @@ impl StreamContract {
         Ok(())
     }
 
-    /// Withdraw the currently vested (and not yet withdrawn) amount to the recipient.
+    /// Withdraw the currently vested (and not yet withdrawn) amount to `destination`.
+    /// Authorized by the stream recipient.
     /// Returns the net amount transferred after any protocol fee.
-    pub fn withdraw(env: Env, stream_id: u64) -> Result<i128, StreamError> {
+    pub fn withdraw_to(
+        env: Env,
+        stream_id: u64,
+        destination: Address,
+    ) -> Result<i128, StreamError> {
         let key = DataKey::Stream(stream_id);
         let mut stream: Stream =
             env.storage().persistent().get(&key).ok_or(StreamError::StreamNotFound)?;
@@ -633,12 +661,45 @@ impl StreamContract {
         if let Some(treasury) = split.treasury {
             token_client.transfer(&env.current_contract_address(), &treasury, &fee);
         }
-        token_client.transfer(&env.current_contract_address(), &stream.recipient, &net);
+        token_client.transfer(&env.current_contract_address(), &destination, &net);
 
         StreamWithdrawn { id: stream_id, recipient: stream.recipient.clone(), amount: net, fee }
             .publish(&env);
 
         Ok(net)
+    }
+
+    /// Withdraw the currently vested (and not yet withdrawn) amount to the recipient.
+    /// Returns the net amount transferred after any protocol fee.
+    pub fn withdraw(env: Env, stream_id: u64) -> Result<i128, StreamError> {
+        let key = DataKey::Stream(stream_id);
+        let stream: Stream =
+            env.storage().persistent().get(&key).ok_or(StreamError::StreamNotFound)?;
+        Self::withdraw_to(env, stream_id, stream.recipient)
+    }
+
+    /// Reclaim persistent storage for a fully settled stream.
+    ///
+    /// Rejects active streams with [`StreamError::InvalidStateTransition`]: only
+    /// streams that are cancelled or past their schedule end and whose balance has
+    /// been fully withdrawn (`withdrawn == total_amount`) can be closed.
+    /// Removing the entry frees rent and makes subsequent reads or calls return
+    /// [`StreamError::StreamNotFound`].
+    pub fn close_stream(env: Env, stream_id: u64) -> Result<(), StreamError> {
+        let key = DataKey::Stream(stream_id);
+        let stream: Stream =
+            env.storage().persistent().get(&key).ok_or(StreamError::StreamNotFound)?;
+
+        let now = env.ledger().timestamp();
+        let is_cancelled_or_ended = stream.cancelled || now >= stream.end_time;
+        if !is_cancelled_or_ended || stream.withdrawn < stream.total_amount {
+            return Err(StreamError::InvalidStateTransition);
+        }
+
+        env.storage().persistent().remove(&key);
+        StreamClosed { id: stream_id }.publish(&env);
+
+        Ok(())
     }
 
     /// Cancel a stream. The sender is refunded the unvested portion immediately,
@@ -935,7 +996,24 @@ impl StreamContract {
 
     /// Fetch a stream by id.
     pub fn get_stream(env: Env, stream_id: u64) -> Option<Stream> {
-        env.storage().persistent().get(&DataKey::Stream(stream_id))
+        let key = DataKey::Stream(stream_id);
+        let stream: Option<Stream> = env.storage().persistent().get(&key);
+        if stream.is_some() {
+            env.storage().persistent().extend_ttl(&key, LEDGER_BUMP_THRESHOLD, LEDGER_BUMP_LIMIT);
+        }
+        stream
+    }
+
+    /// Fetch multiple streams by their ids in a single call.
+    ///
+    /// Returns entries in the order of the requested `ids`, with `None` for
+    /// unknown ids. Each entry read bumps its persistent TTL, matching `get_stream`.
+    pub fn get_streams(env: Env, ids: Vec<u64>) -> Vec<Option<Stream>> {
+        let mut streams = Vec::new(&env);
+        for id in ids.iter() {
+            streams.push_back(Self::get_stream(env.clone(), id));
+        }
+        streams
     }
 
     /// Fetch the protocol configuration (returns `None` if uninitialized).
