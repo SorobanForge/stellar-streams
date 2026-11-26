@@ -14,6 +14,7 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "coverage": "node scripts/coverage-report.mjs",
     "test:exports": "node scripts/check-package-entries.mjs",
     "test:contracts": "cargo test --manifest-path contracts/Cargo.toml",
     "lint:contracts": "cargo clippy --manifest-path contracts/Cargo.toml --all-targets -- -D warnings",
@@ -57,6 +58,16 @@
     "typescript": "^6.0.3"
   },
   "packageManager": "pnpm@9.4.0",
+  "pnpm": {
+    "overrides": {
+      "axios": ">=1.20.0",
+      "brace-expansion": ">=1.1.20",
+      "browserslist": ">=4.28.7",
+      "follow-redirects": ">=1.16.2",
+      "toml": ">=5.0.1",
+      "zod": ">=4.6.6"
+    }
+  },
   "lint-staged": {
     "!(*.d).{js,jsx,ts,tsx}": [
       "eslint --fix",

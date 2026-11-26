@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { WALLET_CAPABILITIES, getWalletCapabilities } from './capabilities';
 import { WALLET_PROVIDERS } from './index';
+import { WatchAdapter } from './adapters/watch';
 import { FreighterAdapter } from './adapters/freighter';
 import { AlbedoAdapter } from './adapters/albedo';
 import { RabetAdapter } from './adapters/rabe';
@@ -9,6 +10,7 @@ import { LedgerAdapter } from './adapters/ledger';
 import type { WalletAdapter } from './adapters/adapter';
 
 const adapters: Record<string, WalletAdapter> = {
+  watch: new WatchAdapter(),
   freighter: new FreighterAdapter(),
   albedo: new AlbedoAdapter(),
   rabe: new RabetAdapter(),
@@ -32,8 +34,10 @@ describe('WALLET_CAPABILITIES', () => {
 
   it('reports signAuthEntry exactly where the adapter implements it', () => {
     for (const adapter of Object.values(adapters)) {
-      expect(WALLET_CAPABILITIES[adapter.id].signAuthEntry).toBe(
-        typeof adapter.signAuthEntry === 'function',
+      const caps = WALLET_CAPABILITIES[adapter.id];
+      // A read-only adapter exposes a rejecting method but cannot actually sign.
+      expect(caps.signAuthEntry).toBe(
+        typeof adapter.signAuthEntry === 'function' && !caps.readOnly,
       );
     }
   });
@@ -49,6 +53,12 @@ describe('WALLET_CAPABILITIES', () => {
       .filter((caps) => caps.deepLink)
       .map((caps) => caps.wallet);
     expect(deepLink).toEqual(['albedo']);
+  });
+
+  it('marks only the watch adapter as read-only', () => {
+    for (const adapter of Object.values(adapters)) {
+      expect(WALLET_CAPABILITIES[adapter.id].readOnly).toBe(adapter instanceof WatchAdapter);
+    }
   });
 });
 

@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
 import { render, act, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { WalletProvider, useWallet } from './WalletProvider';
+import {
+  MAINNET_PASSPHRASE,
+  TESTNET_PASSPHRASE,
+  WalletProvider,
+  useWallet,
+} from './WalletProvider';
 import * as freighter from '@stellar/freighter-api';
 import albedo from '@albedo-link/intent';
 
@@ -10,10 +15,20 @@ import albedo from '@albedo-link/intent';
 vi.mock('@stellar/freighter-api', () => {
   const isConnected = vi.fn();
   const getAddress = vi.fn();
+  const getNetworkDetails = vi.fn();
+  const getNetwork = vi.fn();
   const requestAccess = vi.fn();
   const signTransaction = vi.fn();
   const signAuthEntry = vi.fn();
-  const api = { isConnected, getAddress, requestAccess, signTransaction, signAuthEntry };
+  const api = {
+    isConnected,
+    getAddress,
+    getNetworkDetails,
+    getNetwork,
+    requestAccess,
+    signTransaction,
+    signAuthEntry,
+  };
   return { ...api, default: api };
 });
 
@@ -24,6 +39,22 @@ vi.mock('@albedo-link/intent', () => ({
     tx: vi.fn(),
   },
 }));
+
+type XBullSdkMock = {
+  getAddress: ReturnType<typeof vi.fn>;
+  signTransaction: ReturnType<typeof vi.fn>;
+  getNetwork?: ReturnType<typeof vi.fn>;
+};
+
+function installXBull(overrides: Partial<XBullSdkMock> = {}): XBullSdkMock {
+  const sdk: XBullSdkMock = {
+    getAddress: vi.fn().mockResolvedValue({ address: 'GB_XBULL' }),
+    signTransaction: vi.fn().mockResolvedValue({ signedTxXdr: 'signed-xbull-xdr' }),
+    ...overrides,
+  };
+  (window as unknown as { xBullSDK?: unknown }).xBullSDK = sdk;
+  return sdk;
+}
 
 // Ledger's device packages are imported dynamically by the adapter; mock them so
 // the provider test never needs a device (or WebHID).
@@ -42,6 +73,8 @@ vi.mock('@ledgerhq/hw-app-str', () => ({
   },
 }));
 
+/** A valid Stellar account address used by the watch-address tests. */
+const WATCH_ADDRESS = 'GAAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQCAIBAEAQDZ7H';
 // The provider loads each adapter with `import()` the first time a provider is
 // used, so without this the first click in each test would spend its time on
 // Vitest's on-demand transform of that module rather than on the provider.
@@ -61,19 +94,24 @@ function TestComponent() {
     activeAddress,
     activeProvider,
     capabilities,
+    readOnly,
     isConnected,
     isConnecting,
     isRestoring,
+    network,
+    walletNetworkPassphrase,
     error,
     connect,
     disconnect,
     signTransaction,
     signAuthEntry,
+    setNetwork,
   } = useWallet();
-  const [signError, setSignError] = useState('none');
   const [signErrorName, setSignErrorName] = useState('none');
   const [authResult, setAuthResult] = useState('none');
   const [authError, setAuthError] = useState('none');
+
+  const [signError, setSignError] = useState('none');
 
   return (
     <div>
@@ -82,27 +120,34 @@ function TestComponent() {
       <div data-testid="capabilities">
         {capabilities ? `${capabilities.wallet}:${capabilities.signAuthEntry}` : 'null'}
       </div>
+      <div data-testid="read-only">{readOnly ? 'true' : 'false'}</div>
       <div data-testid="connected">{isConnected ? 'true' : 'false'}</div>
       <div data-testid="connecting">{isConnecting ? 'true' : 'false'}</div>
       <div data-testid="restoring">{isRestoring ? 'true' : 'false'}</div>
+      <div data-testid="network">{network}</div>
+      <div data-testid="wallet-network">{walletNetworkPassphrase || 'unknown'}</div>
       <div data-testid="error">{error || 'null'}</div>
       <div data-testid="sign-error">{signError}</div>
       <div data-testid="sign-error-name">{signErrorName}</div>
       <div data-testid="auth-result">{authResult}</div>
       <div data-testid="auth-error">{authError}</div>
+      <button onClick={() => connect('watch', WATCH_ADDRESS).catch(() => {})}>Watch Address</button>
       <button onClick={() => connect('freighter').catch(() => {})}>Connect Freighter</button>
       <button onClick={() => connect('albedo').catch(() => {})}>Connect Albedo</button>
       <button onClick={() => connect('rabe').catch(() => {})}>Connect Rabet</button>
       <button onClick={() => connect('hana').catch(() => {})}>Connect Hana</button>
+      <button onClick={() => connect('xbull').catch(() => {})}>Connect xBull</button>
+      <button onClick={() => setNetwork('MAINNET')}>Set Mainnet</button>
       <button onClick={() => connect('ledger').catch(() => {})}>Connect Ledger</button>
       <button onClick={disconnect}>Disconnect</button>
       <button
-        onClick={() =>
-          signTransaction('mock-xdr').catch((err: Error) => {
+        onClick={() => {
+          setSignError('none');
+          void signTransaction('mock-xdr').catch((err: Error) => {
             setSignError(err.message);
             setSignErrorName(err.name);
-          })
-        }
+          });
+        }}
       >
         Sign
       </button>
@@ -125,11 +170,12 @@ describe('WalletProvider', () => {
   let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     localStorage.clear();
     // Clear global window properties
     delete (window as Window & { rabet?: unknown }).rabet;
     delete (window as Window & { hanaWallet?: unknown }).hanaWallet;
+    delete (window as Window & { xBullSDK?: unknown }).xBullSDK;
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
@@ -188,6 +234,43 @@ describe('WalletProvider', () => {
     expect(screen.getByTestId('address').textContent).toBe('GA123...');
     expect(screen.getByTestId('provider').textContent).toBe('freighter');
     expect(screen.getByTestId('restoring').textContent).toBe('false');
+  });
+
+  it('restores a watched address without an extension and marks the session read-only', async () => {
+    localStorage.setItem('stellar_starter_kit_wallet_provider', 'watch');
+    localStorage.setItem('stellar_starter_kit_wallet_address', WATCH_ADDRESS);
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('connected').textContent).toBe('true');
+    });
+
+    expect(screen.getByTestId('address').textContent).toBe(WATCH_ADDRESS);
+    expect(screen.getByTestId('provider').textContent).toBe('watch');
+    expect(screen.getByTestId('capabilities').textContent).toBe('watch:false');
+    expect(screen.getByTestId('read-only').textContent).toBe('true');
+    expect(screen.getByTestId('restoring').textContent).toBe('false');
+  });
+
+  it('clears a stored watch address that is no longer a valid StrKey', async () => {
+    localStorage.setItem('stellar_starter_kit_wallet_provider', 'watch');
+    localStorage.setItem('stellar_starter_kit_wallet_address', 'not-an-address');
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('connected').textContent).toBe('false');
+    });
+    expect(localStorage.getItem('stellar_starter_kit_wallet_address')).toBeNull();
   });
 
   it('should clear the stored session when the extension is missing', async () => {
@@ -273,6 +356,32 @@ describe('WalletProvider', () => {
     expect(screen.getByTestId('capabilities').textContent).toBe('freighter:true');
     expect(localStorage.getItem('stellar_starter_kit_wallet_provider')).toBe('freighter');
     expect(localStorage.getItem('stellar_starter_kit_wallet_address')).toBe('GB_FREIGHTER');
+  });
+
+  it('watches an address and refuses to sign through the provider', async () => {
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Watch Address').click();
+    });
+
+    expect(screen.getByTestId('address').textContent).toBe(WATCH_ADDRESS);
+    expect(screen.getByTestId('provider').textContent).toBe('watch');
+    expect(screen.getByTestId('read-only').textContent).toBe('true');
+    expect(screen.getByTestId('connected').textContent).toBe('true');
+
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+    // The provider normalizes adapter errors for the UI but keeps the
+    // adapter's clear message (and the original error on `cause`).
+    expect(screen.getByTestId('sign-error').textContent).toBe(
+      'Watch address does not support signTransaction.',
+    );
   });
 
   it('should connect to Albedo successfully', async () => {
@@ -427,6 +536,7 @@ describe('WalletProvider', () => {
     expect(screen.getByTestId('address').textContent).toBe('null');
     expect(screen.getByTestId('provider').textContent).toBe('null');
     expect(screen.getByTestId('connected').textContent).toBe('false');
+    expect(screen.getByTestId('wallet-network').textContent).toBe('unknown');
     expect(localStorage.getItem('stellar_starter_kit_wallet_provider')).toBeNull();
     expect(localStorage.getItem('stellar_starter_kit_wallet_address')).toBeNull();
   });
@@ -513,7 +623,173 @@ describe('WalletProvider', () => {
     });
 
     expect(freighter.signTransaction).toHaveBeenCalledWith('mock-xdr', {
-      networkPassphrase: 'Test SDF Network ; September 2015',
+      networkPassphrase: TESTNET_PASSPHRASE,
+      address: 'GB_FREIGHTER',
+    });
+  });
+
+  it('should sign when the wallet network matches the configured network', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER' });
+    vi.mocked(freighter.getNetworkDetails).mockResolvedValue({
+      network: 'TESTNET',
+      networkUrl: 'https://horizon-testnet.stellar.org',
+      networkPassphrase: TESTNET_PASSPHRASE,
+      sorobanRpcUrl: 'https://soroban-testnet.stellar.org',
+    });
+    vi.mocked(freighter.signTransaction).mockResolvedValue({
+      signedTxXdr: 'signed-freighter-xdr',
+      signerAddress: 'GB_FREIGHTER',
+    });
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Freighter').click();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('wallet-network').textContent).toBe(TESTNET_PASSPHRASE),
+    );
+
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+
+    expect(screen.getByTestId('sign-error').textContent).toBe('none');
+    expect(freighter.signTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('should read the wallet network from the xBull SDK when available', async () => {
+    installXBull({
+      getNetwork: vi.fn().mockResolvedValue({
+        network: 'PUBLIC',
+        networkPassphrase: MAINNET_PASSPHRASE,
+      }),
+    });
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect xBull').click();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('wallet-network').textContent).toBe(MAINNET_PASSPHRASE),
+    );
+  });
+
+  it('should block signing and name both networks on a mismatch', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER' });
+    vi.mocked(freighter.getNetworkDetails).mockResolvedValue({
+      network: 'PUBLIC',
+      networkUrl: 'https://horizon.stellar.org',
+      networkPassphrase: MAINNET_PASSPHRASE,
+    });
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Freighter').click();
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('wallet-network').textContent).toBe(MAINNET_PASSPHRASE),
+    );
+
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+
+    const message = screen.getByTestId('sign-error').textContent ?? '';
+    expect(message).toContain('Wallet network mismatch');
+    expect(message).toContain(TESTNET_PASSPHRASE);
+    expect(message).toContain(MAINNET_PASSPHRASE);
+    expect(message).toContain("setNetwork('MAINNET')");
+    expect(freighter.signTransaction).not.toHaveBeenCalled();
+  });
+
+  it('should fall back to getNetwork when Freighter has no getNetworkDetails', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER' });
+    vi.mocked(freighter.getNetworkDetails).mockRejectedValue(new Error('not supported'));
+    vi.mocked(freighter.getNetwork).mockResolvedValue({
+      network: 'PUBLIC',
+      networkPassphrase: MAINNET_PASSPHRASE,
+    });
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Freighter').click();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('wallet-network').textContent).toBe(MAINNET_PASSPHRASE),
+    );
+  });
+
+  it('should re-read the wallet network after setNetwork', async () => {
+    vi.mocked(freighter.isConnected).mockResolvedValue({ isConnected: true });
+    vi.mocked(freighter.requestAccess).mockResolvedValue({ address: 'GB_FREIGHTER' });
+    vi.mocked(freighter.getNetworkDetails).mockResolvedValue({
+      network: 'PUBLIC',
+      networkUrl: 'https://horizon.stellar.org',
+      networkPassphrase: MAINNET_PASSPHRASE,
+    });
+    vi.mocked(freighter.signTransaction).mockResolvedValue({
+      signedTxXdr: 'signed-freighter-xdr',
+      signerAddress: 'GB_FREIGHTER',
+    });
+
+    render(
+      <WalletProvider>
+        <TestComponent />
+      </WalletProvider>,
+    );
+
+    await act(async () => {
+      screen.getByText('Connect Freighter').click();
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('wallet-network').textContent).toBe(MAINNET_PASSPHRASE),
+    );
+
+    // App on Testnet, wallet on Mainnet: signing is blocked.
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+    expect(screen.getByTestId('sign-error').textContent).toContain('Wallet network mismatch');
+
+    await act(async () => {
+      screen.getByText('Set Mainnet').click();
+    });
+
+    expect(screen.getByTestId('network').textContent).toBe('MAINNET');
+
+    await act(async () => {
+      screen.getByText('Sign').click();
+    });
+
+    expect(screen.getByTestId('sign-error').textContent).toBe('none');
+    expect(freighter.signTransaction).toHaveBeenCalledWith('mock-xdr', {
+      networkPassphrase: MAINNET_PASSPHRASE,
       address: 'GB_FREIGHTER',
     });
   });

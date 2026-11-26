@@ -4,10 +4,12 @@ export {
   PUBLIC_NETWORK_PASSPHRASE,
   resolveNetworkPassphrase,
 } from './adapter.js';
+export { WatchAdapter } from './watch.js';
 export { FreighterAdapter } from './freighter.js';
 export { AlbedoAdapter } from './albedo.js';
 export { RabetAdapter } from './rabe.js';
 export { HanaAdapter } from './hana.js';
+export { XBullAdapter } from './xbull.js';
 export {
   LedgerAdapter,
   LedgerConfigurationError,

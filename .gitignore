@@ -58,3 +58,6 @@ yarn.lock
 
 # Generated API reference (typedoc output — regenerate with `pnpm --filter @stellar-starter-kit/sdk docs`)
 docs/api/
+
+# Vitest coverage output
+coverage

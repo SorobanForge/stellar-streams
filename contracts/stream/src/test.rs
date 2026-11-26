@@ -1425,6 +1425,96 @@ proptest! {
     }
 }
 
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 32,
+        max_shrink_iters: 128,
+        .. ProptestConfig::default()
+    })]
+
+    #[test]
+    fn prop_pause_resume_withdraw_sequences_preserve_vesting_invariants(
+        // Keep generated sequences within the stream schedule. The contract
+        // intentionally rejects pausing a completed stream, which is covered
+        // by `test_pause_rejects_stream_that_already_ended`.
+        operations in prop::collection::vec((0u8..3, 0u64..30), 1..32)
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (token, sender, recipient, client) = setup(&env);
+        let total_amount = 10_000i128;
+        token.mint(&sender, total_amount);
+        let id = create(&env, &client, &sender, &recipient, &token.id, total_amount, 0, 1000, 0);
+
+        let mut previous_claimable = client.claimable(&id);
+        let mut previous_total_paused = 0u64;
+        for (operation, elapsed) in operations {
+            advance_time(&env, elapsed);
+
+            let before_operation = client.claimable(&id);
+            prop_assert!(
+                before_operation >= previous_claimable,
+                "claimable decreased with time: {} -> {}",
+                previous_claimable,
+                before_operation
+            );
+
+            let withdrew = match operation {
+                0 => {
+                    client.pause(&id);
+                    false
+                }
+                1 => {
+                    client.resume(&id);
+                    false
+                }
+                _ => match client.try_withdraw(&id) {
+                    Ok(_) => true,
+                    Err(Ok(StreamError::NothingToWithdraw | StreamError::StreamPaused)) => false,
+                    Err(error) => {
+                        prop_assert!(false, "unexpected withdraw error: {:?}", error);
+                        false
+                    }
+                },
+            };
+
+            let claimable = client.claimable(&id);
+            if withdrew {
+                previous_claimable = claimable;
+            } else {
+                prop_assert!(
+                    claimable >= before_operation,
+                    "claimable decreased without a withdrawal: {} -> {}",
+                    before_operation,
+                    claimable
+                );
+                previous_claimable = claimable;
+            }
+
+            let stream = client.get_stream(&id).unwrap();
+            prop_assert!(
+                stream.withdrawn + claimable <= total_amount,
+                "withdrawn ({}) + claimable ({}) exceeds total ({})",
+                stream.withdrawn,
+                claimable,
+                total_amount
+            );
+            prop_assert!(
+                stream.total_paused >= previous_total_paused,
+                "total_paused decreased: {} -> {}",
+                previous_total_paused,
+                stream.total_paused
+            );
+            prop_assert!(
+                stream.total_paused <= env.ledger().timestamp().saturating_sub(stream.start_time),
+                "total_paused ({}) exceeds elapsed time",
+                stream.total_paused
+            );
+            previous_total_paused = stream.total_paused;
+        }
+    }
+}
+
 #[test]
 fn test_version_matches_shared_constant() {
     let env = Env::default();

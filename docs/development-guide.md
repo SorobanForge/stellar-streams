@@ -96,6 +96,18 @@ Optimize compiled contracts to minimize byte size and gas footprint:
 pnpm optimize
 ```
 
+Every optimize run prints the optimized size of each contract. Add `--check` to
+fail when a contract exceeds its committed budget in
+[`contracts/wasm-size-budgets.json`](../contracts/wasm-size-budgets.json):
+
+```bash
+pnpm optimize --check
+```
+
+CI runs the same gate only when contract-related files change. The budget keeps
+headroom below Soroban's 65536-byte contract limit; when a contract legitimately
+grows, update its `maxBytes` in the same PR and explain why in the description.
+
 ### Generate TypeScript Bindings (no deploy)
 
 The `packages/contracts` SDK ships committed TypeScript clients for the `stream`, `splits`, and `escrow` contracts. They live in `packages/contracts/src/generated/<contract>` and are re-exported from the package index. Regenerate them from the locally built WASM at any time — this needs the [Stellar CLI](https://github.com/stellar/stellar-cli/releases) (`stellar`) on your `PATH`, but **no network access and no deployment**:
