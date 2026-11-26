@@ -6,6 +6,7 @@ import {
   Alert,
   Button,
   Card,
+  Modal,
   Input,
   NumberInput,
   ProgressBar,
@@ -158,6 +159,46 @@ describe('Card', () => {
   it('accepts a custom className', () => {
     render(<Card className="custom-card">Body</Card>);
     expect(screen.getByText('Body').classList.contains('custom-card')).toBe(true);
+  });
+});
+
+describe('Modal', () => {
+  it('labels the dialog, traps focus, handles Escape, and restores trigger focus', () => {
+    function ModalHarness() {
+      const [open, setOpen] = React.useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open dialog
+          </button>
+          <Modal open={open} onOpenChange={setOpen} title="Review transaction">
+            <button type="button">First action</button>
+            <button type="button">Last action</button>
+          </Modal>
+        </>
+      );
+    }
+
+    render(<ModalHarness />);
+
+    const trigger = screen.getByRole('button', { name: 'Open dialog' });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const dialog = screen.getByRole('dialog', { name: 'Review transaction' });
+    const firstAction = screen.getByRole('button', { name: 'First action' });
+    const lastAction = screen.getByRole('button', { name: 'Last action' });
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(document.activeElement).toBe(firstAction);
+
+    fireEvent.keyDown(firstAction, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(lastAction);
+    fireEvent.keyDown(lastAction, { key: 'Tab' });
+    expect(document.activeElement).toBe(firstAction);
+
+    fireEvent.keyDown(firstAction, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 });
 

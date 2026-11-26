@@ -12,6 +12,10 @@ import {
   Ban,
   Search,
   Wallet,
+  Download,
+  Inbox,
+  Pause,
+  Play,
 } from 'lucide-react';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
@@ -24,7 +28,14 @@ import {
   Skeleton,
   StatusBadge,
 } from '@stellar-starter-kit/ui';
-import { useCancelStream, useCreateStream, useWithdrawStream } from '@stellar-starter-kit/hooks';
+import {
+  useCancelStream,
+  useCreateStream,
+  usePauseStream,
+  useResumeStream,
+  useStreams,
+  useWithdrawStream,
+} from '@stellar-starter-kit/hooks';
 import { getStreamMetrics, type Stream } from '@stellar-starter-kit/types';
 import {
   formatAddress,
@@ -36,16 +47,16 @@ import {
   formatDuration,
   formatRelativeTime,
 } from '@stellar-starter-kit/utils';
-import {
-  DEFAULT_NETWORK_PASSPHRASE,
-  DEFAULT_SOROBAN_RPC_URL,
-  DEFAULT_TOKEN_CONTRACT_ID,
-} from '../../lib/constants';
+import type { EnvironmentConfig } from '@stellar-starter-kit/config';
+import { environmentConfig, environmentErrors } from '../../lib/environment';
+import ConfigurationError from '../../components/ConfigurationError';
+import { REPO_URL } from '../../lib/constants';
 import {
   getStreamDurationSeconds,
   getStreamCliffSeconds,
   validateStreamInput,
 } from '../../lib/stream-validation';
+import { downloadCsv, exportStreamsToCsv, getStreamsCsvFilename } from '../../lib/stream-csv';
 
 // framer-motion stays out of the initial route bundle; the banner only loads
 // when an error/success message is shown.
@@ -53,18 +64,13 @@ const NotificationBanner = dynamic(() => import('../../components/NotificationBa
   ssr: false,
 });
 
-const RPC_URL = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL ?? DEFAULT_SOROBAN_RPC_URL;
-const NETWORK_PASSPHRASE =
-  process.env.NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE ?? DEFAULT_NETWORK_PASSPHRASE;
-const CONTRACT_ID = process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID ?? '';
-// Testnet native XLM SAC by default; any SEP-41 token contract id works.
-const DEFAULT_TOKEN = process.env.NEXT_PUBLIC_TOKEN_CONTRACT_ID || DEFAULT_TOKEN_CONTRACT_ID;
-const EXPERT_URL = process.env.NEXT_PUBLIC_STELLAR_EXPERT_URL ?? 'https://stellar.expert';
-
 /** One-line vesting timeline for the inspected stream, expressed in relative time. */
 function streamTimeline(stream: Stream, nowSeconds: number): string {
   if (stream.cancelled) {
     return 'Cancelled - the unvested balance was refunded to the sender.';
+  }
+  if (stream.pausedAt != null) {
+    return 'Paused - token accrual is temporarily suspended.';
   }
   if (nowSeconds < stream.cliffTime) {
     return `Cliff ends ${formatRelativeTime(stream.cliffTime, nowSeconds)}`;
@@ -75,7 +81,54 @@ function streamTimeline(stream: Stream, nowSeconds: number): string {
   return `Ends ${formatRelativeTime(stream.endTime, nowSeconds)}`;
 }
 
-export default function StreamsDashboard() {
+export interface StreamsDashboardProps {
+  contractId?: string;
+  initialStreams?: Stream[];
+  config?: EnvironmentConfig;
+}
+
+/**
+ * Route entry point: validates the environment once, then renders the
+ * dashboard. A failed validation is shown instead of mounting the page, so no
+ * client is ever built from the Testnet defaults by accident.
+ */
+export default function StreamsDashboardPage({
+  contractId,
+  initialStreams,
+  config: propConfig,
+}: StreamsDashboardProps = {}) {
+  const config = propConfig ?? environmentConfig;
+  if (!config) {
+    return <ConfigurationError errors={environmentErrors} />;
+  }
+  return (
+    <StreamsDashboard config={config} contractId={contractId} initialStreams={initialStreams} />
+  );
+}
+
+export function StreamsDashboard({
+  config,
+  contractId: overrideContractId,
+  initialStreams,
+}: {
+  config: EnvironmentConfig;
+  contractId?: string;
+  initialStreams?: Stream[];
+}) {
+  const {
+    sorobanRpcUrl,
+    networkPassphrase,
+    streamContractId,
+    tokenContractId,
+    expertUrl,
+    network,
+  } = config;
+  const activeContractId =
+    overrideContractId !== undefined
+      ? overrideContractId
+      : (process.env.NEXT_PUBLIC_STREAM_CONTRACT_ID ?? streamContractId ?? '');
+  const isContractConfigured = activeContractId.length > 0;
+
   const { activeAddress, isConnected, isConnecting, connect, disconnect, signTransaction } =
     useWallet();
 
@@ -84,7 +137,7 @@ export default function StreamsDashboard() {
 
   // Create form.
   const [recipient, setRecipient] = useState('');
-  const [token, setToken] = useState(DEFAULT_TOKEN);
+  const [token, setToken] = useState(tokenContractId);
   const [amount, setAmount] = useState('100');
   const [durationDays, setDurationDays] = useState('30');
   const [cliffDays, setCliffDays] = useState('0');
@@ -100,14 +153,31 @@ export default function StreamsDashboard() {
   const client = useMemo(
     () =>
       new StreamsClient({
-        contractId: CONTRACT_ID,
-        rpcUrl: RPC_URL,
-        networkPassphrase: NETWORK_PASSPHRASE,
+        contractId: activeContractId,
+        rpcUrl: sorobanRpcUrl,
+        networkPassphrase,
         publicKey: activeAddress ?? undefined,
         signTransaction: async (xdr: string) => signTransaction(xdr),
       }),
-    [activeAddress, signTransaction],
+    [activeAddress, signTransaction, activeContractId, sorobanRpcUrl, networkPassphrase],
   );
+
+  const {
+    streams: listedStreams,
+    loading: listingLoading,
+    loadingMore,
+    hasMore,
+    loadMore,
+  } = useStreams(client, activeAddress);
+
+  const loadedStreams = initialStreams ?? listedStreams;
+
+  const handleExportCsv = useCallback(() => {
+    if (!loadedStreams.length || !activeAddress) return;
+    const csv = exportStreamsToCsv(loadedStreams);
+    const filename = getStreamsCsvFilename(network, activeAddress);
+    downloadCsv(filename, csv);
+  }, [loadedStreams, activeAddress, network]);
 
   const notify = useCallback((kind: 'success' | 'error', message: string) => {
     if (kind === 'success') {
@@ -181,12 +251,30 @@ export default function StreamsDashboard() {
     onError: (message) => notify('error', message),
   });
 
+  const pauseStream = usePauseStream(client, {
+    onSuccess: ({ hash }) => {
+      notify('success', `Pause submitted successfully. Tx ${formatAddress(hash, 6)}`);
+      if (stream) void loadStream(stream.id);
+    },
+    onError: (message) => notify('error', message),
+  });
+
+  const resumeStream = useResumeStream(client, {
+    onSuccess: ({ hash }) => {
+      notify('success', `Resume submitted successfully. Tx ${formatAddress(hash, 6)}`);
+      if (stream) void loadStream(stream.id);
+    },
+    onError: (message) => notify('error', message),
+  });
+
   // One mutation per hook instance is allowed at a time; `busy` mirrors that for
   // the buttons that must not start a second write.
   const busy =
     createStream.status === 'pending' ||
     withdrawStream.status === 'pending' ||
-    cancelStream.status === 'pending';
+    cancelStream.status === 'pending' ||
+    pauseStream.status === 'pending' ||
+    resumeStream.status === 'pending';
 
   const runWithdraw = () => {
     if (!stream) return;
@@ -198,13 +286,23 @@ export default function StreamsDashboard() {
     void cancelStream.mutate(stream.id);
   };
 
+  const runPause = () => {
+    if (!stream) return;
+    void pauseStream.mutate(stream.id);
+  };
+
+  const runResume = () => {
+    if (!stream) return;
+    void resumeStream.mutate(stream.id);
+  };
+
   const handleCreate = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!isConnected || !activeAddress) {
       notify('error', 'Connect a wallet to create a stream.');
       return;
     }
-    if (!CONTRACT_ID) {
+    if (!isContractConfigured) {
       notify('error', 'No stream contract configured. Set NEXT_PUBLIC_STREAM_CONTRACT_ID.');
       return;
     }
@@ -246,8 +344,12 @@ export default function StreamsDashboard() {
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   const streamMetrics = stream ? getStreamMetrics(stream, nowSeconds) : null;
-  const status = streamMetrics?.status ?? null;
+  const isPaused = Boolean(stream && stream.pausedAt != null);
+  const isSender = Boolean(activeAddress && stream && activeAddress === stream.sender);
+  const status = isPaused ? 'paused' : (streamMetrics?.status ?? null);
   const progress = streamMetrics?.progressBps ?? 0;
+  const currentPauseDuration = stream?.pausedAt ? Math.max(0, nowSeconds - stream.pausedAt) : 0;
+  const accumulatedPauseSeconds = (stream?.totalPaused ?? 0) + currentPauseDuration;
   // Net/fee math mirrors the contract's `withdraw` exactly; keep these in
   // sync with contracts/stream/src/lib.rs (see computeClaimable/computeProtocolFee
   // in packages/utils).
@@ -279,7 +381,7 @@ export default function StreamsDashboard() {
           </p>
         </div>
 
-        {!CONTRACT_ID && (
+        {!isContractConfigured && (
           <div className="mb-8 flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-200">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
             <div>
@@ -287,7 +389,16 @@ export default function StreamsDashboard() {
               <p className="mt-1 font-light text-amber-200/80">
                 Deploy the <code className="font-mono">stream</code> contract and set{' '}
                 <code className="font-mono">NEXT_PUBLIC_STREAM_CONTRACT_ID</code> to enable the
-                dashboard.
+                dashboard. See{' '}
+                <a
+                  href={`${REPO_URL}/blob/main/docs/development-guide.md`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium underline hover:text-amber-100"
+                >
+                  docs/development-guide.md
+                </a>{' '}
+                for deployment instructions.
               </p>
             </div>
           </div>
@@ -351,64 +462,83 @@ export default function StreamsDashboard() {
               New stream
             </h2>
 
-            <Input
-              label="Recipient"
-              value={recipient}
-              onChange={(e) => setRecipient(e.target.value)}
-              placeholder="G..."
-              aria-invalid={Boolean(formErrors.recipient)}
-              error={formErrors.recipient}
-            />
-
-            <Input
-              label="Token contract"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="C..."
-              aria-invalid={Boolean(formErrors.token)}
-              error={formErrors.token}
-            />
-
-            <div className="grid grid-cols-2 gap-4">
+            <fieldset disabled={!isContractConfigured} className="space-y-6">
               <Input
-                label="Amount"
+                label="Recipient"
+                value={recipient}
+                onChange={(e) => setRecipient(e.target.value)}
+                placeholder="G..."
+                aria-invalid={Boolean(formErrors.recipient)}
+                error={formErrors.recipient}
+                disabled={!isContractConfigured}
+              />
+
+              <Input
+                label="Token contract"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="C..."
+                aria-invalid={Boolean(formErrors.token)}
+                error={formErrors.token}
+                disabled={!isContractConfigured}
+              />
+
+              <div className="grid grid-cols-2 gap-4">
+                <Input
+                  label="Amount"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  aria-invalid={Boolean(formErrors.amount)}
+                  error={formErrors.amount}
+                  disabled={!isContractConfigured}
+                />
+                <Input
+                  label="Duration (days)"
+                  type="number"
+                  min="1"
+                  value={durationDays}
+                  onChange={(e) => setDurationDays(e.target.value)}
+                  aria-invalid={Boolean(formErrors.durationDays)}
+                  error={formErrors.durationDays}
+                  disabled={!isContractConfigured}
+                />
+              </div>
+
+              <Input
+                label="Cliff (days, 0 = none)"
                 type="number"
                 min="0"
-                step="any"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                aria-invalid={Boolean(formErrors.amount)}
-                error={formErrors.amount}
+                value={cliffDays}
+                onChange={(e) => setCliffDays(e.target.value)}
+                aria-invalid={Boolean(formErrors.cliffDays)}
+                error={formErrors.cliffDays}
+                disabled={!isContractConfigured}
               />
-              <Input
-                label="Duration (days)"
-                type="number"
-                min="1"
-                value={durationDays}
-                onChange={(e) => setDurationDays(e.target.value)}
-                aria-invalid={Boolean(formErrors.durationDays)}
-                error={formErrors.durationDays}
-              />
-            </div>
 
-            <Input
-              label="Cliff (days, 0 = none)"
-              type="number"
-              min="0"
-              value={cliffDays}
-              onChange={(e) => setCliffDays(e.target.value)}
-              aria-invalid={Boolean(formErrors.cliffDays)}
-              error={formErrors.cliffDays}
-            />
-
-            <Button
-              type="submit"
-              disabled={busy || !isConnected || !CONTRACT_ID || !isFormValid}
-              loading={busy}
-              className="w-full"
-            >
-              {busy ? 'Creating stream' : 'Create stream'}
-            </Button>
+              <div className="space-y-2">
+                <Button
+                  type="submit"
+                  disabled={busy || !isConnected || !isContractConfigured || !isFormValid}
+                  loading={busy}
+                  className="w-full"
+                >
+                  {!isContractConfigured
+                    ? 'Stream contract not configured'
+                    : busy
+                      ? 'Creating stream'
+                      : 'Create stream'}
+                </Button>
+                {!isContractConfigured && (
+                  <p className="text-center text-xs text-amber-300/80">
+                    Set <code className="font-mono">NEXT_PUBLIC_STREAM_CONTRACT_ID</code> to enable
+                    stream creation.
+                  </p>
+                )}
+              </div>
+            </fieldset>
           </form>
 
           {/* Inspect */}
@@ -482,6 +612,12 @@ export default function StreamsDashboard() {
                       <dt className="text-[10px] text-slate-500 uppercase">Withdrawn</dt>
                       <dd className="mt-1 text-slate-300">{formatAmount(stream.withdrawn)}</dd>
                     </div>
+                    <div>
+                      <dt className="text-[10px] text-slate-500 uppercase">Paused time</dt>
+                      <dd className="mt-1 text-slate-300">
+                        {formatDuration(accumulatedPauseSeconds)}
+                      </dd>
+                    </div>
                     {feeBps !== null && feeBps > 0 ? (
                       <>
                         <div>
@@ -516,9 +652,43 @@ export default function StreamsDashboard() {
                   </dl>
 
                   <div className="flex flex-wrap gap-3 border-t border-slate-900 pt-4">
+                    {isSender && !isPaused && !stream.cancelled && (
+                      <button
+                        onClick={runPause}
+                        disabled={busy || !isConnected}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-900 disabled:pointer-events-none disabled:opacity-40"
+                      >
+                        {pauseStream.status === 'pending' ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-400" />
+                        ) : (
+                          <Pause className="h-3.5 w-3.5 text-amber-400" />
+                        )}
+                        Pause
+                      </button>
+                    )}
+                    {isSender && isPaused && !stream.cancelled && (
+                      <button
+                        onClick={runResume}
+                        disabled={busy || !isConnected}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-900 disabled:pointer-events-none disabled:opacity-40"
+                      >
+                        {resumeStream.status === 'pending' ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-400" />
+                        ) : (
+                          <Play className="h-3.5 w-3.5 text-emerald-400" />
+                        )}
+                        Resume
+                      </button>
+                    )}
                     <button
                       onClick={runWithdraw}
-                      disabled={busy || !isConnected || contractClaimable <= 0n || stream.cancelled}
+                      disabled={
+                        busy ||
+                        !isConnected ||
+                        contractClaimable <= 0n ||
+                        stream.cancelled ||
+                        isPaused
+                      }
                       className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-900 disabled:pointer-events-none disabled:opacity-40"
                     >
                       <Droplets className="h-3.5 w-3.5 text-cyan-400" /> Withdraw
@@ -531,7 +701,7 @@ export default function StreamsDashboard() {
                       <Ban className="h-3.5 w-3.5 text-rose-400" /> Cancel
                     </button>
                     <a
-                      href={`${EXPERT_URL}/explorer/testnet/contract/${CONTRACT_ID}`}
+                      href={`${expertUrl}/contract/${activeContractId}`}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex items-center gap-1.5 px-2 py-2 text-[10px] text-slate-500 transition hover:text-white"
@@ -543,6 +713,119 @@ export default function StreamsDashboard() {
               )}
             </div>
           </div>
+        </div>
+
+        {/* Listed Streams & Export Section */}
+        <div className="mt-12 space-y-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-white">Streams</h2>
+              <p className="mt-1 text-sm text-slate-400">
+                {isConnected
+                  ? `${loadedStreams.length} stream${loadedStreams.length === 1 ? '' : 's'} loaded`
+                  : 'Connect a wallet to view and export streams'}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                href="/streams/my"
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-900 hover:text-white"
+              >
+                <Inbox className="h-4 w-4" aria-hidden="true" /> My streams
+              </Link>
+              <Button
+                type="button"
+                onClick={handleExportCsv}
+                disabled={loadedStreams.length === 0 || !isConnected}
+                variant="secondary"
+                className="inline-flex items-center gap-2"
+                aria-label="Export CSV"
+              >
+                <Download className="h-4 w-4" /> Export CSV
+              </Button>
+            </div>
+          </div>
+
+          {listingLoading && (
+            <div className="space-y-3 rounded-2xl border border-slate-900 bg-slate-950/40 p-6">
+              <Skeleton height="1.5rem" width="30%" rounded="sm" />
+              <Skeleton height="1rem" width="60%" rounded="sm" />
+            </div>
+          )}
+
+          {!listingLoading && isConnected && loadedStreams.length === 0 && (
+            <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-8 text-center">
+              <p className="text-sm text-slate-400">No streams found for this address.</p>
+            </div>
+          )}
+
+          {!listingLoading && loadedStreams.length > 0 && (
+            <>
+              <div className="overflow-x-auto rounded-2xl border border-slate-900 bg-slate-950/40">
+                <table className="w-full text-left font-mono text-xs">
+                  <thead className="border-b border-slate-900 bg-slate-900/30 text-slate-400 uppercase">
+                    <tr>
+                      <th className="px-4 py-3">ID</th>
+                      <th className="px-4 py-3">Recipient</th>
+                      <th className="px-4 py-3">Total Amount</th>
+                      <th className="px-4 py-3">Withdrawn</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-900 text-slate-300">
+                    {loadedStreams.map((item) => (
+                      <tr key={item.id} className="transition-colors hover:bg-slate-900/20">
+                        <td className="px-4 py-3 font-semibold text-white">#{item.id}</td>
+                        <td className="px-4 py-3">{formatAddress(item.recipient, 6)}</td>
+                        <td className="px-4 py-3">{formatTokenAmount(item.totalAmount, 7)} XLM</td>
+                        <td className="px-4 py-3">{formatTokenAmount(item.withdrawn, 7)} XLM</td>
+                        <td className="px-4 py-3">
+                          <StatusBadge
+                            status={
+                              item.cancelled
+                                ? 'cancelled'
+                                : getStreamMetrics(item, nowSeconds).status
+                            }
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLookupId(item.id);
+                              void loadStream(item.id);
+                            }}
+                            className="text-purple-400 underline hover:text-purple-300"
+                          >
+                            Inspect
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Pagination Controls */}
+              <div className="flex flex-col items-center justify-center pt-2">
+                {hasMore ? (
+                  <Button
+                    type="button"
+                    onClick={() => void loadMore()}
+                    disabled={loadingMore}
+                    loading={loadingMore}
+                    variant="secondary"
+                    className="px-6 py-2"
+                  >
+                    {loadingMore ? 'Loading more streams...' : 'Load more'}
+                  </Button>
+                ) : (
+                  <p className="text-xs text-slate-500">End of list — all streams loaded</p>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </main>
       <Footer />

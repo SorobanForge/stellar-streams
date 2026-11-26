@@ -118,6 +118,69 @@ formatDuration(45); // '45s'
 formatDuration(-10); // '0s'
 ```
 
+### `parseDuration(input: string): number`
+
+Parses the `formatDuration` notation back into seconds. Units are
+case-insensitive and cover the same set the formatter emits: `s`, `m`, `h`,
+`d`, `w`, `mo` (a flat 30 days) and `y` (a flat 365 days). Tokens may be
+separated by whitespace or written back to back.
+
+```ts
+parseDuration('30d'); // 2_592_000
+parseDuration(' 12H '); // 43_200
+parseDuration('1d 2h'); // 93_600
+parseDuration('1d2h'); // 93_600
+parseDuration('-5m'); // throws, listing the accepted units
+parseDuration('30'); // throws: no unit
+```
+
+Only whole, non-negative values are accepted. When the formatter drops part of
+a long duration (it keeps the two most significant units), the parse reflects
+the rendered value rather than the original seconds — so use it to read back
+user input, not as an exact inverse for every instant.
+
+### `toSafeNumber(value: bigint): number`
+
+Converts a `bigint` to a `number`, throwing when the value falls outside
+`±Number.MAX_SAFE_INTEGER` instead of silently losing precision.
+
+```ts
+toSafeNumber(9_007_199_254_740_991n); // 9_007_199_254_740_991
+toSafeNumber(9_007_199_254_740_992n); // throws
+toSafeNumber(2n ** 127n - 1n); // throws, rather than returning Infinity
+```
+
+### `bigintRatio(part: bigint, whole: bigint): number`
+
+Returns `part / whole` as a `number` in `[0, 1]` using integer-safe scaling, for
+chart maths over balances larger than `Number.MAX_SAFE_INTEGER`. Non-positive
+parts clamp to `0`, parts at or above `whole` clamp to `1`, and the quotient is
+truncated to nine decimal places. Throws when `whole <= 0n`.
+
+```ts
+bigintRatio(1n, 4n); // 0.25
+bigintRatio(1_234_567n, 10_000_000n); // 0.1234567
+bigintRatio(2n ** 126n, 2n ** 127n); // 0.5, no Infinity
+```
+
+### `splitAmounts(amount, shares): bigint[]`
+
+Splits `amount` across weighted `shares`, mirroring `recipient_portion` in
+`contracts/splits`: every entry except the last is
+`amount * share / totalShares` with bigint truncation, and the final entry
+absorbs the rounding dust, so the results sum to `amount` exactly. This is what
+a UI preview should use to agree with the on-chain transfers stroop for stroop.
+
+```ts
+splitAmounts(100n, [1, 1, 1]); // [33n, 33n, 34n] — dust to the last recipient
+splitAmounts(10n, [3, 7]); // [3n, 7n]
+splitAmounts(10n, []); // throws: shares must not be empty
+splitAmounts(10n, [0, 0]); // throws: total shares must be greater than zero
+splitAmounts(-1n, [1]); // throws: amount must not be negative
+```
+
+Shares may be safe-integer `number`s or non-negative `bigint`s.
+
 ### `computeVestedAmount(schedule: VestingSchedule, now: number): bigint`
 
 Linear vesting at timestamp `now`, using the same integer math as the on-chain
@@ -134,6 +197,20 @@ const schedule = {
 computeVestedAmount(schedule, 1_700_000_300); // 0n — before the cliff
 computeVestedAmount(schedule, 1_700_001_800); // 1_800_000_000n — halfway
 computeVestedAmount(schedule, 1_700_003_600); // 3_600_000_000n — fully vested
+```
+
+Paused streams are supported through the optional `totalPaused` (seconds
+already paused) and `pausedAt` (unix second of the current, open pause) fields.
+The math matches `vested_amount` in Rust: elapsed time is capped at `endTime`,
+then both the closed and the still-open pause windows are subtracted before the
+linear division. Because pausing does not move `endTime`, a paused stream vests
+proportionally less by `endTime` — exactly the contract's behaviour. Schedules
+that omit both fields keep the plain linear result.
+
+```ts
+// Contract test: 1000 stroops over [0, 1000), paused at 250, resumed at 750.
+computeVestedAmount({ ...schedule, totalPaused: 500 }, 1_000); // 500n — not 1000n
+computeVestedAmount({ ...schedule, pausedAt: 250 }, 750); // 250n — accrual frozen
 ```
 
 ### `computeProgressBps(schedule: VestingSchedule, now: number): number`
@@ -168,6 +245,8 @@ interface VestingSchedule {
   startTime: number; // unix seconds
   endTime: number; // unix seconds
   cliffTime: number; // unix seconds
+  totalPaused?: number; // optional: seconds already spent paused
+  pausedAt?: number; // optional: unix second of the open pause, if any
 }
 ```
 
@@ -222,11 +301,12 @@ here.
 The vesting math is implemented **once in Rust** and mirrored **once in
 TypeScript**, with tests on both sides. The mirror pair is:
 
-| TypeScript (this package)          | Rust (source of truth)                           |
-| :--------------------------------- | :----------------------------------------------- |
-| `computeVestedAmount`              | `vested_amount` in `contracts/stream/src/lib.rs` |
-| `computeProgressBps`               | derived from the same linear curve               |
-| `packages/utils/src/index.test.ts` | `contracts/stream/src/test.rs`                   |
+| TypeScript (this package)          | Rust (source of truth)                                         |
+| :--------------------------------- | :------------------------------------------------------------- |
+| `computeVestedAmount`              | `vested_amount` in `contracts/stream/src/lib.rs`               |
+| `computeProgressBps`               | derived from the same linear curve                             |
+| `splitAmounts`                     | `recipient_portion` in `contracts/splits/src/lib.rs`           |
+| `packages/utils/src/index.test.ts` | `contracts/stream/src/test.rs`, `contracts/splits/src/test.rs` |
 
 **The parity contract:** if you change the vesting formula, rounding, or its
 edge cases in `contracts/stream/src/lib.rs`, you **must** update

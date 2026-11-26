@@ -37,6 +37,8 @@ export interface Stream {
   /** Optional external reference (invoice or grant id); empty when none was set. */
   reference: string;
   cancelled: boolean;
+  pausedAt?: number | null;
+  totalPaused?: number;
 }
 
 /** Raw values returned by the Soroban `stream` contract. */
@@ -53,6 +55,8 @@ export interface RawStream {
   label: string;
   reference: string;
   cancelled: boolean;
+  paused_at?: bigint | null;
+  total_paused?: bigint;
 }
 
 /** Error raised when a decoded contract response does not match its expected shape. */
@@ -77,6 +81,12 @@ const isInteger = (value: unknown): value is number =>
 /** Check the runtime shape returned by the stream contract. */
 export function isStream(value: unknown): value is RawStream {
   if (!isRecord(value)) return false;
+  const pausedAtValid =
+    value.paused_at === undefined ||
+    value.paused_at === null ||
+    typeof value.paused_at === 'bigint';
+  const totalPausedValid =
+    value.total_paused === undefined || typeof value.total_paused === 'bigint';
   return (
     typeof value.id === 'bigint' &&
     typeof value.sender === 'string' &&
@@ -89,7 +99,9 @@ export function isStream(value: unknown): value is RawStream {
     typeof value.cliff_time === 'bigint' &&
     typeof value.label === 'string' &&
     typeof value.reference === 'string' &&
-    typeof value.cancelled === 'boolean'
+    typeof value.cancelled === 'boolean' &&
+    pausedAtValid &&
+    totalPausedValid
   );
 }
 
@@ -112,6 +124,16 @@ function assertStream(value: unknown): asserts value is RawStream {
   for (const [field, check, expected] of fields) {
     if (!check(value[field])) throw new ContractResponseError('stream', field, expected);
   }
+  if (
+    value.paused_at !== undefined &&
+    value.paused_at !== null &&
+    typeof value.paused_at !== 'bigint'
+  ) {
+    throw new ContractResponseError('stream', 'paused_at', 'a bigint or null');
+  }
+  if (value.total_paused !== undefined && typeof value.total_paused !== 'bigint') {
+    throw new ContractResponseError('stream', 'total_paused', 'a bigint');
+  }
 }
 
 /** Convert the generated snake_case contract result into the UI domain shape. */
@@ -130,6 +152,8 @@ export function normalizeStream(raw: unknown): Stream {
     label: raw.label,
     reference: raw.reference,
     cancelled: raw.cancelled,
+    pausedAt: raw.paused_at != null ? Number(raw.paused_at) : null,
+    totalPaused: raw.total_paused != null ? Number(raw.total_paused) : 0,
   };
 }
 
@@ -169,15 +193,24 @@ export function normalizeConfig(raw: unknown): StreamConfig {
 
 /**
  * Inputs for `create_stream`. `token` is any token contract id (C...), and
- * `amount` is a decimal string in that token's smallest unit — scale it by the
- * token's own `decimals()`, which is 7 for XLM and SACs but not for every token.
+ * `amount` is in that token's smallest unit — scale it by the token's own
+ * `decimals()`, which is 7 for XLM and SACs but not for every token.
  */
 export interface CreateStreamParams {
   sender: string;
   recipient: string;
   /** Token contract id (C...): the XLM SAC, an issued asset's SAC, or a custom token. */
   token: string;
-  amount: string;
+  /**
+   * Amount in the token's smallest unit, as a decimal string or a `bigint`.
+   *
+   * A `bigint` is accepted so a caller holding one — for example the value
+   * returned by a claimable/vested read — can pass it straight through instead
+   * of converting it back to text first. The SDK stringifies it before
+   * validation, so both forms are held to the same rules: a positive integer
+   * that fits in an `i128`.
+   */
+  amount: string | bigint;
   startTime: number;
   endTime: number;
   cliffTime: number;

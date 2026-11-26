@@ -9,6 +9,10 @@ export const XLM_DECIMALS = 7;
 /** Number of stroops in one XLM (1 XLM = 10^7 stroops). */
 export const STROOPS_PER_XLM = 10_000_000n;
 
+/** `Number.MAX_SAFE_INTEGER` as a bigint, for safe-conversion bounds checks. */
+const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
+const MIN_SAFE_BIGINT = -MAX_SAFE_BIGINT;
+
 /**
  * Serializes records as RFC 4180 CSV with a header row in the requested order.
  * Bigints are written as base-10 integers, and string amounts stay strings, so
@@ -217,6 +221,98 @@ export function formatDuration(seconds: number): string {
   return parts.join(' ');
 }
 
+/** Seconds per unit, shared by `formatDuration` and `parseDuration`. */
+const DURATION_UNIT_SECONDS: Readonly<Record<string, number>> = {
+  s: SECOND,
+  m: MINUTE,
+  h: HOUR,
+  d: DAY,
+  w: WEEK,
+  mo: MONTH,
+  y: YEAR,
+};
+
+/**
+ * Parses a human-readable duration back into seconds, the inverse of
+ * `formatDuration`.
+ *
+ * Units are case-insensitive and match the formatter: `s`, `m`, `h`, `d`, `w`,
+ * `mo` (a flat 30 days) and `y` (a flat 365 days). Tokens may be separated by
+ * whitespace or written back to back, so `"30d"`, `" 12H "`, `"1d 2h"` and
+ * `"1d2h"` all parse. Values are whole numbers and must be non-negative.
+ *
+ * Throws for negative, empty, unit-less or otherwise unparseable input; the
+ * error names every accepted unit.
+ *
+ *      parseDuration('30d')   // 2_592_000
+ *      parseDuration('12h')   // 43_200
+ *      parseDuration('1d 2h') // 93_600
+ */
+export function parseDuration(input: string): number {
+  const accepted = 's, m, h, d, w, mo, y';
+  const invalid = (reason: string): Error =>
+    new Error(
+      `Invalid duration: ${JSON.stringify(input)}. ${reason} Accepted units are ${accepted} (e.g. "30d", "12h", "1d 2h").`,
+    );
+
+  if (typeof input !== 'string') throw invalid('Expected a string.');
+  const text = input.trim();
+  if (text === '') throw invalid('Duration is empty.');
+  if (text.startsWith('-')) throw invalid('Durations must not be negative.');
+  if (text.startsWith('+')) throw invalid('Expected a positive duration.');
+
+  // A hand-written scanner instead of a regex: the input is user provided and
+  // a pattern like /(\d+)\s*(mo|[smhdwy])/ can backtrack quadratically on long
+  // runs of digits, which CodeQL reports as a ReDoS risk. This walk is linear
+  // and accepts the same grammar.
+  const isDigit = (char: string): boolean => char >= '0' && char <= '9';
+  const isWhitespace = (char: string): boolean => char.trim() === '';
+
+  let cursor = 0;
+  let total = 0;
+
+  while (cursor < text.length) {
+    while (cursor < text.length && isWhitespace(text[cursor])) cursor++;
+    if (cursor >= text.length) break;
+
+    if (!isDigit(text[cursor])) {
+      throw invalid(
+        cursor === 0 ? 'Expected at least one value and unit.' : 'Unexpected characters.',
+      );
+    }
+
+    const numberStart = cursor;
+    while (cursor < text.length && isDigit(text[cursor])) cursor++;
+    const digits = text.slice(numberStart, cursor);
+
+    while (cursor < text.length && isWhitespace(text[cursor])) cursor++;
+
+    // Longest unit first so `mo` is not read as `m` followed by stray text.
+    let unitKey: string;
+    if (text.slice(cursor, cursor + 2).toLowerCase() === 'mo') {
+      unitKey = 'mo';
+      cursor += 2;
+    } else {
+      unitKey = text.slice(cursor, cursor + 1).toLowerCase();
+      cursor += unitKey === '' ? 0 : 1;
+    }
+
+    const value = Number(digits);
+    const unit = DURATION_UNIT_SECONDS[unitKey];
+    if (!Number.isSafeInteger(value) || unit === undefined) {
+      throw invalid('Expected whole numbers followed by a unit.');
+    }
+
+    const seconds = value * unit;
+    if (!Number.isSafeInteger(seconds) || !Number.isSafeInteger(total + seconds)) {
+      throw invalid('Duration is too large to represent in seconds.');
+    }
+    total += seconds;
+  }
+
+  return total;
+}
+
 const MINUTE_SECONDS = 60;
 const HOUR_SECONDS = 3_600;
 const DAY_SECONDS = 86_400;
@@ -262,20 +358,44 @@ export interface VestingSchedule {
   startTime: number;
   endTime: number;
   cliffTime: number;
+  /** Seconds the stream has already spent paused (contract `total_paused`). */
+  totalPaused?: number;
+  /** Unix second the stream was paused at, when it is paused now (`paused_at`). */
+  pausedAt?: number | null;
+}
+
+/** Saturating `a - b` for non-negative seconds counts. */
+function saturatingSub(a: number, b: number): number {
+  return a > b ? a - b : 0;
 }
 
 /**
  * Computes the amount vested at `now`, using the same integer math as the
  * `stream` Soroban contract. Keep this in sync with `vested_amount` in Rust.
+ *
+ * Paused time is folded out of the schedule exactly like the contract: past
+ * pause windows via `totalPaused`, and a still-open window via `pausedAt`, which
+ * counts from the pause timestamp up to `now` (capped at `endTime`). Callers
+ * that omit both fields get the plain linear result they always had.
+ *
+ * Note that pausing does not push `endTime` out, so a stream that spent time
+ * paused vests proportionally less by `endTime` — precisely the contract's
+ * behaviour, which is why a UI preview needs these fields to agree on-chain.
  */
 export function computeVestedAmount(schedule: VestingSchedule, now: number): bigint {
-  const { totalAmount, startTime, endTime, cliffTime } = schedule;
+  const { totalAmount, startTime, endTime, cliffTime, totalPaused = 0, pausedAt } = schedule;
   if (now < startTime || now < cliffTime) return 0n;
-  if (now >= endTime) return totalAmount;
 
-  const elapsed = BigInt(now - startTime);
-  const duration = BigInt(endTime - startTime);
-  return (totalAmount * elapsed) / duration;
+  const cappedNow = Math.min(now, endTime);
+  const elapsed = cappedNow - startTime;
+  const activePause = pausedAt != null && now > pausedAt ? cappedNow - pausedAt : 0;
+  const effectiveElapsed = saturatingSub(saturatingSub(elapsed, totalPaused), activePause);
+
+  const duration = endTime - startTime;
+  if (duration === 0) return totalAmount;
+
+  const vested = (totalAmount * BigInt(effectiveElapsed)) / BigInt(duration);
+  return vested > totalAmount ? totalAmount : vested;
 }
 
 /**
@@ -297,6 +417,10 @@ export interface ClaimableStream {
   endTime: number;
   cliffTime: number;
   withdrawn: string | bigint | number;
+  /** Seconds the stream has already spent paused (contract `total_paused`). */
+  totalPaused?: number;
+  /** Unix second the stream was paused at, when it is paused now (`paused_at`). */
+  pausedAt?: number | null;
 }
 
 export function computeClaimable(stream: ClaimableStream, now: number): bigint {
@@ -306,12 +430,68 @@ export function computeClaimable(stream: ClaimableStream, now: number): bigint {
       startTime: stream.startTime,
       endTime: stream.endTime,
       cliffTime: stream.cliffTime,
+      totalPaused: stream.totalPaused,
+      pausedAt: stream.pausedAt,
     },
     now,
   );
   const withdrawn = BigInt(stream.withdrawn);
   const claimable = vested - withdrawn;
   return claimable > 0n ? claimable : 0n;
+}
+
+/**
+ * Splits `amount` across weighted `shares`, mirroring `recipient_portion` in
+ * `contracts/splits`: every entry but the last is `amount * share / totalShares`
+ * with bigint truncation, and the **final entry absorbs the rounding dust** so
+ * the results always sum to `amount` exactly.
+ *
+ * A UI preview built with this helper therefore matches the on-chain transfers
+ * stroop for stroop. Throws for a negative amount, empty shares, negative or
+ * non-integer shares, and a total weight of zero.
+ *
+ *      splitAmounts(100n, [1, 1, 1]) // [33n, 33n, 34n]
+ *      splitAmounts(10n, [3, 7])     // [3n, 7n]
+ */
+export function splitAmounts(amount: bigint, shares: readonly (number | bigint)[]): bigint[] {
+  if (amount < 0n) {
+    throw new Error(`splitAmounts: amount must not be negative (received ${amount.toString()})`);
+  }
+  if (shares.length === 0) {
+    throw new Error('splitAmounts: shares must not be empty');
+  }
+
+  const weights = shares.map((share, index) => {
+    if (typeof share === 'number') {
+      if (!Number.isSafeInteger(share)) {
+        throw new Error(`splitAmounts: share at index ${index} must be a safe integer`);
+      }
+      if (share < 0) {
+        throw new Error(`splitAmounts: share at index ${index} must not be negative`);
+      }
+      return BigInt(share);
+    }
+    if (share < 0n) {
+      throw new Error(`splitAmounts: share at index ${index} must not be negative`);
+    }
+    return share;
+  });
+
+  const totalShares = weights.reduce((sum, share) => sum + share, 0n);
+  if (totalShares === 0n) {
+    throw new Error('splitAmounts: total shares must be greater than zero');
+  }
+
+  const amounts: bigint[] = [];
+  let distributed = 0n;
+  for (let i = 0; i < weights.length - 1; i++) {
+    const portion = (amount * weights[i]) / totalShares;
+    amounts.push(portion);
+    distributed += portion;
+  }
+  // `recipient_portion` hands the remainder to the final recipient.
+  amounts.push(amount - distributed);
+  return amounts;
 }
 
 /**
@@ -340,6 +520,53 @@ export function computeProgressBps(schedule: VestingSchedule, now: number): numb
 export function formatBps(bps: number): string {
   const clamped = Math.max(0, Math.min(10_000, bps));
   return `${(clamped / 100).toFixed(clamped % 100 === 0 ? 0 : 1)}%`;
+}
+
+/**
+ * Converts a `bigint` to a `number`, throwing instead of silently losing
+ * precision outside the safe integer range (`±(2^53 − 1)`).
+ *
+ * Use this at the boundary where a bigint has to feed a `number` API (chart
+ * scales, CSS sizes, percentages). Values that do not fit are a bug in the
+ * caller, never something to round.
+ *
+ *      toSafeNumber(9_007_199_254_740_991n); // 9007199254740991
+ *      toSafeNumber(9_007_199_254_740_992n); // throws
+ *      toSafeNumber(-9_007_199_254_740_992n); // throws
+ */
+export function toSafeNumber(value: bigint): number {
+  if (value > MAX_SAFE_BIGINT || value < MIN_SAFE_BIGINT) {
+    throw new Error(
+      `toSafeNumber: ${value.toString()} is outside the safe integer range (±${Number.MAX_SAFE_INTEGER}).`,
+    );
+  }
+  return Number(value);
+}
+
+const RATIO_SCALE = 1_000_000_000n;
+
+/**
+ * Returns `part / whole` as a `number` in `[0, 1]`, computed with integer-safe
+ * scaling so huge bigint balances never turn into `Infinity` or lose their
+ * leading digits the way `Number(part) / Number(whole)` can.
+ *
+ * The quotient is truncated to nine decimal places before becoming a double;
+ * values at or above `whole` clamp to `1`, and non-positive parts clamp to `0`.
+ * Throws when `whole` is not positive.
+ *
+ *      bigintRatio(1n, 4n);                          // 0.25
+ *      bigintRatio(2n ** 127n - 1n, 2n ** 127n - 1n); // 1
+ */
+export function bigintRatio(part: bigint, whole: bigint): number {
+  if (whole <= 0n) {
+    throw new Error('bigintRatio: whole must be greater than zero');
+  }
+  if (part <= 0n) return 0;
+  if (part >= whole) return 1;
+
+  // `part < whole`, so the scaled quotient is below 10^9 and always a safe
+  // integer to hand back to `Number`.
+  return Number((part * RATIO_SCALE) / whole) / Number(RATIO_SCALE);
 }
 
 /**

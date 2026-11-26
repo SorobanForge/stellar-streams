@@ -13,7 +13,7 @@ import {
   TriangleAlert,
   Wallet,
 } from 'lucide-react';
-import { cn, Footer, Header, NumberInput, Spinner } from '@stellar-starter-kit/ui';
+import { cn, Footer, Header, Modal, NumberInput, Spinner } from '@stellar-starter-kit/ui';
 import {
   formatAddress,
   formatBps,
@@ -125,6 +125,7 @@ export default function UiGallery() {
   const [loading, setLoading] = useState(false);
   const [toggled, setToggled] = useState(false);
   const [amount, setAmount] = useState('100.0000000');
+  const [modalOpen, setModalOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-[#06060c] text-slate-100 selection:bg-purple-500/30 selection:text-purple-200">
@@ -399,6 +400,41 @@ export default function UiGallery() {
                 </p>
               </div>
             </div>
+          </GallerySection>
+
+          {/* -------------------------------------------------- Modal */}
+          <GallerySection
+            title="Modal dialog"
+            description="A labelled modal dialog traps keyboard focus, restores it to its trigger, and closes with Escape."
+          >
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              className={cn(buttonBase, buttonVariants.primary, buttonSizes.sm)}
+            >
+              Review transaction
+            </button>
+            <Modal open={modalOpen} onOpenChange={setModalOpen} title="Review transaction">
+              <p className="text-sm leading-relaxed font-light text-slate-400">
+                Confirm the recipient and amount before submitting this transaction.
+              </p>
+              <div className="mt-6 flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setModalOpen(false)}
+                  className={cn(buttonBase, buttonVariants.ghost, buttonSizes.sm)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalOpen(false)}
+                  className={cn(buttonBase, buttonVariants.primary, buttonSizes.sm)}
+                >
+                  Confirm transaction
+                </button>
+              </div>
+            </Modal>
           </GallerySection>
 
           {/* -------------------------------------------------- Surfaces */}
