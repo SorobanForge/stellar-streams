@@ -9,6 +9,8 @@ const STREAM: Stream = {
   sender: 'GSENDER',
   recipient: 'GRECIPIENT',
   token: 'CTOKEN',
+  label: '',
+  reference: '',
   totalAmount: '1000',
   withdrawn: '0',
   startTime: 0,
@@ -72,7 +74,7 @@ describe('useStream', () => {
       getStream: vi.fn().mockRejectedValue(new Error('stream not found')),
     });
 
-    const { result } = renderHook(() => useStream(asClient(client), 1n));
+    const { result } = renderHook(() => useStream(asClient(client), 1n, { retries: 0 }));
 
     await waitFor(() => expect(result.current.error).toBe('stream not found'));
 

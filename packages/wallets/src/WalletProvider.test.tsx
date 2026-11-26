@@ -1,7 +1,12 @@
 import React, { useState } from 'react';
 import { render, act, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
-import { WalletProvider, useWallet } from './WalletProvider';
+import {
+  MAINNET_PASSPHRASE,
+  TESTNET_PASSPHRASE,
+  WalletProvider,
+  useWallet,
+} from './WalletProvider';
 import * as freighter from '@stellar/freighter-api';
 import albedo from '@albedo-link/intent';
 
@@ -10,10 +15,20 @@ import albedo from '@albedo-link/intent';
 vi.mock('@stellar/freighter-api', () => {
   const isConnected = vi.fn();
   const getAddress = vi.fn();
+  const getNetworkDetails = vi.fn();
+  const getNetwork = vi.fn();
   const requestAccess = vi.fn();
   const signTransaction = vi.fn();
   const signAuthEntry = vi.fn();
-  const api = { isConnected, getAddress, requestAccess, signTransaction, signAuthEntry };
+  const api = {
+    isConnected,
+    getAddress,
+    getNetworkDetails,
+    getNetwork,
+    requestAccess,
+    signTransaction,
+    signAuthEntry,
+  };
   return { ...api, default: api };
 });
 
@@ -24,6 +39,22 @@ vi.mock('@albedo-link/intent', () => ({
     tx: vi.fn(),
   },
 }));
+
+type XBullSdkMock = {
+  getAddress: ReturnType<typeof vi.fn>;
+  signTransaction: ReturnType<typeof vi.fn>;
+  getNetwork?: ReturnType<typeof vi.fn>;
+};
+
+function installXBull(overrides: Partial<XBullSdkMock> = {}): XBullSdkMock {
+  const sdk: XBullSdkMock = {
+    getAddress: vi.fn().mockResolvedValue({ address: 'GB_XBULL' }),
+    signTransaction: vi.fn().mockResolvedValue({ signedTxXdr: 'signed-xbull-xdr' }),
+    ...overrides,
+  };
+  (window as unknown as { xBullSDK?: unknown }).xBullSDK = sdk;
+  return sdk;
+}
 
 // Ledger's device packages are imported dynamically by the adapter; mock them so
 // the provider test never needs a device (or WebHID).
@@ -64,30 +95,20 @@ function TestComponent() {
     isConnected,
     isConnecting,
     isRestoring,
+    network,
+    walletNetworkPassphrase,
     error,
     connect,
     disconnect,
     signTransaction,
     signAuthEntry,
+    setNetwork,
   } = useWallet();
-  const [signError, setSignError] = useState('none');
   const [signErrorName, setSignErrorName] = useState('none');
   const [authResult, setAuthResult] = useState('none');
   const [authError, setAuthError] = useState('none');
 
-  const [signError, setSignError] = React.useState('none');
-
-  // `connect` and `signTransaction` re-throw after recording their error; the
-  // handlers swallow the rejection so tests assert on the rendered state.
-  const attempt = (provider: WalletType) => {
-    void connect(provider).catch(() => undefined);
-  };
-  const sign = () => {
-    setSignError('none');
-    void signTransaction('mock-xdr').catch((err) => {
-      setSignError(err instanceof Error ? err.message : String(err));
-    });
-  };
+  const [signError, setSignError] = useState('none');
 
   return (
     <div>
@@ -99,6 +120,8 @@ function TestComponent() {
       <div data-testid="connected">{isConnected ? 'true' : 'false'}</div>
       <div data-testid="connecting">{isConnecting ? 'true' : 'false'}</div>
       <div data-testid="restoring">{isRestoring ? 'true' : 'false'}</div>
+      <div data-testid="network">{network}</div>
+      <div data-testid="wallet-network">{walletNetworkPassphrase || 'unknown'}</div>
       <div data-testid="error">{error || 'null'}</div>
       <div data-testid="sign-error">{signError}</div>
       <div data-testid="sign-error-name">{signErrorName}</div>
@@ -108,15 +131,18 @@ function TestComponent() {
       <button onClick={() => connect('albedo').catch(() => {})}>Connect Albedo</button>
       <button onClick={() => connect('rabe').catch(() => {})}>Connect Rabet</button>
       <button onClick={() => connect('hana').catch(() => {})}>Connect Hana</button>
+      <button onClick={() => connect('xbull').catch(() => {})}>Connect xBull</button>
+      <button onClick={() => setNetwork('MAINNET')}>Set Mainnet</button>
       <button onClick={() => connect('ledger').catch(() => {})}>Connect Ledger</button>
       <button onClick={disconnect}>Disconnect</button>
       <button
-        onClick={() =>
-          signTransaction('mock-xdr').catch((err: Error) => {
+        onClick={() => {
+          setSignError('none');
+          void signTransaction('mock-xdr').catch((err: Error) => {
             setSignError(err.message);
             setSignErrorName(err.name);
-          })
-        }
+          });
+        }}
       >
         Sign
       </button>
@@ -139,11 +165,12 @@ describe('WalletProvider', () => {
   let errorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     localStorage.clear();
     // Clear global window properties
     delete (window as Window & { rabet?: unknown }).rabet;
     delete (window as Window & { hanaWallet?: unknown }).hanaWallet;
+    delete (window as Window & { xBullSDK?: unknown }).xBullSDK;
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
   });

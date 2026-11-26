@@ -15,6 +15,13 @@ export const WALLET_PROVIDERS = {
   LEDGER: 'ledger',
 } as const;
 
+export type WalletProviderType = WalletType;
+
+export interface WalletProviderOption {
+  id: WalletProviderType;
+  label: string;
+}
+
 /**
  * Every supported provider, in the order the wallet picker lists them. UIs must
  * render from this list rather than hard-coding a subset, so a newly supported
@@ -26,6 +33,7 @@ export const WALLET_PROVIDER_OPTIONS: readonly WalletProviderOption[] = [
   { id: WALLET_PROVIDERS.ALBEDO, label: 'Albedo' },
   { id: WALLET_PROVIDERS.RABE, label: 'Rabet' },
   { id: WALLET_PROVIDERS.HANA, label: 'Hana' },
+  { id: WALLET_PROVIDERS.LEDGER, label: 'Ledger' },
 ];
 
 // Explicit extensions: the emitted dist keeps specifiers as written, and

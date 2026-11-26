@@ -16,6 +16,7 @@ import {
   Inbox,
   Pause,
   Play,
+  ChevronDown,
 } from 'lucide-react';
 import { useWallet, WALLET_PROVIDER_OPTIONS, type WalletType } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
@@ -136,6 +137,7 @@ export function StreamsDashboard({
 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   // Create form.
   const [recipient, setRecipient] = useState('');
@@ -190,6 +192,16 @@ export function StreamsDashboard({
       setSuccess(null);
     }
   }, []);
+
+  const handleConnect = useCallback(
+    (provider: WalletType) => {
+      setPickerOpen(false);
+      connect(provider).catch((err: unknown) => {
+        notify('error', err instanceof Error ? err.message : 'Could not connect to the wallet.');
+      });
+    },
+    [connect, notify],
+  );
 
   const formErrors = useMemo(
     () =>
