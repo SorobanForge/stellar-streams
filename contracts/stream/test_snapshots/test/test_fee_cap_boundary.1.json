@@ -723,6 +723,12 @@
                   },
                   {
                     "key": {
+                      "symbol": "paused_at"
+                    },
+                    "val": "void"
+                  },
+                  {
+                    "key": {
                       "symbol": "recipient"
                     },
                     "val": {
@@ -767,6 +773,14 @@
                     },
                     "val": {
                       "i128": "10000"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "total_paused"
+                    },
+                    "val": {
+                      "u64": "0"
                     }
                   },
                   {
@@ -1022,6 +1036,12 @@
                   },
                   {
                     "key": {
+                      "symbol": "paused_at"
+                    },
+                    "val": "void"
+                  },
+                  {
+                    "key": {
                       "symbol": "recipient"
                     },
                     "val": {
@@ -1066,6 +1086,14 @@
                     },
                     "val": {
                       "i128": "1000"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "total_paused"
+                    },
+                    "val": {
+                      "u64": "0"
                     }
                   },
                   {
@@ -1183,29 +1211,6 @@
             "contract_data": {
               "ext": "v0",
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABFO3O",
-              "key": "ledger_key_contract_instance",
-              "durability": "persistent",
-              "val": {
-                "contract_instance": {
-                  "executable": {
-                    "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-                  },
-                  "storage": null
-                }
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 4095
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABHGT6",
               "key": {
                 "ledger_key_nonce": {
                   "nonce": "3126073502131104533"
@@ -1321,6 +1326,12 @@
                   },
                   {
                     "key": {
+                      "symbol": "paused_at"
+                    },
+                    "val": "void"
+                  },
+                  {
+                    "key": {
                       "symbol": "recipient"
                     },
                     "val": {
@@ -1365,6 +1376,14 @@
                     },
                     "val": {
                       "i128": "1000"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "total_paused"
+                    },
+                    "val": {
+                      "u64": "0"
                     }
                   },
                   {

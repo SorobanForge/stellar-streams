@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import {
@@ -16,47 +16,68 @@ import {
   Inbox,
   Pause,
   Play,
+  ChevronDown,
+  History,
+  MinusCircle,
+  PlusCircle,
 } from 'lucide-react';
-import { useWallet } from '@stellar-starter-kit/wallets';
+import { useWallet, WALLET_PROVIDER_OPTIONS, type WalletType } from '@stellar-starter-kit/wallets';
 import { StreamsClient, type TokenMetadata } from '@stellar-starter-kit/sdk';
 import {
   Button,
+  DataTable,
   Footer,
   Header,
   Input,
   ProgressBar,
   Skeleton,
   StatusBadge,
+  type DataTableColumn,
 } from '@stellar-starter-kit/ui';
 import {
   useCancelStream,
   useCreateStream,
   usePauseStream,
+  useReduceStream,
   useResumeStream,
   useStreams,
+  useTopUpStream,
   useWithdrawStream,
 } from '@stellar-starter-kit/hooks';
 import { getStreamMetrics, type Stream } from '@stellar-starter-kit/types';
 import {
   formatAddress,
-  formatTokenAmount,
   parseTokenAmount,
   computeClaimable,
   computeProtocolFee,
   formatBps,
   formatDuration,
   formatRelativeTime,
+  formatTokenAmount,
 } from '@stellar-starter-kit/utils';
 import type { EnvironmentConfig } from '@stellar-starter-kit/config';
 import { environmentConfig, environmentErrors } from '../../lib/environment';
 import ConfigurationError from '../../components/ConfigurationError';
 import { REPO_URL } from '../../lib/constants';
 import {
+  describeStreamActionError,
+  parsePositiveTokenAmount,
+  validateReduceTotal,
+  validateTopUpAmount,
+} from '../../lib/stream-actions';
+import {
+  clearRecentStreams,
+  readRecentStreams,
+  rememberRecentStream,
+} from '../../lib/stream-history';
+import { validateStreamSchedule } from '../../lib/stream-schedule-validation';
+import {
   getStreamDurationSeconds,
   getStreamCliffSeconds,
   validateStreamInput,
 } from '../../lib/stream-validation';
 import { downloadCsv, exportStreamsToCsv, getStreamsCsvFilename } from '../../lib/stream-csv';
+import { formatStreamAmount } from '../../lib/stream-amount';
 
 // framer-motion stays out of the initial route bundle; the banner only loads
 // when an error/success message is shown.
@@ -134,6 +155,7 @@ export function StreamsDashboard({
 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   // Create form.
   const [recipient, setRecipient] = useState('');
@@ -144,11 +166,22 @@ export function StreamsDashboard({
 
   // Lookup.
   const [lookupId, setLookupId] = useState('');
+  const [recentIds, setRecentIds] = useState<string[]>([]);
   const [stream, setStream] = useState<Stream | null>(null);
   const [contractClaimable, setContractClaimable] = useState<bigint>(0n);
   const [streamToken, setStreamToken] = useState<TokenMetadata | null>(null);
   const [loadingStream, setLoadingStream] = useState(false);
   const [feeBps, setFeeBps] = useState<number | null>(null);
+
+  // Sender adjustments.
+  const [topUpAmount, setTopUpAmount] = useState('');
+  const [reduceTotal, setReduceTotal] = useState('');
+
+  // localStorage is only available after mount; reading during render would
+  // produce a hydration mismatch (and throw during SSR).
+  useEffect(() => {
+    setRecentIds(readRecentStreams(network));
+  }, [network]);
 
   const client = useMemo(
     () =>
@@ -189,6 +222,16 @@ export function StreamsDashboard({
     }
   }, []);
 
+  const handleConnect = useCallback(
+    (provider: WalletType) => {
+      setPickerOpen(false);
+      connect(provider).catch((err: unknown) => {
+        notify('error', err instanceof Error ? err.message : 'Could not connect to the wallet.');
+      });
+    },
+    [connect, notify],
+  );
+
   const formErrors = useMemo(
     () =>
       validateStreamInput({
@@ -215,14 +258,15 @@ export function StreamsDashboard({
         // Fetch protocol config for feeBps
         const config = await client.getConfig().catch(() => null);
         setFeeBps(config ? config.feeBps : 0);
-        if (!found) notify('error', `No stream found with id ${id}.`);
+        if (found) setRecentIds(rememberRecentStream(network, found.id));
+        else notify('error', `No stream found with id ${id}.`);
       } catch (err: unknown) {
         notify('error', err instanceof Error ? err.message : 'Failed to load stream.');
       } finally {
         setLoadingStream(false);
       }
     },
-    [client, notify],
+    [client, notify, network],
   );
 
   // The mutation hooks own the pending/error/hash state that used to be
@@ -267,6 +311,24 @@ export function StreamsDashboard({
     onError: (message) => notify('error', message),
   });
 
+  const topUpStream = useTopUpStream(client, {
+    onSuccess: ({ hash }) => {
+      notify('success', `Top-up confirmed. Tx ${formatAddress(hash, 6)}`);
+      setTopUpAmount('');
+      if (stream) void loadStream(stream.id);
+    },
+    onError: (message) => notify('error', message),
+  });
+
+  const reduceStream = useReduceStream(client, {
+    onSuccess: ({ hash }) => {
+      notify('success', `Stream reduced and the difference refunded. Tx ${formatAddress(hash, 6)}`);
+      setReduceTotal('');
+      if (stream) void loadStream(stream.id);
+    },
+    onError: (message) => notify('error', message),
+  });
+
   // One mutation per hook instance is allowed at a time; `busy` mirrors that for
   // the buttons that must not start a second write.
   const busy =
@@ -274,7 +336,9 @@ export function StreamsDashboard({
     withdrawStream.status === 'pending' ||
     cancelStream.status === 'pending' ||
     pauseStream.status === 'pending' ||
-    resumeStream.status === 'pending';
+    resumeStream.status === 'pending' ||
+    topUpStream.status === 'pending' ||
+    reduceStream.status === 'pending';
 
   const runWithdraw = () => {
     if (!stream) return;
@@ -320,6 +384,15 @@ export function StreamsDashboard({
       const endTime = now + getStreamDurationSeconds(durationDays);
       const cliffTime = now + getStreamCliffSeconds(cliffDays);
 
+      // Guard the exact timestamps the contract will see, in addition to the
+      // day-based form checks above.
+      const scheduleErrors = validateStreamSchedule({ startTime, endTime, cliffTime }, now);
+      const scheduleProblem = Object.values(scheduleErrors)[0];
+      if (scheduleProblem) {
+        notify('error', scheduleProblem);
+        return;
+      }
+
       const { decimals } = await client.getTokenMetadata(token.trim());
       await createStream.mutate({
         sender: activeAddress,
@@ -337,10 +410,14 @@ export function StreamsDashboard({
     }
   };
 
-  const formatAmount = (raw: bigint | string) =>
-    streamToken
-      ? `${formatTokenAmount(raw, streamToken.decimals)} ${streamToken.symbol}`
-      : `${raw.toString()} (base units)`;
+  // Amounts use the token's own decimals and symbol, read alongside the stream.
+  // A failed SEP-41 metadata read shows the raw base-unit value instead of
+  // assuming 7 decimals, and never blanks the view.
+  const formatAmount = (raw: bigint | string) => {
+    const formatted = formatStreamAmount(raw, streamToken);
+    if (formatted.isFallback) return `${formatted.value} (base units)`;
+    return `${formatted.value} ${formatted.symbol}`;
+  };
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   const streamMetrics = stream ? getStreamMetrics(stream, nowSeconds) : null;
@@ -356,6 +433,108 @@ export function StreamsDashboard({
   const claimable = stream ? computeClaimable(stream, nowSeconds) : contractClaimable;
   const feeAmount = computeProtocolFee(claimable, feeBps ?? 0);
   const netAmount = claimable - feeAmount;
+
+  const streamStatus = (item: Stream) =>
+    item.cancelled ? 'cancelled' : getStreamMetrics(item, nowSeconds).status;
+
+  const streamDecimals = streamToken?.decimals ?? 7;
+  const currentTotal = stream ? BigInt(stream.totalAmount) : 0n;
+  const topUpValidation = topUpAmount ? validateTopUpAmount(topUpAmount, streamDecimals) : null;
+  const reduceValidation = reduceTotal
+    ? validateReduceTotal(reduceTotal, currentTotal, streamDecimals)
+    : null;
+  const topUpError = describeStreamActionError(topUpStream.error, topUpStream.errorCode);
+  const reduceError = describeStreamActionError(reduceStream.error, reduceStream.errorCode);
+
+  const handleTopUp = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!stream) return;
+    const problem = validateTopUpAmount(topUpAmount, streamDecimals);
+    if (problem) {
+      notify('error', problem);
+      return;
+    }
+    const parsedAmount = parsePositiveTokenAmount(topUpAmount, streamDecimals);
+    if (parsedAmount === null) return;
+    setError(null);
+    setSuccess(null);
+    await topUpStream.mutate({ id: stream.id, amount: parsedAmount });
+  };
+
+  const handleReduce = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!stream) return;
+    const problem = validateReduceTotal(reduceTotal, currentTotal, streamDecimals);
+    if (problem) {
+      notify('error', problem);
+      return;
+    }
+    const newTotal = parsePositiveTokenAmount(reduceTotal, streamDecimals);
+    if (newTotal === null) return;
+    setError(null);
+    setSuccess(null);
+    await reduceStream.mutate({ id: stream.id, newTotal });
+  };
+
+  const handleClearHistory = () => {
+    clearRecentStreams(network);
+    setRecentIds([]);
+  };
+
+  // Column order and formatting preserve the bespoke table this replaced.
+  // Amounts stay in XLM (7 decimals) as before; the base-unit listing lives in
+  // the recipient inbox.
+  const streamColumns: DataTableColumn<Stream>[] = [
+    {
+      id: 'id',
+      header: 'ID',
+      sortable: true,
+      sortValue: (item) => item.id,
+      cell: (item) => <span className="font-semibold text-white">#{item.id}</span>,
+    },
+    {
+      id: 'recipient',
+      header: 'Recipient',
+      cell: (item) => formatAddress(item.recipient, 6),
+    },
+    {
+      id: 'total',
+      header: 'Total Amount',
+      sortable: true,
+      sortValue: (item) => item.totalAmount,
+      cell: (item) => `${formatTokenAmount(item.totalAmount, 7)} XLM`,
+    },
+    {
+      id: 'withdrawn',
+      header: 'Withdrawn',
+      sortable: true,
+      sortValue: (item) => item.withdrawn,
+      cell: (item) => `${formatTokenAmount(item.withdrawn, 7)} XLM`,
+    },
+    {
+      id: 'status',
+      header: 'Status',
+      sortable: true,
+      sortValue: streamStatus,
+      cell: (item) => <StatusBadge status={streamStatus(item)} />,
+    },
+    {
+      id: 'action',
+      header: 'Action',
+      cell: (item) => (
+        <button
+          type="button"
+          onClick={() => {
+            setLookupId(item.id);
+            void loadStream(item.id);
+          }}
+          className="text-purple-400 underline hover:text-purple-300"
+        >
+          Inspect
+        </button>
+      ),
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-[#06060c] text-slate-100 selection:bg-purple-500/30 selection:text-purple-200">
@@ -428,20 +607,55 @@ export function StreamsDashboard({
               Disconnect
             </button>
           ) : (
-            <button
-              onClick={() =>
-                connect('freighter').catch(() => notify('error', 'Connection failed.'))
-              }
-              disabled={isConnecting}
-              className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-600 to-cyan-500 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:brightness-110"
-            >
-              {isConnecting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Wallet className="h-3.5 w-3.5" />
+            <div className="relative">
+              <button
+                onClick={() => setPickerOpen((open) => !open)}
+                disabled={isConnecting}
+                aria-haspopup="menu"
+                aria-expanded={pickerOpen}
+                className="inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-purple-600 to-cyan-500 px-4 py-2 text-xs font-semibold text-white shadow-md transition hover:brightness-110 disabled:pointer-events-none disabled:opacity-50"
+              >
+                {isConnecting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Wallet className="h-3.5 w-3.5" />
+                )}
+                Connect wallet
+                <ChevronDown
+                  className={`h-3.5 w-3.5 transition-transform ${pickerOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+
+              {pickerOpen && (
+                <>
+                  {/* Invisible backdrop: a click anywhere else closes the picker. */}
+                  <button
+                    type="button"
+                    aria-hidden
+                    tabIndex={-1}
+                    onClick={() => setPickerOpen(false)}
+                    className="fixed inset-0 z-10 cursor-default"
+                  />
+                  <div
+                    role="menu"
+                    aria-label="Choose a wallet"
+                    className="absolute right-0 z-20 mt-2 w-48 overflow-hidden rounded-xl border border-slate-800 bg-[#0b0b16] py-1 shadow-2xl shadow-black/50"
+                  >
+                    {WALLET_PROVIDER_OPTIONS.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => handleConnect(option.id)}
+                        className="flex w-full items-center px-4 py-2.5 text-left text-xs font-semibold text-slate-300 transition hover:bg-slate-900 hover:text-white"
+                      >
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
               )}
-              Connect Freighter
-            </button>
+            </div>
           )}
         </div>
 
@@ -552,8 +766,14 @@ export function StreamsDashboard({
                   value={lookupId}
                   onChange={(e) => setLookupId(e.target.value)}
                   placeholder="Stream id"
+                  list="recent-stream-ids"
                   className="w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
                 />
+                <datalist id="recent-stream-ids">
+                  {recentIds.map((id) => (
+                    <option key={id} value={id} />
+                  ))}
+                </datalist>
                 <button
                   onClick={() => loadStream(lookupId)}
                   disabled={loadingStream || !lookupId}
@@ -566,6 +786,23 @@ export function StreamsDashboard({
                   )}
                   Load
                 </button>
+              </div>
+
+              <div className="mt-2 flex h-5 items-center justify-between text-[10px] text-slate-500">
+                <span>
+                  {recentIds.length > 0
+                    ? 'Recent lookups are remembered on this device.'
+                    : 'Your recent lookups will appear here.'}
+                </span>
+                {recentIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearHistory}
+                    className="inline-flex items-center gap-1 transition-colors hover:text-white"
+                  >
+                    <History className="h-3 w-3" /> Clear history
+                  </button>
+                )}
               </div>
 
               {loadingStream && (
@@ -709,6 +946,126 @@ export function StreamsDashboard({
                       Explorer <ExternalLink className="h-3 w-3" />
                     </a>
                   </div>
+
+                  {isSender && (
+                    <div className="space-y-4 border-t border-slate-900 pt-4">
+                      <div className="flex items-center gap-2 text-[10px] tracking-wider text-slate-500 uppercase">
+                        <History className="h-3 w-3" /> Sender controls
+                      </div>
+
+                      <form
+                        onSubmit={handleTopUp}
+                        className="space-y-2 rounded-lg border border-slate-900 bg-slate-950/40 p-3"
+                      >
+                        <label
+                          htmlFor="top-up-amount"
+                          className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-400 uppercase"
+                        >
+                          <PlusCircle className="h-3.5 w-3.5 text-cyan-400" /> Top up
+                        </label>
+                        <p className="text-[10px] font-light text-slate-500">
+                          Adds tokens and extends the end date at the current payment rate.
+                          Already-vested tokens stay vested.
+                        </p>
+                        <div className="flex gap-2">
+                          <input
+                            id="top-up-amount"
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={topUpAmount}
+                            onChange={(e) => {
+                              setTopUpAmount(e.target.value);
+                              if (topUpStream.status === 'error') topUpStream.reset();
+                            }}
+                            placeholder={`Amount in ${streamToken?.symbol ?? 'token units'}`}
+                            aria-invalid={Boolean(topUpValidation)}
+                            className="w-full rounded-lg border border-slate-900 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-200 focus:border-purple-500 focus:outline-none"
+                          />
+                          <button
+                            type="submit"
+                            disabled={
+                              busy ||
+                              !isConnected ||
+                              !topUpAmount.trim() ||
+                              stream.cancelled ||
+                              nowSeconds >= stream.endTime ||
+                              Boolean(topUpValidation)
+                            }
+                            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-cyan-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-500 disabled:pointer-events-none disabled:opacity-40"
+                          >
+                            {topUpStream.status === 'pending' ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <PlusCircle className="h-3.5 w-3.5" />
+                            )}
+                            Top up
+                          </button>
+                        </div>
+                        {(topUpValidation || topUpError) && (
+                          <p role="alert" className="text-[10px] text-rose-300">
+                            {topUpValidation ?? topUpError}
+                          </p>
+                        )}
+                      </form>
+
+                      <form
+                        onSubmit={handleReduce}
+                        className="space-y-2 rounded-lg border border-slate-900 bg-slate-950/40 p-3"
+                      >
+                        <label
+                          htmlFor="reduce-total"
+                          className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-400 uppercase"
+                        >
+                          <MinusCircle className="h-3.5 w-3.5 text-amber-400" /> Reduce total
+                        </label>
+                        <p className="text-[10px] font-light text-slate-500">
+                          Sets a new total and refunds the difference to you immediately. The
+                          payment rate is unchanged, so the stream ends sooner. It cannot go below
+                          the amount already vested.
+                        </p>
+                        <div className="flex gap-2">
+                          <input
+                            id="reduce-total"
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={reduceTotal}
+                            onChange={(e) => {
+                              setReduceTotal(e.target.value);
+                              if (reduceStream.status === 'error') reduceStream.reset();
+                            }}
+                            placeholder={`New total (current ${formatAmount(stream.totalAmount)})`}
+                            aria-invalid={Boolean(reduceValidation)}
+                            className="w-full rounded-lg border border-slate-900 bg-slate-950 px-3 py-2 font-mono text-xs text-slate-200 focus:border-purple-500 focus:outline-none"
+                          />
+                          <button
+                            type="submit"
+                            disabled={
+                              busy ||
+                              !isConnected ||
+                              !reduceTotal.trim() ||
+                              stream.cancelled ||
+                              Boolean(reduceValidation)
+                            }
+                            className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-200 transition hover:bg-amber-500/20 disabled:pointer-events-none disabled:opacity-40"
+                          >
+                            {reduceStream.status === 'pending' ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <MinusCircle className="h-3.5 w-3.5" />
+                            )}
+                            Reduce
+                          </button>
+                        </div>
+                        {(reduceValidation || reduceError) && (
+                          <p role="alert" className="text-[10px] text-rose-300">
+                            {reduceValidation ?? reduceError}
+                          </p>
+                        )}
+                      </form>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -746,85 +1103,49 @@ export function StreamsDashboard({
             </div>
           </div>
 
-          {listingLoading && (
-            <div className="space-y-3 rounded-2xl border border-slate-900 bg-slate-950/40 p-6">
-              <Skeleton height="1.5rem" width="30%" rounded="sm" />
-              <Skeleton height="1rem" width="60%" rounded="sm" />
-            </div>
-          )}
-
-          {!listingLoading && isConnected && loadedStreams.length === 0 && (
-            <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-8 text-center">
-              <p className="text-sm text-slate-400">No streams found for this address.</p>
-            </div>
-          )}
+          <DataTable
+            caption={
+              activeAddress
+                ? `Streams for ${formatAddress(activeAddress, 6)}`
+                : 'Streams for the connected wallet'
+            }
+            columns={streamColumns}
+            rows={loadedStreams}
+            getRowKey={(item) => item.id}
+            loading={listingLoading}
+            loadingState={
+              <div className="space-y-3 rounded-2xl border border-slate-900 bg-slate-950/40 p-6">
+                <Skeleton height="1.5rem" width="30%" rounded="sm" />
+                <Skeleton height="1rem" width="60%" rounded="sm" />
+              </div>
+            }
+            emptyState={
+              isConnected ? (
+                <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-8 text-center">
+                  <p className="text-sm text-slate-400">No streams found for this address.</p>
+                </div>
+              ) : null
+            }
+            className="font-mono"
+          />
 
           {!listingLoading && loadedStreams.length > 0 && (
-            <>
-              <div className="overflow-x-auto rounded-2xl border border-slate-900 bg-slate-950/40">
-                <table className="w-full text-left font-mono text-xs">
-                  <thead className="border-b border-slate-900 bg-slate-900/30 text-slate-400 uppercase">
-                    <tr>
-                      <th className="px-4 py-3">ID</th>
-                      <th className="px-4 py-3">Recipient</th>
-                      <th className="px-4 py-3">Total Amount</th>
-                      <th className="px-4 py-3">Withdrawn</th>
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-900 text-slate-300">
-                    {loadedStreams.map((item) => (
-                      <tr key={item.id} className="transition-colors hover:bg-slate-900/20">
-                        <td className="px-4 py-3 font-semibold text-white">#{item.id}</td>
-                        <td className="px-4 py-3">{formatAddress(item.recipient, 6)}</td>
-                        <td className="px-4 py-3">{formatTokenAmount(item.totalAmount, 7)} XLM</td>
-                        <td className="px-4 py-3">{formatTokenAmount(item.withdrawn, 7)} XLM</td>
-                        <td className="px-4 py-3">
-                          <StatusBadge
-                            status={
-                              item.cancelled
-                                ? 'cancelled'
-                                : getStreamMetrics(item, nowSeconds).status
-                            }
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setLookupId(item.id);
-                              void loadStream(item.id);
-                            }}
-                            className="text-purple-400 underline hover:text-purple-300"
-                          >
-                            Inspect
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Pagination Controls */}
-              <div className="flex flex-col items-center justify-center pt-2">
-                {hasMore ? (
-                  <Button
-                    type="button"
-                    onClick={() => void loadMore()}
-                    disabled={loadingMore}
-                    loading={loadingMore}
-                    variant="secondary"
-                    className="px-6 py-2"
-                  >
-                    {loadingMore ? 'Loading more streams...' : 'Load more'}
-                  </Button>
-                ) : (
-                  <p className="text-xs text-slate-500">End of list — all streams loaded</p>
-                )}
-              </div>
-            </>
+            <div className="flex flex-col items-center justify-center pt-2">
+              {hasMore ? (
+                <Button
+                  type="button"
+                  onClick={() => void loadMore()}
+                  disabled={loadingMore}
+                  loading={loadingMore}
+                  variant="secondary"
+                  className="px-6 py-2"
+                >
+                  {loadingMore ? 'Loading more streams...' : 'Load more'}
+                </Button>
+              ) : (
+                <p className="text-xs text-slate-500">End of list — all streams loaded</p>
+              )}
+            </div>
           )}
         </div>
       </main>

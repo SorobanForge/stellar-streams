@@ -31,6 +31,7 @@ import {
   normalizeEscrow,
   normalizeStream,
 } from '@stellar-starter-kit/types';
+import { parseTokenAmount } from '@stellar-starter-kit/utils';
 
 /**
  * A memo attached to a write transaction. Text memos are for exchange-style
@@ -53,6 +54,12 @@ export interface WriteOptions {
    * simulation are still added on top by Soroban assembly.
    */
   fee?: string;
+  /**
+   * Ceiling for this call's base fee, in stroops. Together with the client's
+   * `maxFee` option, the stricter (lower) value wins. A call whose fee would
+   * exceed it throws before the wallet prompt opens.
+   */
+  maxFee?: string;
   /** Memo to attach to the transaction. Omit to leave the transaction memo-less. */
   memo?: TransactionMemo;
   /**
@@ -181,6 +188,22 @@ export interface StreamsClientOptions {
    * failover without a network.
    */
   transportFactory?: (rpcUrl: string) => StreamsTransport;
+  /**
+   * How long a single Soroban RPC request may take, in milliseconds, before it
+   * rejects with an {@link RpcTimeoutError}. Defaults to
+   * {@link DEFAULT_REQUEST_TIMEOUT_MS} (30s). Set `0` (or `Infinity`) to disable.
+   *
+   * Applies to every request, through the default transport, an injected
+   * `transport` (single or array) and every `transportFactory` result. A
+   * timeout counts as a transport failure, so with several {@link rpcUrls} the
+   * request is retried on the next host. A {@link FailoverTransport} passed as
+   * `transport` is used unchanged; wrap its endpoints in a
+   * {@link TimeoutTransport} yourself.
+   *
+   * This bounds each RPC round trip; {@link pollTimeoutMs} still bounds how
+   * long a submitted transaction may take to confirm overall.
+   */
+  requestTimeoutMs?: number;
   /** Default signal for write calls. A per-call signal takes precedence over it. */
   signal?: AbortSignal;
   /**
@@ -189,6 +212,13 @@ export interface StreamsClientOptions {
    * are then only discovered once the transaction is submitted.
    */
   skipSimulation?: boolean;
+  /**
+   * Ceiling for the base fee of every write transaction, in stroops. A
+   * per-call `WriteOptions.maxFee` overrides it; the stricter (lower) value
+   * wins. A call whose fee would exceed it throws before the wallet prompt
+   * opens. Leave unset for no ceiling beyond the caller's own `fee`.
+   */
+  maxFee?: string;
   /** Base delay between confirmation polls and submission retries. Defaults to 1s. */
   pollIntervalMs?: number;
   /** How long to wait for a submitted transaction to confirm. Defaults to 30s. */
@@ -339,6 +369,133 @@ export class FailoverTransport implements StreamsTransport {
 }
 
 /**
+ * Default for {@link StreamsClientOptions.requestTimeoutMs}: how long a single
+ * Soroban RPC request may take before it is abandoned. Long enough for a slow
+ * simulation of a full batch, short enough that a hung host does not leave a UI
+ * spinning until the browser gives up on its own.
+ */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+/** The {@link StreamsTransport} methods a {@link TimeoutTransport} can time out. */
+export type StreamsTransportMethod = keyof StreamsTransport;
+
+/**
+ * Thrown when a single Soroban RPC request does not settle within
+ * {@link StreamsClientOptions.requestTimeoutMs}.
+ *
+ * Its `name` is `'TimeoutError'`, so it is recognisable with either
+ * `error instanceof RpcTimeoutError` or `error.name === 'TimeoutError'`, and the
+ * client treats it as a transport failure: with several {@link
+ * StreamsClientOptions.rpcUrls} configured, a timed-out request rotates to the
+ * next host exactly like a refused connection or a 5xx response.
+ */
+export class RpcTimeoutError extends Error {
+  override readonly name = 'TimeoutError';
+
+  constructor(
+    /** The transport method that timed out, e.g. `'simulateTransaction'`. */
+    readonly method: StreamsTransportMethod,
+    /** The timeout that elapsed, in milliseconds. */
+    readonly timeoutMs: number,
+    /** The RPC host the request was sent to, when known. */
+    readonly url?: string,
+  ) {
+    super(
+      `Soroban RPC ${method} timed out after ${timeoutMs}ms` +
+        (url === undefined ? '.' : ` (${url}).`),
+    );
+  }
+}
+
+/**
+ * Wraps a {@link StreamsTransport} so every call rejects with an
+ * {@link RpcTimeoutError} once `timeoutMs` elapses without an answer.
+ *
+ * The client applies it automatically, to both the default
+ * `SorobanRpc.Server` transport and injected ones, using
+ * {@link StreamsClientOptions.requestTimeoutMs}. It is exported for callers that
+ * build their own {@link FailoverTransport}, which the client uses as-is.
+ *
+ * The underlying request is not cancelled (the transport interface carries no
+ * abort signal); its eventual result is simply ignored. A `timeoutMs` of `0`,
+ * a negative number or `Infinity` disables the timeout and returns calls
+ * unchanged.
+ *
+ * @example
+ * ```typescript
+ * const transport = new TimeoutTransport(new SorobanRpc.Server(url), 10_000, url);
+ * ```
+ */
+export class TimeoutTransport implements StreamsTransport {
+  constructor(
+    private readonly inner: StreamsTransport,
+    /** Per-request timeout in milliseconds. */
+    readonly timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS,
+    /** Host label included in timeout errors. */
+    private readonly url?: string,
+  ) {}
+
+  private run<T>(method: StreamsTransportMethod, call: () => Promise<T>): Promise<T> {
+    const { timeoutMs } = this;
+    if (!(timeoutMs > 0) || timeoutMs === Infinity) return call();
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new RpcTimeoutError(method, timeoutMs, this.url)),
+        timeoutMs,
+      );
+      let pending: Promise<T>;
+      try {
+        pending = Promise.resolve(call());
+      } catch (error) {
+        clearTimeout(timer);
+        reject(error);
+        return;
+      }
+      pending.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (error: unknown) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
+  }
+
+  getAccount(address: string): Promise<Account> {
+    return this.run('getAccount', () => this.inner.getAccount(address));
+  }
+
+  simulateTransaction(tx: Transaction): Promise<SorobanRpc.Api.SimulateTransactionResponse> {
+    return this.run('simulateTransaction', () => this.inner.simulateTransaction(tx));
+  }
+
+  prepareTransaction(tx: Transaction): Promise<Transaction> {
+    return this.run('prepareTransaction', () => this.inner.prepareTransaction(tx));
+  }
+
+  sendTransaction(
+    tx: Transaction | FeeBumpTransaction,
+  ): Promise<SorobanRpc.Api.SendTransactionResponse> {
+    return this.run('sendTransaction', () => this.inner.sendTransaction(tx));
+  }
+
+  getTransaction(hash: string): Promise<SorobanRpc.Api.GetTransactionResponse> {
+    return this.run('getTransaction', () => this.inner.getTransaction(hash));
+  }
+
+  getLatestLedger(): Promise<SorobanRpc.Api.GetLatestLedgerResponse> {
+    return this.run('getLatestLedger', () => this.inner.getLatestLedger());
+  }
+
+  getEvents(request: SorobanRpc.Api.GetEventsRequest): Promise<SorobanRpc.Api.GetEventsResponse> {
+    return this.run('getEvents', () => this.inner.getEvents(request));
+  }
+}
+
+/**
  * Whether an error came from reaching an RPC host rather than from the
  * application response it returned. Both `fetch`/axios and the Stellar SDK
  * report host failures with different shapes, so the classifier accepts the
@@ -346,6 +503,7 @@ export class FailoverTransport implements StreamsTransport {
  */
 function isTransportFailure(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
+  if (error instanceof RpcTimeoutError) return true;
   if (error.name === 'AbortError' || error.name === 'StreamsError') return false;
   const status = httpStatus(error);
   if (status !== undefined) return status >= 500 || status === 408 || status === 429;
@@ -598,7 +756,13 @@ export type StreamErrorCode =
   | 'BATCH_OVERFLOW'
   | 'STREAM_PAUSED'
   | 'NOT_PAUSED'
-  | 'SAME_RECIPIENT';
+  | 'STREAM_COMPLETED'
+  | 'AMOUNT_OVERFLOW'
+  | 'REDUCTION_BELOW_VESTED'
+  | 'INVALID_REDUCTION'
+  | 'SAME_RECIPIENT'
+  | 'PAUSE_WINDOW_EXCEEDED'
+  | 'INVALID_STATE_TRANSITION';
 
 /**
  * Stable identifiers for the splits contract's `SplitError` enum. They share
@@ -648,7 +812,13 @@ const STREAM_ERROR_CODES: Record<number, StreamErrorCode> = {
   15: 'BATCH_OVERFLOW',
   16: 'STREAM_PAUSED',
   17: 'NOT_PAUSED',
-  20: 'SAME_RECIPIENT',
+  18: 'STREAM_COMPLETED',
+  19: 'AMOUNT_OVERFLOW',
+  20: 'REDUCTION_BELOW_VESTED',
+  21: 'INVALID_REDUCTION',
+  22: 'SAME_RECIPIENT',
+  23: 'PAUSE_WINDOW_EXCEEDED',
+  24: 'INVALID_STATE_TRANSITION',
 };
 
 /**
@@ -813,6 +983,7 @@ const ESCROW_ERROR_CODES: Record<number, EscrowErrorCode> = {
   6: 'DEADLINE_NOT_REACHED',
   7: 'DEADLINE_EXPIRED',
   8: 'ALREADY_FINALIZED',
+  // Code 2 is intentionally absent; it is retired in the contract enum.
   9: 'INVALID_DEADLINE',
   10: 'MILESTONE_SCHEDULE_NOT_FOUND',
   11: 'MILESTONE_INDEX_OUT_OF_RANGE',
@@ -879,6 +1050,13 @@ abstract class SorobanClient {
   constructor(options: StreamsClientOptions) {
     this.options = options;
     const urls = configuredRpcUrls(options);
+    const timeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    // Every per-host transport gets its own timeout, inside the failover
+    // layer, so a hung host rotates to the next one like any other failure.
+    const endpoint = (url: string, transport: StreamsTransport) => ({
+      url,
+      transport: new TimeoutTransport(transport, timeoutMs, url),
+    });
     if (options.transport instanceof FailoverTransport) {
       this.rpc = options.transport;
     } else if (Array.isArray(options.transport)) {
@@ -886,18 +1064,14 @@ abstract class SorobanClient {
         throw new Error('Pass at least one injected transport, or leave `transport` unset.');
       }
       this.rpc = new FailoverTransport(
-        options.transport.map((transport, index) => ({
-          url: urls[index] ?? `injected transport ${index + 1}`,
-          transport,
-        })),
+        options.transport.map((transport, index) =>
+          endpoint(urls[index] ?? `injected transport ${index + 1}`, transport),
+        ),
         options.onRpcFailover,
       );
     } else if (options.transport) {
       const url = urls[0] ?? 'injected transport';
-      this.rpc = new FailoverTransport(
-        [{ url, transport: options.transport }],
-        options.onRpcFailover,
-      );
+      this.rpc = new FailoverTransport([endpoint(url, options.transport)], options.onRpcFailover);
     } else {
       if (urls.length === 0) {
         throw new Error('Configure at least one RPC endpoint with `rpcUrl` or `rpcUrls`.');
@@ -906,7 +1080,7 @@ abstract class SorobanClient {
         options.transportFactory ??
         ((url: string) => new SorobanRpc.Server(url) as StreamsTransport);
       this.rpc = new FailoverTransport(
-        urls.map((url) => ({ url, transport: create(url) })),
+        urls.map((url) => endpoint(url, create(url))),
         options.onRpcFailover,
       );
     }
@@ -1069,6 +1243,10 @@ abstract class SorobanClient {
     }
     const signal = opts.signal ?? this.options.signal;
     const fee = opts.fee === undefined ? DEFAULT_WRITE_FEE : validateFee(opts.fee);
+    // Enforce the fee ceiling before any transaction is built or a wallet
+    // prompt is opened. The stricter of the client and per-call maxFee wins.
+    const maxFee = maxFeeLimit(this.options.maxFee, opts.maxFee);
+    assertWithinMaxFee(fee, maxFee);
     const memo = opts.memo === undefined ? undefined : toMemo(opts.memo);
 
     // A cached sequence can go stale if the account transacted elsewhere; in
@@ -1120,7 +1298,10 @@ abstract class SorobanClient {
 
       let hash: string;
       try {
-        hash = await this.submit(this.options.feeBump ? await this.bumpFees(inner) : inner, signal);
+        hash = await this.submit(
+          this.options.feeBump ? await this.bumpFees(inner, maxFee) : inner,
+          signal,
+        );
       } catch (error) {
         this.invalidateAccount();
         if (error instanceof StaleSequenceError && attempt === 0) continue;
@@ -1162,7 +1343,7 @@ abstract class SorobanClient {
    * @throws StreamsError when the sponsor's signer returns something other than
    * a signed fee-bump envelope.
    */
-  private async bumpFees(inner: Transaction): Promise<FeeBumpTransaction> {
+  private async bumpFees(inner: Transaction, maxFee?: string): Promise<FeeBumpTransaction> {
     const { feeBump } = this.options;
     if (!feeBump) {
       throw new Error('bumpFees called without a feeBump hook.');
@@ -1177,6 +1358,8 @@ abstract class SorobanClient {
       baseFee === undefined
         ? ceilDiv(BigInt(inner.fee), BigInt(inner.operations.length)).toString()
         : String(baseFee);
+    // The outer (sponsor) fee is capped by the same ceiling as the inner fee.
+    assertWithinMaxFee(rate, maxFee);
 
     const unsigned = TransactionBuilder.buildFeeBumpTransaction(
       feeSource,
@@ -1310,6 +1493,16 @@ export interface CreateStreamsEntry {
   /** Unix seconds before which nothing is claimable; between start and end. */
   cliffTime: number;
 }
+
+/**
+ * Arguments for {@link StreamsClient.createStreamFromAmount}. Same as
+ * {@link CreateStreamParams}, but `amount` is a human-readable decimal string in
+ * the token's display unit (for example `'12.5'` XLM) instead of smallest units.
+ */
+export type CreateStreamFromAmountParams = Omit<CreateStreamParams, 'amount'> & {
+  /** Human-readable amount in the token's display unit, e.g. `'12.5'`. */
+  amount: string;
+};
 
 /** Arguments for {@link StreamsClient.createStreams}. */
 export interface CreateStreamsParams {
@@ -1755,6 +1948,68 @@ export class StreamsClient extends SorobanClient {
   }
 
   /**
+   * Like {@link createStream}, but takes a human-readable amount in the token's
+   * display unit instead of smallest units. The scale comes from the token's
+   * own `decimals()`, read through the cached {@link getTokenMetadata} — no
+   * extra metadata round trip on repeat calls with the same token.
+   *
+   * `amount` is a plain decimal string (`'12.5'`, `'.5'`, `'100'`). Fractional
+   * digits beyond the token's precision are truncated toward zero, matching
+   * {@link parseTokenAmount} from `@stellar-starter-kit/utils`. The scaled value
+   * must be a positive integer that fits in an `i128`, otherwise it throws
+   * before the transaction is built or a wallet prompt is opened.
+   *
+   * All other fields are validated before the metadata lookup. The contract
+   * call itself is identical to `createStream`'s, so simulation errors and
+   * write options behave the same way.
+   *
+   * @param params - Same as {@link CreateStreamParams}, except `amount` is a
+   *   decimal string in the token's display unit.
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns The hash of the confirmed transaction.
+   * @throws Error when a field is invalid, `amount` does not scale to a
+   *   positive `i128`, or the token metadata cannot be read.
+   * @throws StreamsError when the contract rejects the stream.
+   * @example
+   * ```typescript
+   * // A 7-decimal token: 12.5 -> 125000000 stroops.
+   * const { hash } = await client.createStreamFromAmount({
+   *   sender: address,
+   *   recipient,
+   *   token: xlmSac,
+   *   amount: '12.5',
+   *   startTime: now,
+   *   endTime: now + 86_400,
+   *   cliffTime: now,
+   * });
+   * ```
+   */
+  async createStreamFromAmount<O extends WriteOptions = WriteOptions>(
+    params: CreateStreamFromAmountParams,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    const label = params.label ?? '';
+    const reference = params.reference ?? '';
+    // Validate everything that does not need token metadata up front, so a
+    // malformed schedule or address never costs a network round trip.
+    assertAddress(params.sender, 'sender');
+    assertAddress(params.recipient, 'recipient');
+    assertTokenId(params.token);
+    assertSchedule(params.startTime, params.endTime, params.cliffTime);
+    assertMetadata(label, reference);
+
+    const { decimals } = await this.getTokenMetadata(params.token);
+    const amount = parseTokenAmount(params.amount, decimals);
+    if (amount <= 0n) {
+      throw new Error(`Invalid amount: ${params.amount}. Must be greater than 0.`);
+    }
+    if (amount > I128_MAX) {
+      throw new Error(`Invalid amount: ${params.amount}. Must fit in a signed 128-bit integer.`);
+    }
+    return this.createStream({ ...params, amount: amount.toString() }, opts);
+  }
+
+  /**
    * Create up to {@link MAX_BATCH_STREAMS} streams in one transaction, the
    * payroll path: `sender` funds every stream and authorizes once, instead of
    * sending one transaction per recipient.
@@ -1989,6 +2244,86 @@ export class StreamsClient extends SorobanClient {
       opts,
     );
   }
+
+  /**
+   * Add funds to an existing stream, extending its schedule so the payment
+   * rate stays the same. Only the stream's sender may top it up, and the stream
+   * must still be streaming — cancelled and completed streams are rejected.
+   *
+   * `amount` is in the token's smallest unit, as a positive decimal integer
+   * string (or a `bigint`). It is validated before a transaction is built or a
+   * wallet prompt is opened, and encoded as the contract's `i128` argument.
+   *
+   * @param id - Stream id as `bigint`, `number`, or decimal string.
+   * @param amount - Positive amount to add, in the token's smallest unit.
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns The hash of the confirmed transaction.
+   * @throws Error when `amount` is not a positive decimal integer that fits in
+   *   an `i128`, or no `publicKey` / `signTransaction` was configured.
+   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`,
+   *   `UNAUTHORIZED`, `STREAM_COMPLETED` or `AMOUNT_OVERFLOW`.
+   * @example
+   * ```typescript
+   * const { hash } = await client.topUp(stream.id, '1000000000'); // 100 XLM
+   * ```
+   */
+  async topUp<O extends WriteOptions = WriteOptions>(
+    id: bigint | number | string,
+    amount: string | bigint,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    const value = parseAmount(amount.toString());
+    return this.invoke(
+      'top_up',
+      [nativeToScVal(BigInt(id), { type: 'u64' }), nativeToScVal(value, { type: 'i128' })],
+      opts,
+    );
+  }
+
+  /**
+   * Reduce a stream's total deposit, refunding the difference to the sender.
+   * Only the sender may reduce a stream. `newTotal` is the new total amount in
+   * the token's smallest unit, as a positive decimal integer string (or a
+   * `bigint`); it must be below the current total and at least what has already
+   * vested, as enforced by the contract.
+   *
+   * The amount is validated before a transaction is built or a wallet prompt
+   * is opened, and encoded as the contract's `i128` argument.
+   *
+   * @param id - Stream id as `bigint`, `number`, or decimal string.
+   * @param newTotal - New total amount, in the token's smallest unit.
+   * @param opts - per-call write options; `opts.signal` aborts the prompt, submission and poll.
+   * @returns The hash of the confirmed transaction.
+   * @throws Error when `newTotal` is not a positive decimal integer that fits
+   *   in an `i128`, or no `publicKey` / `signTransaction` was configured.
+   * @throws StreamsError when the contract rejects the call — `STREAM_NOT_FOUND`,
+   *   `UNAUTHORIZED`, `ALREADY_CANCELLED`, `REDUCTION_BELOW_VESTED`,
+   *   `INVALID_REDUCTION` or `AMOUNT_OVERFLOW`.
+   * @example
+   * ```typescript
+   * const { hash } = await client.reduceStream(stream.id, '500000000'); // halve a 100 XLM stream
+   * ```
+   */
+  async reduceStream<O extends WriteOptions = WriteOptions>(
+    id: bigint | number | string,
+    newTotal: string | bigint,
+    opts: O = {} as O,
+  ): Promise<WriteResultFor<O>> {
+    const value = parseAmount(newTotal.toString());
+    return this.invoke(
+      'reduce_stream',
+      [nativeToScVal(BigInt(id), { type: 'u64' }), nativeToScVal(value, { type: 'i128' })],
+      opts,
+    );
+  }
+}
+
+/** An escrow's milestone schedule, as returned by {@link EscrowClient.getMilestones}. */
+export interface EscrowMilestones {
+  /** Each milestone's amount in the token's smallest unit, as a decimal string. */
+  amounts: string[];
+  /** `released[i]` is `true` once milestone `i` has been paid to the payee. */
+  released: boolean[];
 }
 
 /**
@@ -2009,6 +2344,23 @@ export class EscrowClient extends SorobanClient {
     return raw === null ? null : normalizeEscrow(raw);
   }
 
+  /**
+   * The id the next escrow will receive.
+   *
+   * @returns The pending escrow id, starting at `1n` on a fresh deployment.
+   * @throws EscrowError when the simulation fails with a contract error.
+   * @example
+   * ```typescript
+   * const nextId = await client.nextEscrowId();
+   * const { hash } = await client.createEscrow({ ...params, id: nextId });
+   * // `nextId` is the id this write consumed, so the escrow can be read back:
+   * const created = await client.getEscrow(nextId);
+   * ```
+   */
+  async nextEscrowId(): Promise<bigint> {
+    return (await this.simulate('next_escrow_id')) as bigint;
+  }
+
   /** Whether the zero-based milestone index has already been released. */
   async isMilestoneReleased(id: bigint | number | string, index: number): Promise<boolean> {
     return (await this.simulate(
@@ -2016,6 +2368,47 @@ export class EscrowClient extends SorobanClient {
       nativeToScVal(BigInt(id), { type: 'u64' }),
       nativeToScVal(index, { type: 'u32' }),
     )) as boolean;
+  }
+
+  /**
+   * Fetch an escrow's milestone schedule and which milestones have been paid.
+   *
+   * Returns `null` when the escrow has no schedule (a plain, single-release
+   * escrow, or an unknown id). Otherwise `amounts[i]` is milestone `i`'s amount
+   * in the token's smallest unit, as a decimal string, and `released[i]` says
+   * whether it has been paid out. The released flags are read in parallel, one
+   * `is_milestone_released` simulation per milestone.
+   *
+   * @example
+   * ```typescript
+   * const schedule = await escrowClient.getMilestones(7);
+   * // => { amounts: ['250', '750'], released: [true, false] }
+   * ```
+   */
+  async getMilestones(id: bigint | number | string): Promise<EscrowMilestones | null> {
+    const escrowId = nativeToScVal(BigInt(id), { type: 'u64' });
+    const raw = await this.simulate('get_milestones', escrowId);
+    if (raw === null || raw === undefined) return null;
+    if (!Array.isArray(raw)) {
+      throw new Error('Unexpected get_milestones response: expected a list of amounts.');
+    }
+    const amounts = raw.map((amount) => {
+      if (typeof amount !== 'bigint') {
+        throw new Error('Unexpected get_milestones response: expected i128 amounts.');
+      }
+      return amount.toString();
+    });
+    const released = await Promise.all(
+      amounts.map(
+        async (_, index) =>
+          (await this.simulate(
+            'is_milestone_released',
+            escrowId,
+            nativeToScVal(index, { type: 'u32' }),
+          )) === true,
+      ),
+    );
+    return { amounts, released };
   }
 
   /**
@@ -2149,6 +2542,35 @@ function validateFee(fee: string): string {
     throw new Error(`Invalid fee: ${fee}. Must be greater than 0.`);
   }
   return value.toString();
+}
+
+/** Validates a fee ceiling and normalises it to a decimal string. */
+function validateMaxFee(maxFee: string): string {
+  if (!/^\d+$/.test(maxFee)) {
+    throw new Error(`Invalid maxFee: ${maxFee}. Expected a decimal integer string of stroops.`);
+  }
+  const value = BigInt(maxFee);
+  if (value <= 0n) {
+    throw new Error(`Invalid maxFee: ${maxFee}. Must be greater than 0.`);
+  }
+  return value.toString();
+}
+
+/** The stricter (lower) of the client and per-call fee ceilings, or `undefined`. */
+function maxFeeLimit(clientMaxFee?: string, callMaxFee?: string): string | undefined {
+  const client = clientMaxFee === undefined ? undefined : BigInt(validateMaxFee(clientMaxFee));
+  const call = callMaxFee === undefined ? undefined : BigInt(validateMaxFee(callMaxFee));
+  if (client === undefined) return callMaxFee;
+  if (call === undefined) return clientMaxFee;
+  return call < client ? callMaxFee : clientMaxFee;
+}
+
+/** Throws when `fee` exceeds `maxFee`, naming both values. */
+function assertWithinMaxFee(fee: string, maxFee?: string): void {
+  if (maxFee === undefined) return;
+  if (BigInt(fee) > BigInt(validateMaxFee(maxFee))) {
+    throw new Error(`Fee ${fee} stroops exceeds the maximum allowed fee of ${maxFee} stroops.`);
+  }
 }
 
 /** Maximum value of a Stellar id memo: an unsigned 64-bit integer. */
