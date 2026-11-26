@@ -1,12 +1,20 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import type { WalletAdapter } from './adapters/adapter.js';
+import {
+  networkMismatchMessage,
+  PUBLIC_NETWORK_PASSPHRASE,
+  TESTNET_PASSPHRASE,
+  type WalletAdapter,
+} from './adapters/adapter.js';
 import type { WatchAdapter } from './adapters/watch.js';
 import { isUserRejection, NotSupportedError, toSigningError } from './errors.js';
 import { getWalletCapabilities, type WalletCapabilities } from './capabilities.js';
 
-export type WalletType = 'watch' | 'freighter' | 'albedo' | 'rabe' | 'hana' | 'ledger';
+export type WalletType = 'watch' | 'freighter' | 'albedo' | 'rabe' | 'hana' | 'ledger' | 'xbull';
+
+export { networkMismatchMessage, PUBLIC_NETWORK_PASSPHRASE, TESTNET_PASSPHRASE };
+export const MAINNET_PASSPHRASE = PUBLIC_NETWORK_PASSPHRASE;
 
 export interface WalletContextType {
   activeAddress: string | null;
@@ -26,6 +34,8 @@ export interface WalletContextType {
   isConnecting: boolean;
   isRestoring: boolean;
   network: string;
+  /** Network passphrase reported by the connected wallet, or `null` if unreadable. */
+  walletNetworkPassphrase: string | null;
   error: string | null;
   connect: (provider: WalletType, address?: string) => Promise<void>;
   disconnect: () => void;
@@ -65,6 +75,7 @@ const ADAPTER_LOADERS: Record<WalletType, () => Promise<WalletAdapter>> = {
   rabe: async () => new (await import('./adapters/rabe.js')).RabetAdapter(),
   hana: async () => new (await import('./adapters/hana.js')).HanaAdapter(),
   ledger: async () => new (await import('./adapters/ledger.js')).LedgerAdapter(),
+  xbull: async () => new (await import('./adapters/xbull.js')).XBullAdapter(),
 };
 
 /**
@@ -96,7 +107,13 @@ function isWalletProvider(value: string): value is WalletType {
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [activeAddress, setActiveAddress] = useState<string | null>(null);
   const [activeProvider, setActiveProvider] = useState<WalletType | null>(null);
-  const [network, setNetwork] = useState<string>('TESTNET');
+  const [network, setNetworkState] = useState<string>('TESTNET');
+  const networkRef = useRef(network);
+  const setNetwork = useCallback((nextNetwork: string) => {
+    networkRef.current = nextNetwork;
+    setNetworkState(nextNetwork);
+  }, []);
+  const [walletNetworkPassphrase, setWalletNetworkPassphrase] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   /** True while a persisted session is being verified against the extension. */
@@ -136,6 +153,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     const provider = activeProvider;
     setActiveAddress(null);
     setActiveProvider(null);
+    setWalletNetworkPassphrase(null);
     setError(null);
     localStorage.removeItem(LOCAL_STORAGE_KEY_PROVIDER);
     localStorage.removeItem(LOCAL_STORAGE_KEY_ADDRESS);
@@ -212,6 +230,22 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!activeProvider) {
+      setWalletNetworkPassphrase(null);
+      return;
+    }
+    let cancelled = false;
+    void adapterFor(activeProvider)
+      .then((adapter) => adapter.getNetworkPassphrase?.() ?? null)
+      .then((passphrase) => {
+        if (!cancelled) setWalletNetworkPassphrase(passphrase);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProvider, network]);
+
   /** Signs through the active adapter and logs failures at the right level. */
   const signWith = useCallback(
     async (
@@ -232,12 +266,17 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
       const passphrase =
         opts?.networkPassphrase ||
-        (network === 'TESTNET'
-          ? 'Test SDF Network ; September 2015'
-          : 'Public Global Stellar Network ; September 2015');
+        (networkRef.current === 'TESTNET' ? TESTNET_PASSPHRASE : PUBLIC_NETWORK_PASSPHRASE);
+
+      if (walletNetworkPassphrase && walletNetworkPassphrase !== passphrase) {
+        throw new Error(networkMismatchMessage(passphrase, walletNetworkPassphrase));
+      }
 
       try {
-        return await sign.call(adapter, xdr, { networkPassphrase: passphrase, network });
+        return await sign.call(adapter, xdr, {
+          networkPassphrase: passphrase,
+          network: networkRef.current,
+        });
       } catch (err) {
         const error = toSigningError(err, `Failed to sign ${noun}.`);
         if (isUserRejection(error.message)) {
@@ -248,7 +287,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         throw error;
       }
     },
-    [activeProvider, activeAddress, network],
+    [activeProvider, activeAddress, walletNetworkPassphrase],
   );
 
   const signTransaction = useCallback(
@@ -280,6 +319,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         isConnecting,
         isRestoring,
         network,
+        walletNetworkPassphrase,
         error,
         connect,
         disconnect,

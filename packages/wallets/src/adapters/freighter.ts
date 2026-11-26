@@ -65,6 +65,22 @@ export class FreighterAdapter implements WalletAdapter {
     return res.address;
   }
 
+  async getNetworkPassphrase(): Promise<string | null> {
+    const api = await freighterApi();
+    try {
+      const details = await api.getNetworkDetails?.();
+      if (details?.networkPassphrase) return details.networkPassphrase;
+    } catch {
+      // Older Freighter versions do not expose getNetworkDetails.
+    }
+    try {
+      const details = await api.getNetwork?.();
+      return details?.networkPassphrase || null;
+    } catch {
+      return null;
+    }
+  }
+
   async signTransaction(xdr: string, opts?: SignTransactionOptions): Promise<string> {
     const { signTransaction } = await freighterApi();
     const { signedTxXdr } = await signTransaction(xdr, {

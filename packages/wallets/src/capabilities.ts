@@ -92,6 +92,14 @@ export const WALLET_CAPABILITIES: Record<WalletType, WalletCapabilities> = {
     hardware: true,
     deepLink: false,
   },
+  xbull: {
+    wallet: 'xbull',
+    name: 'xBull',
+    readOnly: false,
+    signAuthEntry: false,
+    hardware: false,
+    deepLink: false,
+  },
 };
 
 /** Capabilities of one wallet; `null` for an id that is not a supported wallet. */
