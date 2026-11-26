@@ -75,6 +75,11 @@ export function Footer() {
                   Streams App
                 </a>
               </li>
+              <li>
+                <a href="/settings" className="transition-colors hover:text-white">
+                  Network &amp; settings
+                </a>
+              </li>
             </ul>
           </div>
 

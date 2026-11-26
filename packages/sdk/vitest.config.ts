@@ -11,10 +11,25 @@ export default defineConfig({
       '@stellar-starter-kit/utils': fileURLToPath(
         new URL('../utils/src/index.ts', import.meta.url),
       ),
+      // The shared testing package is consumed from source so `vitest run` works
+      // without building it first; its `dist` is not produced by the test job.
+      '@stellar-starter-kit/testing': fileURLToPath(
+        new URL('../testing/src/index.ts', import.meta.url),
+      ),
     },
   },
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+  },
+
+  // Writes coverage/coverage-summary.json, which scripts/coverage-report.mjs merges
+  // into the per-package coverage report posted on pull requests.
+  coverage: {
+    provider: 'v8',
+    reporter: ['text-summary', 'json-summary'],
+    reportsDirectory: './coverage',
+    include: ['src/**/*.{ts,tsx}'],
+    exclude: ['src/**/*.test.{ts,tsx}', 'src/**/*.d.ts', 'src/**/generated/**'],
   },
 });

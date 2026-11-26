@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import { ToastProvider } from '@stellar-starter-kit/ui';
 import { WalletProvider } from '@stellar-starter-kit/wallets';
 import { ThemeProvider } from '../components/theme/ThemeProvider';
 import { THEME_INIT_SCRIPT } from '../lib/theme';
@@ -26,7 +27,9 @@ export default function RootLayout({
       </head>
       <body className="antialiased">
         <ThemeProvider>
-          <WalletProvider>{children}</WalletProvider>
+          <WalletProvider>
+            <ToastProvider>{children}</ToastProvider>
+          </WalletProvider>
         </ThemeProvider>
       </body>
     </html>
