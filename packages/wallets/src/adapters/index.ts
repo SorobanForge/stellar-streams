@@ -21,3 +21,17 @@ export type {
   LedgerStellarApp,
   LedgerTransport,
 } from './ledger.js';
+export {
+  WalletConnectAdapter,
+  STELLAR_CHAIN_TESTNET,
+  STELLAR_CHAIN_PUBKEY,
+  parseCaip10Address,
+  toStellarChainId,
+} from './walletconnect.js';
+export type {
+  WalletConnectAdapterOptions,
+  WalletConnectClient,
+  WalletConnectClientLoader,
+  WalletConnectSession,
+  WalletConnectSessionProposal,
+} from './walletconnect.js';

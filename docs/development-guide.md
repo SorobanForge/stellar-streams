@@ -272,3 +272,67 @@ exported members in `packages/sdk/src/index.ts` and re-run the command above to
 refresh the reference. The build reports `Found 0 errors and 0 warnings` when
 every `{@link}` resolves; a broken intra-package link surfaces there as a
 warning, not a silent gap.
+
+---
+
+## 4. GitHub Actions Pinning Policy
+
+To guard against supply-chain compromise, all workflows pin third-party actions to full commit SHAs.
+
+### Policy
+
+1. **Third-party actions:** Every `uses:` statement outside the `actions/*` namespace must reference a full 40-character commit SHA, with the human-readable version tag documented in a trailing comment:
+   ```yaml
+   uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+   ```
+2. **Official actions:** Actions within the `actions/*` namespace (`actions/checkout`, `actions/setup-node`, `actions/cache`) remain on vetted major release tags (`@v7`, `@v6`). These are maintained directly by GitHub infrastructure and reviewed under their security lifecycle.
+3. **Auditability:** Pinned SHAs prevent tag-mutation attacks where a compromised tag points to malicious code without altering repository diffs.
+
+### How to Bump a Pinned Action
+
+To bump a pinned action to a new release:
+
+1. Lookup the target release tag and resolve its full commit SHA via the GitHub API or CLI:
+   ```bash
+   gh api repos/<owner>/<repo>/commits/<tag> --jq '.sha'
+   ```
+2. Update the workflow file with the returned commit SHA and update the trailing comment:
+   ```yaml
+   uses: <owner>/<repo>@<new-commit-sha> # <tag>
+   ```
+3. Run the workflow on a feature branch to verify that inputs and outputs remain compatible before merging to main.
+
+---
+
+## Malware Scan and Supply-Chain Guard
+
+Every pull request is automatically verified against malware and supply-chain threats before merge via `.github/workflows/malware-scan.yml` and `scripts/check-pr-supply-chain.mjs`.
+
+### What Is Checked
+
+- **ClamAV Anti-Malware:** Scans all committed and tracked files against an updated ClamAV database to flag trojans, viruses, and compromised binaries.
+- **Supply-Chain Guard:** Analyzes the diff against `origin/main` to detect:
+  - Dangerous lifecycle scripts (`preinstall`, `install`, `postinstall`).
+  - Registry overrides in `.npmrc`, `.yarnrc`, and `.pnpmfile.cjs`.
+  - Committed executable binaries or WASM modules.
+  - Suspicious download-and-execute shell one-liners.
+
+### How to Resolve Failures
+
+- **Lifecycle script flagged:** Replace lifecycle scripts in `package.json` with explicit commands in build or test scripts.
+- **Registry override flagged:** Remove custom registry URLs or auth tokens from package manager configuration files; all packages must resolve from the public npm registry.
+- **Committed binary flagged:** Remove binary files from git tracking. Binaries must be compiled during CI or downloaded dynamically via scripts.
+- **ClamAV alert:** Inspect the flagged file. If malicious, remove it immediately. For false positives, reach out to security maintainers.
+
+### Local Reproduction
+
+```bash
+# Verify supply-chain diff locally
+node scripts/check-pr-supply-chain.mjs --base origin/main
+
+# Verify tracked files with ClamAV locally
+git ls-files > /tmp/files-to-scan.txt
+clamscan --file-list=/tmp/files-to-scan.txt --infected --no-summary --max-filesize=50M --max-scansize=200M
+```
+
+For complete policy and threat analysis, refer to [SECURITY.md](../SECURITY.md#malware-scanning-and-supply-chain-guards).
