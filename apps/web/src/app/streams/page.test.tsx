@@ -70,6 +70,12 @@ vi.mock('next/dynamic', () => ({
   },
 }));
 
+// The header hosts the theme toggle, which needs the app's ThemeProvider; the
+// header chrome is not what these tests exercise.
+vi.mock('../../components/AppHeader', () => ({
+  AppHeader: () => null,
+}));
+
 vi.mock('next/link', () => ({
   default: ({ children, href, ...rest }: { children: React.ReactNode; href: string }) => (
     <a href={href} {...rest}>
