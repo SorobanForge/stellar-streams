@@ -6,7 +6,16 @@ import Link from 'next/link';
 import { Logo } from './Logo';
 import { REPO_URL } from '../constants';
 
-export function Header() {
+export interface HeaderProps {
+  /**
+   * Extra controls rendered before the repository link, e.g. the dashboard's
+   * theme toggle. Kept as a slot so this package does not depend on the app's
+   * theme provider.
+   */
+  actions?: React.ReactNode;
+}
+
+export function Header({ actions }: HeaderProps = {}) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -40,13 +49,13 @@ export function Header() {
   }, [isMenuOpen]);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-slate-900/80 bg-[#07070e]/80 backdrop-blur-md">
+    <header className="border-border bg-background/80 sticky top-0 z-50 border-b backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
         <Link href="/" className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-tr from-purple-600 to-cyan-500 text-white">
             <Logo size={18} />
           </div>
-          <span className="font-extrabold tracking-wider text-white">Stellar Streams</span>
+          <span className="text-foreground font-extrabold tracking-wider">Stellar Streams</span>
         </Link>
 
         {/* Mobile menu button */}
@@ -56,7 +65,7 @@ export function Header() {
           onClick={() => setIsMenuOpen((open) => !open)}
           aria-controls="mobile-menu"
           aria-expanded={isMenuOpen}
-          className="flex items-center gap-2 rounded-lg p-2 text-slate-300 hover:bg-slate-900/50 hover:text-white md:hidden"
+          className="text-muted-foreground hover:bg-secondary hover:text-foreground flex items-center gap-2 rounded-lg p-2 md:hidden"
         >
           <span className="sr-only">{isMenuOpen ? 'Close main menu' : 'Open main menu'}</span>
           {/* Hamburger icon */}
@@ -82,33 +91,37 @@ export function Header() {
         </button>
 
         {/* Desktop navigation */}
-        <nav className="hidden items-center gap-8 text-sm font-medium text-slate-300 md:flex">
-          <a href="/#protocol" className="transition-colors hover:text-white">
+        <nav className="text-muted-foreground hidden items-center gap-8 text-sm font-medium md:flex">
+          <a href="/#protocol" className="hover:text-foreground transition-colors">
             Protocol
           </a>
-          <a href="/#sdk" className="transition-colors hover:text-white">
+          <a href="/#sdk" className="hover:text-foreground transition-colors">
             SDK
           </a>
-          <a href="/#roadmap" className="transition-colors hover:text-white">
+          <a href="/#roadmap" className="hover:text-foreground transition-colors">
             Roadmap
           </a>
-          <Link href="/docs" className="flex items-center gap-1 transition-colors hover:text-white">
+          <Link
+            href="/docs"
+            className="hover:text-foreground flex items-center gap-1 transition-colors"
+          >
             Docs <ExternalLink className="h-3.5 w-3.5" />
           </Link>
           <Link
             href="/streams"
-            className="font-semibold text-cyan-400 transition-colors hover:text-cyan-300"
+            className="font-semibold text-cyan-700 transition-colors hover:text-cyan-600 dark:text-cyan-400 dark:hover:text-cyan-300"
           >
             Streams App
           </Link>
         </nav>
 
         <div className="flex items-center gap-4">
+          {actions}
           <a
             href={REPO_URL}
             target="_blank"
             rel="noreferrer"
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-800 bg-slate-900/50 text-slate-300 transition-colors hover:bg-slate-900 hover:text-white"
+            className="border-border bg-card text-muted-foreground hover:bg-secondary hover:text-foreground flex h-9 w-9 items-center justify-center rounded-lg border transition-colors"
             aria-label="GitHub Repository"
           >
             <Github className="h-5 w-5" />
@@ -127,7 +140,7 @@ export function Header() {
         <div
           ref={panelRef}
           id="mobile-menu"
-          className="fixed inset-x-0 top-16 z-40 flex items-center justify-center bg-[#07070e]/90 px-4 pb-6 backdrop-blur-md"
+          className="bg-background/95 fixed inset-x-0 top-16 z-40 flex items-center justify-center px-4 pb-6 backdrop-blur-md"
           role="menu"
           aria-orientation="vertical"
           aria-label="Mobile menu"
@@ -135,35 +148,35 @@ export function Header() {
           <div className="w-full max-w-xs space-y-2">
             <a
               href="/#protocol"
-              className="block rounded-md px-3 py-2 text-base font-medium text-slate-300 hover:bg-slate-900/50 hover:text-white"
+              className="text-muted-foreground hover:bg-secondary hover:text-foreground block rounded-md px-3 py-2 text-base font-medium"
               onClick={() => setIsMenuOpen(false)}
             >
               Protocol
             </a>
             <a
               href="/#sdk"
-              className="block rounded-md px-3 py-2 text-base font-medium text-slate-300 hover:bg-slate-900/50 hover:text-white"
+              className="text-muted-foreground hover:bg-secondary hover:text-foreground block rounded-md px-3 py-2 text-base font-medium"
               onClick={() => setIsMenuOpen(false)}
             >
               SDK
             </a>
             <a
               href="/#roadmap"
-              className="block rounded-md px-3 py-2 text-base font-medium text-slate-300 hover:bg-slate-900/50 hover:text-white"
+              className="text-muted-foreground hover:bg-secondary hover:text-foreground block rounded-md px-3 py-2 text-base font-medium"
               onClick={() => setIsMenuOpen(false)}
             >
               Roadmap
             </a>
             <Link
               href="/docs"
-              className="flex items-center gap-1 rounded-md px-3 py-2 text-base font-medium text-slate-300 hover:bg-slate-900/50 hover:text-white"
+              className="text-muted-foreground hover:bg-secondary hover:text-foreground flex items-center gap-1 rounded-md px-3 py-2 text-base font-medium"
               onClick={() => setIsMenuOpen(false)}
             >
               Docs <ExternalLink className="h-3.5 w-3.5" />
             </Link>
             <Link
               href="/streams"
-              className="block rounded-md px-3 py-2 text-base font-semibold text-cyan-400 hover:text-cyan-300"
+              className="block rounded-md px-3 py-2 text-base font-semibold text-cyan-700 hover:text-cyan-600 dark:text-cyan-400 dark:hover:text-cyan-300"
               onClick={() => setIsMenuOpen(false)}
             >
               Streams App

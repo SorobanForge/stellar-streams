@@ -132,7 +132,7 @@ describe('StatusBadge', () => {
     render(<StatusBadge status={status} />);
     const badge = screen.getByText('Unknown');
     expect(badge.getAttribute('data-status')).toBe('unknown');
-    expect(badge.className).toContain('text-slate-300');
+    expect(badge.className).toContain('text-muted-foreground');
   });
 
   it('accepts a custom className', () => {

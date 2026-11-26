@@ -492,13 +492,67 @@ export function normalizeEscrowSchedule(amounts: unknown, released: unknown): Es
 }
 
 /**
- * Inputs for `create_escrow`. `id` is chosen by the caller (the escrow
- * contract does not allocate ids), and `amount` is a decimal string in the
- * token's smallest unit — scale it by the token's own `decimals()`, which is
- * 7 for XLM and SACs but not for every token.
+ * Live totals for an escrow, derived from its milestone schedule.
+ *
+ * Every amount stays in the token's smallest unit as a `bigint`:
+ * - `remainingAmount` is what the contract still holds for the payee, i.e. the
+ *   sum of every unreleased milestone (the full amount without a schedule).
+ * - `refundableAmount` is what the payer can recover through a refund or a
+ *   post-deadline cancel, i.e. the amount minus everything already released.
+ * - `releasedAmount` is the part of the escrow already paid to the payee.
+ *
+ * For a milestone escrow `remainingAmount` and `refundableAmount` are equal;
+ * they diverge only for a non-milestone escrow, where nothing is released
+ * until the single payout and both equal the full amount.
+ */
+export interface EscrowTotals {
+  remainingAmount: bigint;
+  refundableAmount: bigint;
+  releasedAmount: bigint;
+}
+
+/**
+ * Compute the remaining and refundable amounts of an escrow from its schedule.
+ *
+ * This is a pure projection of the values the contract derives in
+ * `remaining_amount` and `refundable_amount`, so a dashboard can update the
+ * numbers as soon as an arbiter releases a milestone instead of waiting for a
+ * refetch. A partially inconsistent schedule (one that releases more than the
+ * escrow amount) clamps both totals at zero rather than reporting a negative
+ * amount.
+ */
+export function getEscrowTotals(
+  escrow: Pick<Escrow, 'amount'>,
+  schedule: EscrowSchedule | null,
+): EscrowTotals {
+  const amount = BigInt(escrow.amount);
+  if (!schedule) {
+    return { remainingAmount: amount, refundableAmount: amount, releasedAmount: 0n };
+  }
+
+  const releasedAmount = schedule.milestones.reduce(
+    (total, milestone) => (milestone.released ? total + milestone.amount : total),
+    0n,
+  );
+  const pendingAmount = schedule.milestones.reduce(
+    (total, milestone) => (milestone.released ? total : total + milestone.amount),
+    0n,
+  );
+  const unreleased = amount - releasedAmount;
+  return {
+    remainingAmount: pendingAmount,
+    refundableAmount: unreleased > 0n ? unreleased : 0n,
+    releasedAmount,
+  };
+}
+
+/**
+ * Inputs for `create_escrow`. The contract assigns the escrow id and returns
+ * it, and `amount` is a decimal string in the token's smallest unit — scale it
+ * by the token's own `decimals()`, which is 7 for XLM and SACs but not for
+ * every token.
  */
 export interface CreateEscrowParams {
-  id: string;
   payer: string;
   payee: string;
   arbiter: string;

@@ -1,13 +1,18 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { useWallet } from '@stellar-starter-kit/wallets';
 import { EscrowClient } from '@stellar-starter-kit/contracts';
-import { Footer, Header } from '@stellar-starter-kit/ui';
+import { EscrowClient as EscrowSdkClient } from '@stellar-starter-kit/sdk';
+import { Footer } from '@stellar-starter-kit/ui';
 import type { EnvironmentConfig } from '@stellar-starter-kit/config';
 import { environmentConfig, environmentErrors } from '../../lib/environment';
 import ConfigurationError from '../../components/ConfigurationError';
+import { AppHeader } from '../../components/AppHeader';
+import { MilestoneEscrowWizard } from '../../components/escrow/MilestoneEscrowWizard';
+import { ArbiterReleasePanel } from '../../components/escrow/ArbiterReleasePanel';
+import { probeMilestoneSupport, type MilestoneSupport } from '../../lib/escrow-milestones';
 import { normalizeEscrow, type RawEscrow, type Escrow } from '@stellar-starter-kit/types';
 import {
   ArrowLeft,
@@ -23,6 +28,7 @@ import {
   Ban,
   Undo2,
   Search,
+  Milestone,
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -82,7 +88,9 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
   } = useWallet();
 
   // State Variables
-  const [activeTab, setActiveTab] = useState<'create' | 'manage' | 'lookup'>('create');
+  const [activeTab, setActiveTab] = useState<'create' | 'manage' | 'lookup' | 'milestones'>(
+    'create',
+  );
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<boolean>(false);
@@ -103,6 +111,12 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
   const [lookupId, setLookupId] = useState<string>('');
   const [lookupResult, setLookupResult] = useState<Escrow | null>(null);
   const [lookupLoading, setLookupLoading] = useState<boolean>(false);
+
+  // Milestone escrow state
+  const [milestoneEscrowId, setMilestoneEscrowId] = useState<string>('');
+  const [milestoneSupport, setMilestoneSupport] = useState<MilestoneSupport | 'checking' | 'idle'>(
+    'idle',
+  );
 
   const addLog = useCallback(
     (type: LogEntry['type'], status: LogEntry['status'], details: string, hash?: string) => {
@@ -137,6 +151,37 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
       },
     });
   }, [activeAddress, signTransaction, contractId, sorobanRpcUrl, networkPassphrase]);
+
+  // Typed SDK client used by the milestone wizard and the arbiter release
+  // panel. The rest of the page still uses the generated bindings.
+  const milestoneClient = useMemo(
+    () =>
+      new EscrowSdkClient({
+        contractId,
+        rpcUrl: sorobanRpcUrl,
+        networkPassphrase,
+        publicKey: activeAddress ?? undefined,
+        signTransaction: async (txXdr: string) => signTransaction(txXdr),
+      }),
+    [activeAddress, signTransaction, contractId, sorobanRpcUrl, networkPassphrase],
+  );
+
+  // Gate the milestone UI on the contract feature itself: `get_milestones` only
+  // exists once the milestone-release contract change is deployed.
+  useEffect(() => {
+    if (!contractConfigured || !isConnected) {
+      setMilestoneSupport('idle');
+      return;
+    }
+    let cancelled = false;
+    setMilestoneSupport('checking');
+    void probeMilestoneSupport(milestoneClient).then((support) => {
+      if (!cancelled) setMilestoneSupport(support);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [contractConfigured, isConnected, milestoneClient]);
 
   // Set default caller to active address when it changes
   useEffect(() => {
@@ -332,31 +377,31 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#06060c] text-slate-100 selection:bg-purple-500/30 selection:text-purple-200">
+    <div className="bg-background text-foreground min-h-screen selection:bg-purple-500/30 selection:text-purple-200">
       {/* Background decoration */}
       <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
         <div className="absolute top-[-15%] left-[-15%] h-[60%] w-[60%] rounded-full bg-purple-900/10 blur-[150px]"></div>
         <div className="absolute right-[-15%] bottom-[-15%] h-[60%] w-[60%] rounded-full bg-cyan-900/10 blur-[150px]"></div>
       </div>
 
-      <Header />
+      <AppHeader />
 
       <main className="relative z-10 mx-auto max-w-6xl px-6 pt-12 pb-24">
         <div className="mb-8">
           <Link
             href="/"
-            className="inline-flex items-center gap-2 text-sm text-slate-400 transition-colors hover:text-white"
+            className="text-muted-foreground hover:text-foreground inline-flex items-center gap-2 text-sm transition-colors"
           >
             <ArrowLeft className="h-4 w-4" /> Back to Dashboard
           </Link>
         </div>
 
         {!contractConfigured && (
-          <div className="mb-8 flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-200">
+          <div className="mb-8 flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-800 dark:text-amber-200">
             <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
             <div>
               <p className="font-semibold">Escrow contract not configured</p>
-              <p className="mt-1 font-light text-amber-200/80">
+              <p className="mt-1 font-light text-amber-800/80 dark:text-amber-200/80">
                 Deploy the <code className="font-mono">escrow</code> contract and set its id in{' '}
                 <code className="font-mono">apps/web/.env.local</code> to enable this page.
               </p>
@@ -369,10 +414,10 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
           <span className="inline-flex items-center gap-1.5 rounded-full border border-purple-500/20 bg-purple-500/5 px-3 py-1 text-xs font-semibold tracking-wide text-purple-300">
             Escrow Contract Slice
           </span>
-          <h1 className="mt-4 text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
+          <h1 className="text-foreground mt-4 text-4xl font-extrabold tracking-tight sm:text-5xl">
             Escrow & Arbitrage Management
           </h1>
-          <p className="mt-3 text-lg font-light text-slate-400">
+          <p className="text-muted-foreground mt-3 text-lg font-light">
             Establish trustless token holdbacks, deposit funds, and manage releases/refunds via
             arbiters on Stellar.
           </p>
@@ -381,20 +426,20 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
           {/* Main Controls Card */}
           <div className="lg:col-span-8">
-            <div className="relative overflow-hidden rounded-2xl border border-slate-900 bg-slate-950/40 p-8 shadow-2xl backdrop-blur-md">
+            <div className="border-border bg-card relative overflow-hidden rounded-2xl border p-8 shadow-2xl">
               <div className="pointer-events-none absolute inset-0 bg-gradient-to-tr from-purple-500/5 to-cyan-500/5"></div>
 
               {/* Wallet connection panel */}
-              <div className="mb-8 flex items-center justify-between border-b border-slate-900 pb-6">
+              <div className="border-border mb-8 flex items-center justify-between border-b pb-6">
                 <div>
-                  <h2 className="text-slate-350 text-xs font-semibold tracking-wider uppercase">
+                  <h2 className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
                     Connection Info
                   </h2>
                   <div className="mt-1 flex items-center gap-2 text-xs">
                     {isConnected ? (
                       <>
                         <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500"></span>
-                        <span className="font-mono text-slate-400">
+                        <span className="text-muted-foreground font-mono">
                           {activeAddress?.substring(0, 8)}...
                           {activeAddress?.substring(activeAddress.length - 8)} ({activeProvider})
                         </span>
@@ -402,7 +447,7 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                     ) : (
                       <>
                         <span className="h-2 w-2 rounded-full bg-rose-500"></span>
-                        <span className="text-slate-400">Not Connected</span>
+                        <span className="text-muted-foreground">Not Connected</span>
                       </>
                     )}
                   </div>
@@ -412,7 +457,7 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                   {isConnected ? (
                     <button
                       onClick={disconnect}
-                      className="rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-1.5 text-xs font-semibold text-slate-300 transition-all hover:bg-slate-900 hover:text-white"
+                      className="border-border bg-card text-foreground hover:bg-secondary rounded-lg border px-4 py-1.5 text-xs font-semibold transition-all"
                     >
                       Disconnect
                     </button>
@@ -445,7 +490,7 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
               </div>
 
               {/* Tabs */}
-              <div className="mb-8 flex border-b border-slate-900">
+              <div className="border-border mb-8 flex border-b">
                 <button
                   onClick={() => {
                     setActiveTab('create');
@@ -455,7 +500,7 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                   className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold transition-all ${
                     activeTab === 'create'
                       ? 'border-purple-500 text-purple-400'
-                      : 'text-slate-450 border-transparent hover:text-slate-200'
+                      : 'text-muted-foreground hover:text-foreground border-transparent'
                   }`}
                 >
                   <Plus className="h-4 w-4" /> Create Escrow
@@ -469,7 +514,7 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                   className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold transition-all ${
                     activeTab === 'manage'
                       ? 'border-purple-500 text-purple-400'
-                      : 'text-slate-450 border-transparent hover:text-slate-200'
+                      : 'text-muted-foreground hover:text-foreground border-transparent'
                   }`}
                 >
                   <ArrowRightLeft className="h-4 w-4" /> Manage (Release/Refund/Cancel)
@@ -482,11 +527,25 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                   }}
                   className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold transition-all ${
                     activeTab === 'lookup'
-                      ? 'border-purple-500 text-purple-400'
-                      : 'text-slate-450 border-transparent hover:text-slate-200'
+                      ? 'border-purple-500 text-purple-700 dark:text-purple-400'
+                      : 'text-muted-foreground hover:text-foreground border-transparent'
                   }`}
                 >
                   <Search className="h-4 w-4" /> Lookup ID
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveTab('milestones');
+                    setError(null);
+                    setSuccessMessage(null);
+                  }}
+                  className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm font-semibold transition-all ${
+                    activeTab === 'milestones'
+                      ? 'border-purple-500 text-purple-700 dark:text-purple-400'
+                      : 'text-muted-foreground hover:text-foreground border-transparent'
+                  }`}
+                >
+                  <Milestone className="h-4 w-4" /> Milestones
                 </button>
               </div>
 
@@ -497,27 +556,27 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                   <form onSubmit={handleCreateEscrow} className="space-y-6">
                     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                       <div className="flex items-end">
-                        <p className="text-xs leading-relaxed text-slate-400">
+                        <p className="text-muted-foreground text-xs leading-relaxed">
                           The escrow id is assigned on-chain: the contract returns the new id once
                           the transaction succeeds.
                         </p>
                       </div>
 
                       <div>
-                        <label className="block text-xs font-semibold tracking-wider text-slate-400 uppercase">
+                        <label className="text-muted-foreground block text-xs font-semibold tracking-wider uppercase">
                           Token Contract Address
                         </label>
                         <input
                           type="text"
                           value={createToken}
                           onChange={(e) => setCreateToken(e.target.value)}
-                          className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
+                          className="border-input bg-background text-foreground placeholder:text-muted-foreground mt-2 w-full rounded-xl border px-4 py-2.5 font-mono text-sm focus:border-purple-500 focus:outline-none"
                           required
                         />
                       </div>
 
                       <div>
-                        <label className="block text-xs font-semibold tracking-wider text-slate-400 uppercase">
+                        <label className="text-muted-foreground block text-xs font-semibold tracking-wider uppercase">
                           Payee/Beneficiary Address
                         </label>
                         <input
@@ -525,13 +584,13 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                           placeholder="e.g. GB..."
                           value={createPayee}
                           onChange={(e) => setCreatePayee(e.target.value)}
-                          className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
+                          className="border-input bg-background text-foreground placeholder:text-muted-foreground mt-2 w-full rounded-xl border px-4 py-2.5 font-mono text-sm focus:border-purple-500 focus:outline-none"
                           required
                         />
                       </div>
 
                       <div>
-                        <label className="block text-xs font-semibold tracking-wider text-slate-400 uppercase">
+                        <label className="text-muted-foreground block text-xs font-semibold tracking-wider uppercase">
                           Arbiter Address
                         </label>
                         <input
@@ -539,13 +598,13 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                           placeholder="e.g. GC..."
                           value={createArbiter}
                           onChange={(e) => setCreateArbiter(e.target.value)}
-                          className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
+                          className="border-input bg-background text-foreground placeholder:text-muted-foreground mt-2 w-full rounded-xl border px-4 py-2.5 font-mono text-sm focus:border-purple-500 focus:outline-none"
                           required
                         />
                       </div>
 
                       <div>
-                        <label className="block text-xs font-semibold tracking-wider text-slate-400 uppercase">
+                        <label className="text-muted-foreground block text-xs font-semibold tracking-wider uppercase">
                           Deposit Amount (XLM)
                         </label>
                         <div className="relative mt-2">
@@ -554,23 +613,23 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                             step="any"
                             value={createAmount}
                             onChange={(e) => setCreateAmount(e.target.value)}
-                            className="w-full rounded-xl border border-slate-900 bg-slate-950 py-2.5 pr-12 pl-4 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
+                            className="border-input bg-background text-foreground w-full rounded-xl border py-2.5 pr-12 pl-4 font-mono text-sm focus:border-purple-500 focus:outline-none"
                             required
                           />
                           <div className="absolute inset-y-0 right-0 flex items-center pr-3">
-                            <span className="text-xs font-semibold text-slate-500">XLM</span>
+                            <span className="text-muted-foreground text-xs font-semibold">XLM</span>
                           </div>
                         </div>
                       </div>
 
                       <div>
-                        <label className="block text-xs font-semibold tracking-wider text-slate-400 uppercase">
+                        <label className="text-muted-foreground block text-xs font-semibold tracking-wider uppercase">
                           Deadline (Duration from now)
                         </label>
                         <select
                           value={createDeadline}
                           onChange={(e) => setCreateDeadline(e.target.value)}
-                          className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
+                          className="border-input bg-background text-foreground mt-2 w-full rounded-xl border px-4 py-2.5 text-sm focus:border-purple-500 focus:outline-none"
                         >
                           <option value="60">1 Minute (Testing)</option>
                           <option value="300">5 Minutes</option>
@@ -580,7 +639,7 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                       </div>
                     </div>
 
-                    <div className="flex justify-end gap-4 border-t border-slate-900 pt-6">
+                    <div className="border-border flex justify-end gap-4 border-t pt-6">
                       <button
                         type="submit"
                         disabled={!isConnected || actionLoading || !contractConfigured}
@@ -602,7 +661,7 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                   <div className="space-y-6">
                     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                       <div>
-                        <label className="block text-xs font-semibold tracking-wider text-slate-400 uppercase">
+                        <label className="text-muted-foreground block text-xs font-semibold tracking-wider uppercase">
                           Target Escrow ID
                         </label>
                         <input
@@ -610,31 +669,31 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                           placeholder="ID to load/manage"
                           value={manageId}
                           onChange={(e) => setManageId(e.target.value)}
-                          className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
+                          className="border-input bg-background text-foreground placeholder:text-muted-foreground mt-2 w-full rounded-xl border px-4 py-2.5 font-mono text-sm focus:border-purple-500 focus:outline-none"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-xs font-semibold tracking-wider text-slate-400 uppercase">
+                        <label className="text-muted-foreground block text-xs font-semibold tracking-wider uppercase">
                           Signing Caller Address
                         </label>
                         <input
                           type="text"
                           value={manageCaller}
                           onChange={(e) => setManageCaller(e.target.value)}
-                          className="mt-2 w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
+                          className="border-input bg-background text-foreground placeholder:text-muted-foreground mt-2 w-full rounded-xl border px-4 py-2.5 font-mono text-sm focus:border-purple-500 focus:outline-none"
                           required
                         />
                       </div>
                     </div>
 
                     {/* Manage quick controls */}
-                    <div className="grid grid-cols-1 gap-4 border-t border-slate-900 pt-8 sm:grid-cols-4">
+                    <div className="border-border grid grid-cols-1 gap-4 border-t pt-8 sm:grid-cols-4">
                       {/* Fund */}
                       <button
                         onClick={() => handleFundEscrow(manageId)}
                         disabled={!isConnected || actionLoading || !manageId || !contractConfigured}
-                        className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/20 py-4 font-semibold text-slate-200 shadow-inner transition-all hover:bg-slate-900/50 disabled:pointer-events-none disabled:opacity-40"
+                        className="border-border bg-card text-foreground hover:bg-secondary flex flex-col items-center justify-center gap-2 rounded-xl border py-4 font-semibold shadow-inner transition-all disabled:pointer-events-none disabled:opacity-40"
                       >
                         <Coins className="h-5 w-5 text-yellow-400" />
                         <span className="text-xs tracking-wider uppercase">Fund Escrow</span>
@@ -644,7 +703,7 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                       <button
                         onClick={() => handleLifecycleAction('release')}
                         disabled={!isConnected || actionLoading || !manageId || !contractConfigured}
-                        className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/20 py-4 font-semibold text-slate-200 shadow-inner transition-all hover:bg-slate-900/50 disabled:pointer-events-none disabled:opacity-40"
+                        className="border-border bg-card text-foreground hover:bg-secondary flex flex-col items-center justify-center gap-2 rounded-xl border py-4 font-semibold shadow-inner transition-all disabled:pointer-events-none disabled:opacity-40"
                       >
                         <Play className="h-5 w-5 text-emerald-400" />
                         <span className="text-xs tracking-wider uppercase">Release Payee</span>
@@ -654,7 +713,7 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                       <button
                         onClick={() => handleLifecycleAction('refund')}
                         disabled={!isConnected || actionLoading || !manageId || !contractConfigured}
-                        className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/20 py-4 font-semibold text-slate-200 shadow-inner transition-all hover:bg-slate-900/50 disabled:pointer-events-none disabled:opacity-40"
+                        className="border-border bg-card text-foreground hover:bg-secondary flex flex-col items-center justify-center gap-2 rounded-xl border py-4 font-semibold shadow-inner transition-all disabled:pointer-events-none disabled:opacity-40"
                       >
                         <Undo2 className="h-5 w-5 text-cyan-400" />
                         <span className="text-xs tracking-wider uppercase">Refund Payer</span>
@@ -664,7 +723,7 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                       <button
                         onClick={() => handleLifecycleAction('cancel')}
                         disabled={!isConnected || actionLoading || !manageId || !contractConfigured}
-                        className="flex flex-col items-center justify-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/20 py-4 font-semibold text-slate-200 shadow-inner transition-all hover:bg-slate-900/50 disabled:pointer-events-none disabled:opacity-40"
+                        className="border-border bg-card text-foreground hover:bg-secondary flex flex-col items-center justify-center gap-2 rounded-xl border py-4 font-semibold shadow-inner transition-all disabled:pointer-events-none disabled:opacity-40"
                       >
                         <Ban className="h-5 w-5 text-rose-400" />
                         <span className="text-xs tracking-wider uppercase">Cancel (Payer)</span>
@@ -673,7 +732,58 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                   </div>
                 )}
 
-                {/* 3. LOOKUP TAB */}
+                {/* 3. MILESTONE WIZARD + ARBITER RELEASE */}
+                {activeTab === 'milestones' && (
+                  <div className="space-y-8">
+                    {!contractConfigured ? (
+                      <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-800 dark:text-amber-200">
+                        Configure the escrow contract before creating a milestone escrow.
+                      </div>
+                    ) : !isConnected ? (
+                      <div className="border-border bg-secondary/50 text-muted-foreground rounded-xl border p-4 text-sm">
+                        Connect a wallet to use the milestone wizard. The dashboard probes the
+                        deployed contract for milestone support once a wallet is connected.
+                      </div>
+                    ) : milestoneSupport === 'checking' ? (
+                      <div className="border-border bg-secondary/50 text-muted-foreground flex items-center gap-2 rounded-xl border p-4 text-sm">
+                        <Loader2 className="h-4 w-4 animate-spin" /> Verifying milestone support on
+                        the deployed contract…
+                      </div>
+                    ) : milestoneSupport === 'unsupported' ? (
+                      <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-800 dark:text-amber-200">
+                        This escrow contract does not expose milestone releases yet. Deploy the
+                        milestone-release contract change, then reload to enable the wizard.
+                      </div>
+                    ) : milestoneSupport === 'unknown' ? (
+                      <div className="border-border bg-secondary/50 text-muted-foreground rounded-xl border p-4 text-sm">
+                        Milestone support could not be verified against the RPC endpoint. The wizard
+                        stays available; a write on a contract without milestones will fail with a
+                        contract error.
+                      </div>
+                    ) : null}
+
+                    <MilestoneEscrowWizard
+                      client={milestoneClient}
+                      tokenContractId={tokenContractId}
+                      isConnected={isConnected}
+                      activeAddress={activeAddress ?? null}
+                      onCreated={({ id }) => {
+                        setMilestoneEscrowId(id.toString());
+                        setLookupId(id.toString());
+                      }}
+                    />
+
+                    <ArbiterReleasePanel
+                      client={milestoneClient}
+                      isConnected={isConnected}
+                      activeAddress={activeAddress ?? null}
+                      expertUrl={expertUrl}
+                      initialEscrowId={milestoneEscrowId}
+                    />
+                  </div>
+                )}
+
+                {/* 4. LOOKUP TAB */}
                 {activeTab === 'lookup' && (
                   <div className="space-y-6">
                     <div className="flex gap-4">
@@ -682,7 +792,7 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                         placeholder="Search by Escrow ID..."
                         value={lookupId}
                         onChange={(e) => setLookupId(e.target.value)}
-                        className="w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
+                        className="border-input bg-background text-foreground placeholder:text-muted-foreground w-full rounded-xl border px-4 py-2.5 font-mono text-sm focus:border-purple-500 focus:outline-none"
                       />
                       <button
                         onClick={() => handleLookupEscrow(lookupId)}
@@ -723,35 +833,35 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
           {/* Details & Logs Sidebar */}
           <div className="space-y-6 lg:col-span-4">
             {/* Info Box */}
-            <div className="rounded-2xl border border-slate-900 bg-slate-950/20 p-6 backdrop-blur-sm">
-              <h3 className="flex items-center gap-1.5 text-sm font-semibold text-white">
+            <div className="border-border bg-card rounded-2xl border p-6">
+              <h3 className="text-foreground flex items-center gap-1.5 text-sm font-semibold">
                 <Shield className="h-4 w-4 text-purple-400" /> Contract Details
               </h3>
               <div className="mt-4 space-y-3 font-mono text-xs">
                 <div>
-                  <div className="text-[10px] text-slate-500 uppercase">Contract ID</div>
-                  <div className="mt-1 break-all text-slate-300 transition-colors select-all hover:text-cyan-400">
+                  <div className="text-muted-foreground text-[10px] uppercase">Contract ID</div>
+                  <div className="text-foreground/80 mt-1 break-all transition-colors select-all hover:text-cyan-700 dark:hover:text-cyan-400">
                     {contractId || 'Not configured'}
                   </div>
                 </div>
                 <div>
-                  <div className="text-[10px] text-slate-500 uppercase">Network</div>
-                  <div className="mt-1 text-slate-300">Stellar {networkLabel}</div>
+                  <div className="text-muted-foreground text-[10px] uppercase">Network</div>
+                  <div className="text-foreground/80 mt-1">Stellar {networkLabel}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] text-slate-500 uppercase">Explorer</div>
+                  <div className="text-muted-foreground text-[10px] uppercase">Explorer</div>
                   <div className="mt-1">
                     {contractId ? (
                       <a
                         href={`${expertUrl}/contract/${contractId}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-cyan-400 hover:underline"
+                        className="inline-flex items-center gap-1 text-cyan-700 hover:underline dark:text-cyan-400"
                       >
                         View on Stellar.expert <ExternalLink className="h-3 w-3" />
                       </a>
                     ) : (
-                      <span className="text-slate-500">Not configured</span>
+                      <span className="text-muted-foreground">Not configured</span>
                     )}
                   </div>
                 </div>
@@ -759,29 +869,31 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
             </div>
 
             {/* Logs Window */}
-            <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-6 backdrop-blur-md">
-              <h3 className="mb-4 text-sm font-semibold text-white">Event Log</h3>
+            <div className="border-border bg-card rounded-2xl border p-6">
+              <h3 className="text-foreground mb-4 text-sm font-semibold">Event Log</h3>
 
               <div className="max-h-[350px] scrollbar-thin space-y-3 overflow-y-auto pr-2">
                 {logs.length === 0 ? (
-                  <div className="text-slate-650 py-8 text-center font-mono text-xs">
+                  <div className="text-muted-foreground py-8 text-center font-mono text-xs">
                     No logs recorded.
                   </div>
                 ) : (
                   logs.map((log) => (
                     <div
                       key={log.id}
-                      className="rounded-lg border border-slate-900 bg-slate-950/60 p-3.5 font-mono text-xs"
+                      className="border-border bg-secondary/50 rounded-lg border p-3.5 font-mono text-xs"
                     >
                       <div className="mb-1.5 flex items-center justify-between">
-                        <span className="text-slate-450 font-semibold tracking-wider uppercase">
+                        <span className="text-muted-foreground font-semibold tracking-wider uppercase">
                           {log.type}
                         </span>
-                        <span className="text-[10px] text-slate-600">
+                        <span className="text-muted-foreground text-[10px]">
                           {log.timestamp.toLocaleTimeString()}
                         </span>
                       </div>
-                      <div className="text-xs leading-relaxed text-slate-300">{log.details}</div>
+                      <div className="text-foreground/80 text-xs leading-relaxed">
+                        {log.details}
+                      </div>
                       {log.status === 'pending' && (
                         <div className="mt-2 flex items-center gap-1 text-[10px] text-yellow-500">
                           <Loader2 className="h-3 w-3 animate-spin" /> Simulating on Soroban...
@@ -797,7 +909,7 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                               href={`${expertUrl}/tx/${log.hash}`}
                               target="_blank"
                               rel="noreferrer"
-                              className="flex items-center gap-0.5 text-[10px] text-slate-500 hover:text-white"
+                              className="text-muted-foreground hover:text-foreground flex items-center gap-0.5 text-[10px]"
                             >
                               Tx Hash <ExternalLink className="h-2.5 w-2.5" />
                             </a>

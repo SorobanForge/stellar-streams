@@ -27,13 +27,14 @@ import {
   Button,
   DataTable,
   Footer,
-  Header,
   Input,
   ProgressBar,
   Skeleton,
   StatusBadge,
   type DataTableColumn,
 } from '@stellar-starter-kit/ui';
+
+import { AppHeader } from '../../components/AppHeader';
 import {
   useCancelStream,
   useCreateStream,
@@ -58,6 +59,7 @@ import {
 import type { EnvironmentConfig } from '@stellar-starter-kit/config';
 import { environmentConfig, environmentErrors } from '../../lib/environment';
 import ConfigurationError from '../../components/ConfigurationError';
+import { AppHeader } from '../../components/AppHeader';
 import { REPO_URL } from '../../lib/constants';
 import {
   describeStreamActionError,
@@ -537,12 +539,12 @@ export function StreamsDashboard({
   ];
 
   return (
-    <div className="min-h-screen bg-[#06060c] text-slate-100 selection:bg-purple-500/30 selection:text-purple-200">
-      <Header />
+    <div className="bg-background text-foreground min-h-screen selection:bg-purple-500/30 selection:text-purple-200">
+      <AppHeader />
       <main className="relative z-10 mx-auto max-w-6xl px-6 pt-12 pb-24">
         <Link
           href="/"
-          className="inline-flex items-center gap-2 text-sm text-slate-400 transition-colors hover:text-white"
+          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-2 text-sm transition-colors"
         >
           <ArrowLeft className="h-4 w-4" /> Back to overview
         </Link>
@@ -551,10 +553,10 @@ export function StreamsDashboard({
           <span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/20 bg-cyan-500/5 px-3 py-1 text-xs font-semibold tracking-wide text-cyan-300">
             <Droplets className="h-3.5 w-3.5" /> Stellar Streams
           </span>
-          <h1 className="mt-4 text-4xl font-extrabold tracking-tight text-white sm:text-5xl">
+          <h1 className="text-foreground mt-4 text-4xl font-extrabold tracking-tight sm:text-5xl">
             Continuous payment streams
           </h1>
-          <p className="mt-3 max-w-2xl text-lg font-light text-slate-400">
+          <p className="text-muted-foreground mt-3 max-w-2xl text-lg font-light">
             Lock tokens on Soroban and let them vest by the second to a recipient. Withdraw anytime,
             cancel to refund the unvested balance, or use a cliff for milestones.
           </p>
@@ -583,26 +585,26 @@ export function StreamsDashboard({
           </div>
         )}
 
-        <div className="mb-8 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-900 bg-slate-950/40 px-6 py-4">
+        <div className="border-border bg-card mb-8 flex flex-wrap items-center justify-between gap-4 rounded-2xl border px-6 py-4">
           <div className="flex items-center gap-2 text-sm">
             {isConnected ? (
               <>
                 <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
-                <span className="font-mono text-slate-300">
+                <span className="text-foreground/80 font-mono">
                   {formatAddress(activeAddress ?? '', 6)}
                 </span>
               </>
             ) : (
               <>
                 <span className="h-2 w-2 rounded-full bg-rose-500" />
-                <span className="text-slate-400">Wallet not connected</span>
+                <span className="text-muted-foreground">Wallet not connected</span>
               </>
             )}
           </div>
           {isConnected ? (
             <button
               onClick={disconnect}
-              className="rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-slate-900 hover:text-white"
+              className="border-border bg-card text-foreground hover:bg-secondary rounded-lg border px-4 py-2 text-xs font-semibold transition"
             >
               Disconnect
             </button>
@@ -670,9 +672,9 @@ export function StreamsDashboard({
           {/* Create */}
           <form
             onSubmit={handleCreate}
-            className="space-y-6 rounded-2xl border border-slate-900 bg-slate-950/40 p-6 lg:col-span-5"
+            className="border-border bg-card space-y-6 rounded-2xl border p-6 lg:col-span-5"
           >
-            <h2 className="text-sm font-semibold tracking-wider text-slate-400 uppercase">
+            <h2 className="text-muted-foreground text-sm font-semibold tracking-wider uppercase">
               New stream
             </h2>
 
@@ -757,8 +759,8 @@ export function StreamsDashboard({
 
           {/* Inspect */}
           <div className="space-y-6 lg:col-span-7">
-            <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-6">
-              <h2 className="mb-4 text-sm font-semibold tracking-wider text-slate-400 uppercase">
+            <div className="border-border bg-card rounded-2xl border p-6">
+              <h2 className="text-muted-foreground mb-4 text-sm font-semibold tracking-wider uppercase">
                 Inspect a stream
               </h2>
               <div className="flex gap-3">
@@ -767,7 +769,7 @@ export function StreamsDashboard({
                   onChange={(e) => setLookupId(e.target.value)}
                   placeholder="Stream id"
                   list="recent-stream-ids"
-                  className="w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 focus:border-purple-500 focus:outline-none"
+                  className="border-input bg-background text-foreground placeholder:text-muted-foreground w-full rounded-xl border px-4 py-2.5 font-mono text-sm focus:border-purple-500 focus:outline-none"
                 />
                 <datalist id="recent-stream-ids">
                   {recentIds.map((id) => (
@@ -806,7 +808,7 @@ export function StreamsDashboard({
               </div>
 
               {loadingStream && (
-                <div className="mt-6 space-y-4 rounded-xl border border-slate-900 bg-slate-950/60 p-5">
+                <div className="border-border bg-secondary/60 mt-6 space-y-4 rounded-xl border p-5">
                   <span role="status" className="sr-only">
                     Loading stream
                   </span>
@@ -823,31 +825,37 @@ export function StreamsDashboard({
               )}
 
               {!loadingStream && stream && (
-                <div className="mt-6 space-y-4 rounded-xl border border-slate-900 bg-slate-950/60 p-5 font-mono text-xs">
+                <div className="border-border bg-secondary/60 mt-6 space-y-4 rounded-xl border p-5 font-mono text-xs">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-bold text-white">Stream #{stream.id}</span>
+                    <span className="text-foreground text-sm font-bold">Stream #{stream.id}</span>
                     <StatusBadge status={status ?? 'unknown'} />
                   </div>
 
                   <ProgressBar value={progress / 100} label="Vested" />
-                  <div className="flex justify-between text-[10px] text-slate-500">
+                  <div className="text-muted-foreground flex justify-between text-[10px]">
                     <span>{formatBps(progress)} vested</span>
                     <span>{formatDuration(streamMetrics?.remainingSeconds ?? 0)} remaining</span>
                   </div>
-                  <p className="text-[10px] text-slate-500">{streamTimeline(stream, nowSeconds)}</p>
+                  <p className="text-muted-foreground text-[10px]">
+                    {streamTimeline(stream, nowSeconds)}
+                  </p>
 
-                  <dl className="grid grid-cols-2 gap-4 border-t border-slate-900 pt-4">
+                  <dl className="border-border grid grid-cols-2 gap-4 border-t pt-4">
                     <div>
-                      <dt className="text-[10px] text-slate-500 uppercase">Recipient</dt>
-                      <dd className="mt-1 text-slate-300">{formatAddress(stream.recipient, 6)}</dd>
+                      <dt className="text-muted-foreground text-[10px] uppercase">Recipient</dt>
+                      <dd className="text-foreground/80 mt-1">
+                        {formatAddress(stream.recipient, 6)}
+                      </dd>
                     </div>
                     <div>
-                      <dt className="text-[10px] text-slate-500 uppercase">Total</dt>
-                      <dd className="mt-1 text-slate-300">{formatAmount(stream.totalAmount)}</dd>
+                      <dt className="text-muted-foreground text-[10px] uppercase">Total</dt>
+                      <dd className="text-foreground/80 mt-1">
+                        {formatAmount(stream.totalAmount)}
+                      </dd>
                     </div>
                     <div>
-                      <dt className="text-[10px] text-slate-500 uppercase">Withdrawn</dt>
-                      <dd className="mt-1 text-slate-300">{formatAmount(stream.withdrawn)}</dd>
+                      <dt className="text-muted-foreground text-[10px] uppercase">Withdrawn</dt>
+                      <dd className="text-foreground/80 mt-1">{formatAmount(stream.withdrawn)}</dd>
                     </div>
                     <div>
                       <dt className="text-[10px] text-slate-500 uppercase">Paused time</dt>
@@ -858,7 +866,7 @@ export function StreamsDashboard({
                     {feeBps !== null && feeBps > 0 ? (
                       <>
                         <div>
-                          <dt className="text-[10px] text-slate-500 uppercase">
+                          <dt className="text-muted-foreground text-[10px] uppercase">
                             Claimable (gross)
                           </dt>
                           <dd className="mt-1 font-bold text-cyan-300">
@@ -866,7 +874,7 @@ export function StreamsDashboard({
                           </dd>
                         </div>
                         <div>
-                          <dt className="text-[10px] text-slate-500 uppercase">
+                          <dt className="text-muted-foreground text-[10px] uppercase">
                             Protocol fee ({feeBps}%)
                           </dt>
                           <dd className="mt-1 font-bold text-cyan-300">
@@ -874,7 +882,9 @@ export function StreamsDashboard({
                           </dd>
                         </div>
                         <div>
-                          <dt className="text-[10px] text-slate-500 uppercase">Net amount</dt>
+                          <dt className="text-muted-foreground text-[10px] uppercase">
+                            Net amount
+                          </dt>
                           <dd className="mt-1 font-bold text-cyan-300">
                             {formatAmount(netAmount)}
                           </dd>
@@ -882,7 +892,7 @@ export function StreamsDashboard({
                       </>
                     ) : (
                       <div>
-                        <dt className="text-[10px] text-slate-500 uppercase">Claimable</dt>
+                        <dt className="text-muted-foreground text-[10px] uppercase">Claimable</dt>
                         <dd className="mt-1 font-bold text-cyan-300">{formatAmount(netAmount)}</dd>
                       </div>
                     )}
@@ -926,14 +936,14 @@ export function StreamsDashboard({
                         stream.cancelled ||
                         isPaused
                       }
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-900 disabled:pointer-events-none disabled:opacity-40"
+                      className="border-border bg-card text-foreground hover:bg-secondary inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 font-semibold transition disabled:pointer-events-none disabled:opacity-40"
                     >
                       <Droplets className="h-3.5 w-3.5 text-cyan-400" /> Withdraw
                     </button>
                     <button
                       onClick={runCancel}
                       disabled={busy || !isConnected || stream.cancelled}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 font-semibold text-slate-200 transition hover:bg-slate-900 disabled:pointer-events-none disabled:opacity-40"
+                      className="border-border bg-card text-foreground hover:bg-secondary inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 font-semibold transition disabled:pointer-events-none disabled:opacity-40"
                     >
                       <Ban className="h-3.5 w-3.5 text-rose-400" /> Cancel
                     </button>
@@ -941,7 +951,7 @@ export function StreamsDashboard({
                       href={`${expertUrl}/contract/${activeContractId}`}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-2 py-2 text-[10px] text-slate-500 transition hover:text-white"
+                      className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 px-2 py-2 text-[10px] transition"
                     >
                       Explorer <ExternalLink className="h-3 w-3" />
                     </a>
@@ -1076,8 +1086,8 @@ export function StreamsDashboard({
         <div className="mt-12 space-y-6">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h2 className="text-xl font-bold text-white">Streams</h2>
-              <p className="mt-1 text-sm text-slate-400">
+              <h2 className="text-foreground text-xl font-bold">Streams</h2>
+              <p className="text-muted-foreground mt-1 text-sm">
                 {isConnected
                   ? `${loadedStreams.length} stream${loadedStreams.length === 1 ? '' : 's'} loaded`
                   : 'Connect a wallet to view and export streams'}
@@ -1086,7 +1096,7 @@ export function StreamsDashboard({
             <div className="flex flex-wrap items-center gap-3">
               <Link
                 href="/streams/my"
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-900 hover:text-white"
+                className="border-border bg-card text-foreground hover:bg-secondary inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition"
               >
                 <Inbox className="h-4 w-4" aria-hidden="true" /> My streams
               </Link>
@@ -1128,6 +1138,17 @@ export function StreamsDashboard({
             }
             className="font-mono"
           />
+              </div>
+            }
+            emptyState={
+              isConnected ? (
+                <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-8 text-center">
+                  <p className="text-sm text-slate-400">No streams found for this address.</p>
+                </div>
+              ) : null
+            }
+            className="font-mono"
+          />
 
           {!listingLoading && loadedStreams.length > 0 && (
             <div className="flex flex-col items-center justify-center pt-2">
@@ -1143,9 +1164,10 @@ export function StreamsDashboard({
                   {loadingMore ? 'Loading more streams...' : 'Load more'}
                 </Button>
               ) : (
-                <p className="text-xs text-slate-500">End of list — all streams loaded</p>
+                <p className="text-muted-foreground text-xs">End of list — all streams loaded</p>
               )}
             </div>
+          )}
           )}
         </div>
       </main>
