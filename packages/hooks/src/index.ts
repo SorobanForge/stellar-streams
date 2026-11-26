@@ -492,6 +492,52 @@ export function useResumeStream(
   return useContractMutation<StreamsClient, [StreamId]>(client, run, options);
 }
 
+/** A top-up amount in the token's smallest unit. */
+export type TopUpAmount = bigint | number | string;
+
+/** Inputs for `top_up`: the stream to extend and the amount to add. */
+export interface TopUpStreamParams {
+  /** Stream that receives the additional funds. */
+  id: StreamId;
+  /** Amount to add, in the token's smallest unit. Must be greater than zero. */
+  amount: TopUpAmount;
+}
+
+/**
+ * Adds funds to a stream, extending its schedule at the current payment rate.
+ *
+ * Only the stream's sender may top it up, and the contract rejects a cancelled
+ * or completed stream (`ALREADY_CANCELLED`, `STREAM_COMPLETED`) or an amount
+ * that would overflow (`AMOUNT_OVERFLOW`). Those decisions stay in the
+ * contract; the hook only rejects a non-positive or non-integer amount locally,
+ * which can never be a valid top-up and should not open a wallet prompt.
+ *
+ * A confirmed transaction asks every mounted `useStream` for the id to refetch
+ * so the new total and end date appear without waiting for a poll. There is no
+ * optimistic total: the new total depends on the contract's rounding.
+ */
+export function useTopUpStream(
+  client: StreamsClient | null,
+  options: StreamMutationOptions = {},
+): StreamMutationResult<[TopUpStreamParams]> {
+  const run = useCallback(async (streams: StreamsClient, params: TopUpStreamParams) => {
+    let amount: bigint;
+    try {
+      amount = BigInt(params.amount);
+    } catch {
+      throw new Error('Top-up amount must be a whole number of base units');
+    }
+    if (amount <= 0n) {
+      throw new Error('Top-up amount must be greater than zero');
+    }
+
+    const result = await streams.topUp(params.id, amount);
+    void notifyOptimisticRefresh(streams, String(params.id));
+    return result;
+  }, []);
+  return useContractMutation<StreamsClient, [TopUpStreamParams]>(client, run, options);
+}
+
 export interface UseStreamsResult {
   /** Streams involving the address, or an empty array while loading / unsupported. */
   streams: Stream[];
