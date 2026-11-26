@@ -7,6 +7,7 @@ import type { WalletType } from './WalletProvider';
  * compile error instead of a runtime "Unsupported wallet provider".
  */
 export const WALLET_PROVIDERS = {
+  WATCH: 'watch',
   FREIGHTER: 'freighter',
   XBULL: 'xbull',
   ALBEDO: 'albedo',

@@ -16,6 +16,7 @@ import {
   makeClient,
   makeEscrowClient,
   mockRpc,
+  PUBLIC_KEY,
   sendResponse,
   simulationError,
   simulationSuccess,
@@ -96,6 +97,107 @@ describe('custom fee and memo on writes', () => {
     await expect(
       client.withdraw(1, { memo: { type: 'text', value: 'x'.repeat(29) } }),
     ).rejects.toThrow('Invalid memo text');
+    expect(rpc.calls()).toBe(0);
+  });
+});
+
+describe('fee ceiling (maxFee)', () => {
+  let rpc: ReturnType<typeof mockRpc>;
+
+  beforeEach(() => {
+    rpc = mockRpc();
+    rpc.simulateTransaction.mockResolvedValue(simulationSuccess(xdr.ScVal.scvVoid()));
+    rpc.sendTransaction.mockResolvedValue(sendResponse('PENDING'));
+    rpc.getTransaction.mockResolvedValue(txResponse(GetTransactionStatus.SUCCESS));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('accepts a fee exactly at the boundary', async () => {
+    const client = makeClient({ maxFee: '2500000' });
+    await client.withdraw(1, { fee: '2500000' });
+
+    const tx = rpc.simulateTransaction.mock.calls[0]![0] as Transaction;
+    expect(tx.fee).toBe('2500000');
+  });
+
+  it('rejects a fee one stroop over the ceiling before any network call', async () => {
+    const client = makeClient({ maxFee: '2500000' });
+    await expect(client.withdraw(1, { fee: '2500001' })).rejects.toThrow(
+      'Fee 2500001 stroops exceeds the maximum allowed fee of 2500000 stroops.',
+    );
+    expect(rpc.calls()).toBe(0);
+  });
+
+  it('rejects an invalid maxFee before any network call', async () => {
+    const client = makeClient({ maxFee: 'ten' });
+    await expect(client.withdraw(1)).rejects.toThrow('Invalid maxFee');
+    // Both ceilings set: validation still runs before either is compared.
+    await expect(client.withdraw(1, { maxFee: '2000000' })).rejects.toThrow(
+      'Invalid maxFee: ten. Expected a decimal integer string of stroops.',
+    );
+    await expect(makeClient().withdraw(1, { maxFee: '0' })).rejects.toThrow(
+      'Invalid maxFee: 0. Must be greater than 0.',
+    );
+    expect(rpc.calls()).toBe(0);
+  });
+
+  it('has no ceiling by default', async () => {
+    const client = makeClient();
+    await client.withdraw(1, { fee: '4000000000' });
+    expect(rpc.calls()).toBeGreaterThan(0);
+  });
+
+  it('applies the client maxFee to every write path', async () => {
+    const client = makeClient({ maxFee: '5000' });
+    await expect(client.withdraw(1, { fee: '5001' })).rejects.toThrow('exceeds');
+    await expect(
+      makeEscrowClient({ maxFee: '5000' }).fundEscrow(1, { fee: '5001' }),
+    ).rejects.toThrow('exceeds');
+    expect(rpc.calls()).toBe(0);
+  });
+
+  it('lets a per-call maxFee override the client maxFee', async () => {
+    const client = makeClient({ maxFee: '1000000' });
+    await client.withdraw(1, { fee: '1000000', maxFee: '2000000' });
+    expect(rpc.simulateTransaction).toHaveBeenCalled();
+  });
+
+  it('uses the stricter value when both client and per-call maxFee are set', async () => {
+    const client = makeClient({ maxFee: '1000000' });
+    await expect(client.withdraw(1, { fee: '1500000', maxFee: '2000000' })).rejects.toThrow(
+      'exceeds',
+    );
+    rpc.reset();
+    await client.withdraw(1, { fee: '500000', maxFee: '2000000' });
+    expect(rpc.calls()).toBeGreaterThan(0);
+  });
+
+  it('checks the inner and outer fee on fee-bump submissions', async () => {
+    const client = makeClient({
+      maxFee: '1000',
+      feeBump: {
+        feeSource: PUBLIC_KEY,
+        signTransaction: async (xdr) => xdr,
+      },
+    });
+    // The inner transaction's own fee exceeds the ceiling.
+    await expect(client.withdraw(1, { fee: '2000' })).rejects.toThrow('exceeds');
+    expect(rpc.calls()).toBe(0);
+
+    // A sponsor baseFee over the ceiling is rejected too.
+    rpc.simulateTransaction.mockResolvedValue(simulationSuccess(xdr.ScVal.scvVoid()));
+    const feeBumpClient = makeClient({
+      maxFee: '1000',
+      feeBump: {
+        feeSource: PUBLIC_KEY,
+        baseFee: '5000',
+        signTransaction: async (xdr) => xdr,
+      },
+    });
+    await expect(feeBumpClient.withdraw(1)).rejects.toThrow('exceeds');
     expect(rpc.calls()).toBe(0);
   });
 });
