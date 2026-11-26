@@ -33,8 +33,11 @@ export interface WalletAdapter {
   readonly name: string;
   /** Whether the wallet extension appears installed and reachable. */
   isAvailable(): Promise<boolean>;
-  /** Connect to the wallet and return its public key. */
-  connect(): Promise<string>;
+  /**
+   * Connect to the wallet and return its public key. The watch address adapter
+   * accepts an optional address to watch; every other adapter ignores it.
+   */
+  connect(address?: string): Promise<string>;
   /**
    * End the extension session, when the wallet's API exposes one.
    *

@@ -15,6 +15,11 @@ import {
 } from './optimistic.js';
 
 export * from './splits.js';
+export * from './escrow.js';
+// `useEscrow.ts` repeats the `EscrowId` type, so its names are re-exported
+// explicitly to keep the barrel free of ambiguous star exports.
+export { isEscrowFinal, useEscrow } from './useEscrow.js';
+export type { UseEscrowOptions, UseEscrowResult } from './useEscrow.js';
 export type { MutationOptions, MutationResult, MutationStatus } from './mutation.js';
 
 /** Tracks browser connectivity as a lightweight proxy for network status. */
@@ -359,6 +364,70 @@ export function useCancelStream(
     }
   }, []);
   return useContractMutation<StreamsClient, [StreamId]>(client, run, options);
+}
+
+/** A stream total accepted by `reduce_stream`, in the token's smallest unit. */
+export type StreamTotal = bigint | number | string;
+
+/** Inputs for `reduce_stream`: the stream to shrink and its new total. */
+export interface ReduceStreamParams {
+  /** Stream whose total should be reduced. */
+  id: StreamId;
+  /** New total, in the token's smallest unit. Must not be negative. */
+  newTotal: StreamTotal;
+}
+
+/**
+ * The `reduce_stream` write the hook uses. The SDK does not expose it yet, so
+ * the hook is typed structurally (like the split hooks): a client whose
+ * `reduceStream(id, newTotal)` submits the transaction satisfies it, and a
+ * future `StreamsClient.reduceStream` needs no change here.
+ */
+export interface ReduceStreamsClientLike {
+  reduceStream(id: StreamId, newTotal: bigint): Promise<{ hash: string }>;
+}
+
+/**
+ * Partially cancels a stream by lowering its total without cancelling it.
+ *
+ * Only the stream's sender may reduce it, and the contract rejects a total
+ * below what has already vested (`ReductionBelowVested`) or one that is not a
+ * reduction (`InvalidReduction`); the hook leaves those decisions to the
+ * contract. It only refuses a negative total locally, which cannot be a valid
+ * amount and should never reach the network.
+ *
+ * While the write is in flight, every mounted `useStream` for the id shows the
+ * new `totalAmount`. A confirmed transaction refetches those readers before the
+ * optimistic value is dropped, and a failed one rolls the display back.
+ */
+export function useReduceStream(
+  client: ReduceStreamsClientLike | null,
+  options: StreamMutationOptions = {},
+): StreamMutationResult<[ReduceStreamParams]> {
+  const run = useCallback(async (streams: ReduceStreamsClientLike, params: ReduceStreamParams) => {
+    let newTotal: bigint;
+    try {
+      newTotal = BigInt(params.newTotal);
+    } catch {
+      throw new Error('Stream total must be a whole number of base units');
+    }
+    if (newTotal < 0n) {
+      throw new Error('Stream total cannot be negative');
+    }
+
+    const key = String(params.id);
+    const opId = pushOptimistic(streams, key, () => ({ totalAmount: newTotal.toString() }));
+    try {
+      const result = await streams.reduceStream(params.id, newTotal);
+      settleOptimistic(streams, key, opId);
+      void notifyOptimisticRefresh(streams, key);
+      return result;
+    } catch (err) {
+      rollbackOptimistic(streams, key, opId);
+      throw err;
+    }
+  }, []);
+  return useContractMutation<ReduceStreamsClientLike, [ReduceStreamParams]>(client, run, options);
 }
 
 /**

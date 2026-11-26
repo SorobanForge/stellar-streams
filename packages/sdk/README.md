@@ -100,6 +100,29 @@ const { decimals, symbol } = await client.getTokenMetadata(tokenContractId);
 console.log(`Token ${symbol} uses ${decimals} decimal places`);
 ```
 
+Use `createStreamFromAmount` to skip manual scaling: it reads `decimals` from
+the cached metadata and accepts a human-readable decimal string. Fractional
+digits beyond the token's precision are truncated.
+
+```typescript
+await client.createStreamFromAmount({
+  ...params,
+  amount: '12.5', // 125000000 stroops for a 7-decimal token
+});
+```
+
+### Topping Up and Reducing Streams
+
+```typescript
+await client.topUp(streamId, '1000000000'); // add funds, extend the schedule
+await client.reduceStream(streamId, '500000000'); // reduce the total deposit
+```
+
+Both take amounts in the token's smallest unit (a positive decimal integer
+string or `bigint`) and validate them before a wallet prompt opens. Contract
+rejections surface as `StreamsError` with codes such as `AMOUNT_OVERFLOW`,
+`REDUCTION_BELOW_VESTED` and `INVALID_REDUCTION`.
+
 ### Custom Fees and Memos
 
 Every write call accepts an optional `fee` (in stroops, as a string) and `memo`.
@@ -119,7 +142,14 @@ await client.createStream(params, {
 ```
 
 When neither option is passed, writes keep the default fee (`1000000` stroops)
-and no memo.
+and no memo. To cap what a caller (or the UI) may spend, set `maxFee` on the
+client or on an individual call — the lower of the two wins, and an over-limit
+fee fails before the wallet prompt opens:
+
+```typescript
+const client = new StreamsClient({ ...options, maxFee: '2500000' });
+await client.withdraw(streamId, { fee: '2000000', maxFee: '2200000' });
+```
 
 ### Dry Runs and Resource Estimates
 
@@ -159,6 +189,39 @@ const client = new StreamsClient({
 
 client.activeRpcUrl; // 'https://rpc-primary.example'
 ```
+
+### Request Timeouts
+
+Every Soroban RPC request is bounded by `requestTimeoutMs`, which defaults to
+`DEFAULT_REQUEST_TIMEOUT_MS` (30 seconds). A request that has not settled by then
+rejects with an `RpcTimeoutError` (`error.name === 'TimeoutError'`, plus `method`,
+`timeoutMs` and `url`), so a hung host cannot leave a UI loading indefinitely.
+
+The timeout wraps the default transport, an injected `transport` (single or
+array) and every `transportFactory` result. It counts as a transport failure, so
+with `rpcUrls` configured the request is retried on the next host. Pass `0` to
+disable it. A hand-built `FailoverTransport` passed as `transport` is used as-is;
+wrap its endpoints in `TimeoutTransport` yourself.
+
+```typescript
+import { RpcTimeoutError, StreamsClient } from '@stellar-starter-kit/sdk';
+
+const client = new StreamsClient({
+  contractId,
+  rpcUrls: ['https://rpc-primary.example', 'https://rpc-backup.example'],
+  networkPassphrase,
+  requestTimeoutMs: 10_000,
+});
+
+try {
+  await client.getStream(id);
+} catch (error) {
+  if (error instanceof RpcTimeoutError) showRetryBanner(error.url);
+}
+```
+
+`requestTimeoutMs` bounds each RPC round trip; `pollTimeoutMs` still bounds how
+long a submitted transaction may take to confirm overall.
 
 ### Listing Streams with Cursors
 

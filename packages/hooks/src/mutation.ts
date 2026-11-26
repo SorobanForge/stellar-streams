@@ -20,8 +20,10 @@ export interface MutationResult<TArgs extends unknown[]> {
   status: MutationStatus;
   error: string | null;
   /**
-   * Stable contract error code from the last failure (e.g.
-   * `REDUCTION_BELOW_VESTED`), when the failure carried one.
+   * Stable identifier carried by the failure, e.g. `EscrowError.code`
+   * (`'UNAUTHORIZED_OPERATION'`) or `StreamsError.code` (`'ALREADY_CANCELLED'`).
+   * `null` when the failure did not expose a string `code`, so a UI can branch
+   * on the contract outcome without parsing the message.
    */
   errorCode: string | null;
   /** Hash of the last confirmed transaction; cleared by `reset`. */
@@ -34,6 +36,17 @@ export type MutationRunner<TClient extends object, TArgs extends unknown[]> = (
   client: TClient,
   ...args: TArgs
 ) => Promise<{ hash: string }>;
+
+/**
+ * Reads the stable code a typed contract error exposes. The SDK's
+ * `StreamsError` and `EscrowError` both set a string `code`, so the state
+ * machine can carry it without depending on either class.
+ */
+function errorCodeOf(err: unknown): string | null {
+  if (typeof err !== 'object' || err === null) return null;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'string' && code.length > 0 ? code : null;
+}
 
 /**
  * Shared state machine behind every mutation hook: one call in flight per hook
@@ -85,10 +98,7 @@ export function useContractMutation<TClient extends object, TArgs extends unknow
         return result;
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Transaction failed';
-        const code =
-          typeof (err as { code?: unknown })?.code === 'string'
-            ? ((err as { code: string }).code ?? null)
-            : null;
+        const code = errorCodeOf(err);
         if (mounted.current) {
           setError(message);
           setErrorCode(code);
