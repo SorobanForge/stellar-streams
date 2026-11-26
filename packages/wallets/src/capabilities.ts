@@ -95,6 +95,7 @@ export const WALLET_CAPABILITIES: Record<WalletType, WalletCapabilities> = {
   xbull: {
     wallet: 'xbull',
     name: 'xBull',
+    readOnly: false,
     signAuthEntry: false,
     hardware: false,
     deepLink: false,

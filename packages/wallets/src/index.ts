@@ -29,6 +29,7 @@ export interface WalletProviderOption {
  * wallet cannot be missing from the picker.
  */
 export const WALLET_PROVIDER_OPTIONS: readonly WalletProviderOption[] = [
+  { id: WALLET_PROVIDERS.WATCH, label: 'Watch address' },
   { id: WALLET_PROVIDERS.FREIGHTER, label: 'Freighter' },
   { id: WALLET_PROVIDERS.XBULL, label: 'xBull' },
   { id: WALLET_PROVIDERS.ALBEDO, label: 'Albedo' },

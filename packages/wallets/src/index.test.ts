@@ -16,7 +16,7 @@ describe('Stellar Wallet Providers', () => {
 
     // The dashboard renders this list, so a provider missing here is a wallet
     // users cannot select even though `connect()` supports it.
-    expect(ids).toEqual(['freighter', 'xbull', 'albedo', 'rabe', 'hana', 'ledger']);
+    expect(ids).toEqual(['watch', 'freighter', 'xbull', 'albedo', 'rabe', 'hana', 'ledger']);
     for (const provider of Object.values(WALLET_PROVIDERS)) {
       expect(ids).toContain(provider);
     }

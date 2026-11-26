@@ -215,25 +215,6 @@ fn test_pause_freezes_accrual_until_resumed() {
 }
 
 #[test]
-fn test_pause_after_end_does_not_reduce_claimable_on_resume() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (token, sender, recipient, client) = setup(&env);
-    token.mint(&sender, 1000);
-
-    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
-    advance_time(&env, 1000);
-    assert_eq!(client.claimable(&id), 1000);
-
-    client.pause(&id);
-    advance_time(&env, 100);
-    client.resume(&id);
-
-    assert_eq!(client.claimable(&id), 1000);
-    assert_eq!(client.get_stream(&id).unwrap().total_paused, 0);
-}
-
-#[test]
 fn test_cancel_twice_fails() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1453,7 +1434,10 @@ proptest! {
 
     #[test]
     fn prop_pause_resume_withdraw_sequences_preserve_vesting_invariants(
-        operations in prop::collection::vec((0u8..3, 0u64..301), 1..32)
+        // Keep generated sequences within the stream schedule. The contract
+        // intentionally rejects pausing a completed stream, which is covered
+        // by `test_pause_rejects_stream_that_already_ended`.
+        operations in prop::collection::vec((0u8..3, 0u64..30), 1..32)
     ) {
         let env = Env::default();
         env.mock_all_auths();
@@ -1487,7 +1471,10 @@ proptest! {
                 _ => match client.try_withdraw(&id) {
                     Ok(_) => true,
                     Err(Ok(StreamError::NothingToWithdraw | StreamError::StreamPaused)) => false,
-                    Err(error) => prop_assert!(false, "unexpected withdraw error: {:?}", error),
+                    Err(error) => {
+                        prop_assert!(false, "unexpected withdraw error: {:?}", error);
+                        false
+                    }
                 },
             };
 

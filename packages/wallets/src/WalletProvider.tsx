@@ -1,12 +1,20 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import type { WalletAdapter } from './adapters/adapter.js';
+import {
+  networkMismatchMessage,
+  PUBLIC_NETWORK_PASSPHRASE,
+  TESTNET_PASSPHRASE,
+  type WalletAdapter,
+} from './adapters/adapter.js';
 import type { WatchAdapter } from './adapters/watch.js';
 import { isUserRejection, NotSupportedError, toSigningError } from './errors.js';
 import { getWalletCapabilities, type WalletCapabilities } from './capabilities.js';
 
-export type WalletType = 'watch' | 'freighter' | 'albedo' | 'rabe' | 'hana' | 'ledger';
+export type WalletType = 'watch' | 'freighter' | 'albedo' | 'rabe' | 'hana' | 'ledger' | 'xbull';
+
+export { networkMismatchMessage, PUBLIC_NETWORK_PASSPHRASE, TESTNET_PASSPHRASE };
+export const MAINNET_PASSPHRASE = PUBLIC_NETWORK_PASSPHRASE;
 
 export interface WalletContextType {
   activeAddress: string | null;
