@@ -1122,6 +1122,50 @@ fn test_reduce_stream_rejects_below_vested_amount() {
 }
 
 #[test]
+fn test_reduce_stream_rejection_leaves_state_untouched() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 500);
+    assert_eq!(client.vested(&id), 500);
+
+    // Snapshot the stream, the token balances and the event log so the
+    // rejected calls below can be checked against exactly what came before.
+    let before = client.get_stream(&id).unwrap();
+    let events_before = env.events().all();
+
+    // Below the 500 that has already vested. Issue #80.
+    assert_eq!(client.try_reduce_stream(&id, &499), Err(Ok(StreamError::ReductionBelowVested)));
+    // Not a reduction at all: equal to, then above, the current total.
+    assert_eq!(client.try_reduce_stream(&id, &1000), Err(Ok(StreamError::InvalidReduction)));
+    assert_eq!(client.try_reduce_stream(&id, &1200), Err(Ok(StreamError::InvalidReduction)));
+
+    // The rejected reductions changed nothing: `get_stream` still reports the
+    // original total and the rest of the stored stream is identical.
+    assert_eq!(client.get_stream(&id).unwrap(), before);
+    assert_eq!(client.get_stream(&id).unwrap().total_amount, 1000);
+    // No event at all was emitted, so in particular no `StreamReduced`.
+    assert_eq!(env.events().all(), events_before);
+    // No refund was transferred to the sender, and no tokens moved anywhere.
+    assert_eq!(token.balance(&sender), 0);
+    assert_eq!(token.balance(&recipient), 0);
+    assert_eq!(token.balance(&client.address), 1000);
+
+    // A valid reduction immediately afterwards still succeeds: the rejected
+    // attempts left the stream reducible and its vesting intact.
+    client.reduce_stream(&id, &600);
+    let reduced = client.get_stream(&id).unwrap();
+    assert_eq!(reduced.total_amount, 600);
+    assert_eq!(reduced.end_time, 600);
+    assert_eq!(token.balance(&sender), 400);
+    assert_eq!(token.balance(&client.address), 600);
+    assert_eq!(client.claimable(&id), 500);
+}
+
+#[test]
 fn test_reduce_stream_requires_sender_auth() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1378,6 +1422,96 @@ proptest! {
 
         let vested = vested_amount(&stream, now);
         prop_assert_eq!(vested, 0, "vested before cliff_time should be zero");
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 32,
+        max_shrink_iters: 128,
+        .. ProptestConfig::default()
+    })]
+
+    #[test]
+    fn prop_pause_resume_withdraw_sequences_preserve_vesting_invariants(
+        // Keep generated sequences within the stream schedule. The contract
+        // intentionally rejects pausing a completed stream, which is covered
+        // by `test_pause_rejects_stream_that_already_ended`.
+        operations in prop::collection::vec((0u8..3, 0u64..30), 1..32)
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (token, sender, recipient, client) = setup(&env);
+        let total_amount = 10_000i128;
+        token.mint(&sender, total_amount);
+        let id = create(&env, &client, &sender, &recipient, &token.id, total_amount, 0, 1000, 0);
+
+        let mut previous_claimable = client.claimable(&id);
+        let mut previous_total_paused = 0u64;
+        for (operation, elapsed) in operations {
+            advance_time(&env, elapsed);
+
+            let before_operation = client.claimable(&id);
+            prop_assert!(
+                before_operation >= previous_claimable,
+                "claimable decreased with time: {} -> {}",
+                previous_claimable,
+                before_operation
+            );
+
+            let withdrew = match operation {
+                0 => {
+                    client.pause(&id);
+                    false
+                }
+                1 => {
+                    client.resume(&id);
+                    false
+                }
+                _ => match client.try_withdraw(&id) {
+                    Ok(_) => true,
+                    Err(Ok(StreamError::NothingToWithdraw | StreamError::StreamPaused)) => false,
+                    Err(error) => {
+                        prop_assert!(false, "unexpected withdraw error: {:?}", error);
+                        false
+                    }
+                },
+            };
+
+            let claimable = client.claimable(&id);
+            if withdrew {
+                previous_claimable = claimable;
+            } else {
+                prop_assert!(
+                    claimable >= before_operation,
+                    "claimable decreased without a withdrawal: {} -> {}",
+                    before_operation,
+                    claimable
+                );
+                previous_claimable = claimable;
+            }
+
+            let stream = client.get_stream(&id).unwrap();
+            prop_assert!(
+                stream.withdrawn + claimable <= total_amount,
+                "withdrawn ({}) + claimable ({}) exceeds total ({})",
+                stream.withdrawn,
+                claimable,
+                total_amount
+            );
+            prop_assert!(
+                stream.total_paused >= previous_total_paused,
+                "total_paused decreased: {} -> {}",
+                previous_total_paused,
+                stream.total_paused
+            );
+            prop_assert!(
+                stream.total_paused <= env.ledger().timestamp().saturating_sub(stream.start_time),
+                "total_paused ({}) exceeds elapsed time",
+                stream.total_paused
+            );
+            previous_total_paused = stream.total_paused;
+        }
     }
 }
 
@@ -1867,4 +2001,602 @@ fn test_transfer_recipient_unknown_stream() {
         client.try_transfer_recipient(&99, &caller, &new_recipient),
         Err(Ok(StreamError::StreamNotFound)),
     );
+}
+
+// ---------------------------------------------------------------------------
+// Issue #296: the `unvested` view
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_unvested_view_tracks_vesting() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    // start = 100, cliff = 400, end = 1100.
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 100, 1100, 400);
+
+    // Before the stream starts nothing has vested, so everything is unvested.
+    advance_time(&env, 50);
+    assert_eq!(client.vested(&id), 0);
+    assert_eq!(client.unvested(&id), 1000);
+
+    // At the cliff 300 of the 1000 seconds of schedule have elapsed.
+    advance_time(&env, 350);
+    assert_eq!(client.vested(&id), 300);
+    assert_eq!(client.unvested(&id), 700);
+
+    // Midway the two views are exact complements of the total.
+    advance_time(&env, 250);
+    assert_eq!(client.vested(&id), 550);
+    assert_eq!(client.unvested(&id), 450);
+    assert_eq!(client.vested(&id) + client.unvested(&id), 1000);
+
+    // After the end everything has vested, so `unvested` clamps at zero rather
+    // than going negative.
+    advance_time(&env, 10_000);
+    assert_eq!(client.vested(&id), 1000);
+    assert_eq!(client.unvested(&id), 0);
+
+    // A full withdrawal does not change what has vested, so it stays at zero.
+    assert_eq!(client.withdraw(&id), 1000);
+    assert_eq!(client.unvested(&id), 0);
+}
+
+#[test]
+fn test_unvested_view_while_paused() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 250);
+    client.pause(&id);
+
+    // Pause accounting freezes accrual, so the unvested remainder freezes too.
+    advance_time(&env, 500);
+    assert_eq!(client.vested(&id), 250);
+    assert_eq!(client.unvested(&id), 750);
+    assert_eq!(client.vested(&id) + client.unvested(&id), 1000);
+
+    client.resume(&id);
+    advance_time(&env, 100);
+    assert_eq!(client.vested(&id), 350);
+    assert_eq!(client.unvested(&id), 650);
+}
+
+#[test]
+fn test_unvested_view_unknown_stream() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register(&env);
+    assert_eq!(client.try_unvested(&99), Err(Ok(StreamError::StreamNotFound)));
+}
+
+// ---------------------------------------------------------------------------
+// Issue #297: sender-updatable metadata
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_set_metadata_updates_fields_and_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    let label = String::from_str(&env, "Q4 payroll");
+    let reference = String::from_str(&env, "INV-2026-0042");
+    client.set_metadata(&id, &sender, &label, &reference);
+
+    // Checked first: the event log only holds the most recent invocation's
+    // events.
+    assert_eq!(
+        env.events().all().filter_by_contract(&client.address),
+        [StreamMetadataUpdated {
+            id,
+            sender: sender.clone(),
+            label: label.clone(),
+            reference: reference.clone(),
+        }
+        .to_xdr(&env, &client.address)],
+    );
+
+    // The new metadata is stored and nothing else about the stream changed.
+    let stream = client.get_stream(&id).unwrap();
+    assert_eq!(stream.label, label);
+    assert_eq!(stream.reference, reference);
+    assert_eq!(stream.sender, sender);
+    assert_eq!(stream.recipient, recipient);
+    assert_eq!(stream.total_amount, 1000);
+    assert_eq!((stream.start_time, stream.end_time, stream.cliff_time), (0, 1000, 0));
+
+    // Vesting is untouched by a metadata update.
+    advance_time(&env, 500);
+    assert_eq!(client.claimable(&id), 500);
+}
+
+#[test]
+fn test_set_metadata_rejects_non_sender() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+    let outsider = account(&env);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    let label = String::from_str(&env, "hijacked");
+    let reference = String::from_str(&env, "nope");
+
+    // Neither the recipient nor a third party may rewrite the metadata.
+    assert_eq!(
+        client.try_set_metadata(&id, &recipient, &label, &reference),
+        Err(Ok(StreamError::Unauthorized)),
+    );
+    assert_eq!(
+        client.try_set_metadata(&id, &outsider, &label, &reference),
+        Err(Ok(StreamError::Unauthorized)),
+    );
+
+    let stream = client.get_stream(&id).unwrap();
+    assert_eq!(stream.label, empty_string(&env));
+    assert_eq!(stream.reference, empty_string(&env));
+}
+
+#[test]
+fn test_set_metadata_enforces_length_limits() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    // Both fields at exactly the cap are accepted.
+    let label_at_limit = String::from_bytes(&env, &[b'l'; MAX_LABEL_LEN as usize]);
+    let reference_at_limit = String::from_bytes(&env, &[b'r'; MAX_REFERENCE_LEN as usize]);
+    client.set_metadata(&id, &sender, &label_at_limit, &reference_at_limit);
+    let stream = client.get_stream(&id).unwrap();
+    assert_eq!(stream.label.len(), MAX_LABEL_LEN);
+    assert_eq!(stream.reference.len(), MAX_REFERENCE_LEN);
+
+    // One byte over either cap is rejected with the same error `create_stream`
+    // uses, and the stored metadata is left alone.
+    let label_too_long = String::from_bytes(&env, &[b'l'; MAX_LABEL_LEN as usize + 1]);
+    let reference_too_long = String::from_bytes(&env, &[b'r'; MAX_REFERENCE_LEN as usize + 1]);
+    assert_eq!(
+        client.try_set_metadata(&id, &sender, &label_too_long, &reference_at_limit),
+        Err(Ok(StreamError::MetadataTooLong)),
+    );
+    assert_eq!(
+        client.try_set_metadata(&id, &sender, &label_at_limit, &reference_too_long),
+        Err(Ok(StreamError::MetadataTooLong)),
+    );
+
+    let stream = client.get_stream(&id).unwrap();
+    assert_eq!(stream.label, label_at_limit);
+    assert_eq!(stream.reference, reference_at_limit);
+}
+
+#[test]
+fn test_set_metadata_rejects_cancelled_stream() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 500);
+    client.cancel(&id);
+
+    let label = String::from_str(&env, "late");
+    let reference = String::from_str(&env, "late");
+    assert_eq!(
+        client.try_set_metadata(&id, &sender, &label, &reference),
+        Err(Ok(StreamError::AlreadyCancelled)),
+    );
+
+    let stream = client.get_stream(&id).unwrap();
+    assert_eq!(stream.label, empty_string(&env));
+    assert_eq!(stream.reference, empty_string(&env));
+}
+
+#[test]
+fn test_set_metadata_unknown_stream() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = register(&env);
+    let sender = account(&env);
+    let metadata = empty_string(&env);
+    assert_eq!(
+        client.try_set_metadata(&99, &sender, &metadata, &metadata),
+        Err(Ok(StreamError::StreamNotFound)),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Issue #299: a single pause window is capped
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_pause_window_exactly_at_the_limit_still_pauses() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 4_000_000);
+
+    // A schedule longer than the cap, so the cap is what would end the pause.
+    let id = create(&env, &client, &sender, &recipient, &token.id, 4_000_000, 0, 4_000_000, 0);
+    advance_time(&env, 1000);
+    assert_eq!(client.vested(&id), 1000);
+
+    client.pause(&id);
+    advance_time(&env, MAX_PAUSE_SECONDS);
+
+    // Exactly at the cap the pause is still in force: no extra accrual and the
+    // recipient cannot withdraw.
+    assert_eq!(client.vested(&id), 1000);
+    assert_eq!(client.try_withdraw(&id), Err(Ok(StreamError::StreamPaused)));
+
+    // `resume` is still accepted on the boundary and folds the whole window.
+    client.resume(&id);
+    assert_eq!(client.get_stream(&id).unwrap().total_paused, MAX_PAUSE_SECONDS);
+
+    advance_time(&env, 1000);
+    assert_eq!(client.vested(&id), 2000);
+}
+
+#[test]
+fn test_pause_window_expires_one_second_past_the_limit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 4_000_000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 4_000_000, 0, 4_000_000, 0);
+    advance_time(&env, 1000);
+    client.pause(&id);
+
+    // One second past the cap the pause has lapsed on its own: accrual restarts
+    // and the recipient can withdraw again even though `paused_at` is stored.
+    advance_time(&env, MAX_PAUSE_SECONDS + 1);
+    assert_eq!(client.vested(&id), 1001);
+    assert_eq!(client.try_withdraw(&id), Ok(Ok(1001)));
+
+    // A late `resume` has nothing left to resume.
+    assert_eq!(client.try_resume(&id), Err(Ok(StreamError::PauseWindowExceeded)));
+
+    // Pausing again opens a fresh window instead of returning early: the lapsed
+    // window is folded into `total_paused` and accrual freezes from now.
+    client.pause(&id);
+    assert_eq!(client.get_stream(&id).unwrap().total_paused, MAX_PAUSE_SECONDS);
+    advance_time(&env, 10);
+    assert_eq!(client.vested(&id), 1001);
+}
+
+#[test]
+fn test_pause_rejects_stream_that_already_ended() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 1000);
+
+    assert_eq!(client.try_pause(&id), Err(Ok(StreamError::StreamCompleted)));
+
+    // The rejection left the stream alone: it is still running and fully
+    // withdrawable rather than silently frozen.
+    assert!(client.get_stream(&id).unwrap().paused_at.is_none());
+    assert_eq!(client.withdraw(&id), 1000);
+}
+
+// ---------------------------------------------------------------------------
+// Issue #300: `preview_withdraw`
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_preview_withdraw_with_no_fee() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let admin = account(&env);
+    let treasury = account(&env);
+    client.initialize(&admin, &treasury, &0);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    // Nothing claimable yet: zeroes, not `NothingToWithdraw`.
+    assert_eq!(client.preview_withdraw(&id), WithdrawPreview { gross: 0, fee: 0, net: 0 });
+
+    advance_time(&env, 500);
+    let preview = client.preview_withdraw(&id);
+    assert_eq!(preview, WithdrawPreview { gross: 500, fee: 0, net: 500 });
+
+    // With no fee the whole gross amount reaches the recipient.
+    assert_eq!(client.withdraw(&id), preview.net);
+    assert_eq!(token.balance(&recipient), 500);
+    assert_eq!(token.balance(&treasury), 0);
+
+    // After a full withdrawal the preview is empty again.
+    advance_time(&env, 500);
+    assert_eq!(client.preview_withdraw(&id), WithdrawPreview { gross: 500, fee: 0, net: 500 });
+    assert_eq!(client.withdraw(&id), 500);
+    assert_eq!(client.preview_withdraw(&id), WithdrawPreview { gross: 0, fee: 0, net: 0 });
+}
+
+#[test]
+fn test_preview_withdraw_with_250_bps_fee() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 10_000);
+
+    let admin = account(&env);
+    let treasury = account(&env);
+    client.initialize(&admin, &treasury, &250); // 2.5%
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 10_000, 0, 10_000, 0);
+    advance_time(&env, 5_000);
+
+    // 2.5% of 5000 = 125 to the treasury, 4875 to the recipient.
+    let preview = client.preview_withdraw(&id);
+    assert_eq!(preview, WithdrawPreview { gross: 5_000, fee: 125, net: 4_875 });
+
+    // The preview is exactly what `withdraw` then pays out.
+    assert_eq!(client.withdraw(&id), preview.net);
+    assert_eq!(token.balance(&treasury), 125);
+    assert_eq!(token.balance(&recipient), 4_875);
+}
+
+#[test]
+fn test_preview_withdraw_at_the_fee_cap() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 10_000);
+
+    let admin = account(&env);
+    let treasury = account(&env);
+    client.initialize(&admin, &treasury, &MAX_FEE_BPS); // 10%
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 10_000, 0, 10_000, 0);
+    advance_time(&env, 10_000);
+
+    let preview = client.preview_withdraw(&id);
+    assert_eq!(preview, WithdrawPreview { gross: 10_000, fee: 1_000, net: 9_000 });
+    assert_eq!(client.withdraw(&id), preview.net);
+    assert_eq!(token.balance(&treasury), 1_000);
+    assert_eq!(token.balance(&recipient), 9_000);
+}
+
+#[test]
+fn test_preview_withdraw_reports_paused_and_unknown_streams() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 500);
+    client.pause(&id);
+
+    // `withdraw` would be rejected while paused, so the preview says so too.
+    assert_eq!(client.try_preview_withdraw(&id), Err(Ok(StreamError::StreamPaused)));
+
+    assert_eq!(client.try_preview_withdraw(&99), Err(Ok(StreamError::StreamNotFound)));
+}
+
+// ==================== Issue #295: withdraw_to tests ====================
+
+#[test]
+fn test_withdraw_to_rejects_non_recipient() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+    let outsider = account(&env);
+    let destination = account(&env);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 500);
+
+    let args: Vec<Val> = Vec::from_array(&env, [id.into_val(&env), destination.into_val(&env)]);
+    // Only outsider authorizes: recipient's `require_auth` fails.
+    env.mock_auths(&[MockAuth {
+        address: &outsider,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "withdraw_to",
+            args,
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(client.try_withdraw_to(&id, &destination).is_err());
+
+    // Without any auth, it also fails.
+    env.mock_auths(&[]);
+    assert!(client.try_withdraw_to(&id, &destination).is_err());
+}
+
+#[test]
+fn test_withdraw_to_with_fee_to_third_address() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = TestToken::deploy(&env);
+    let sender = account(&env);
+    let recipient = account(&env);
+    let treasury = account(&env);
+    let admin = account(&env);
+    let destination = account(&env);
+    let client = register(&env);
+
+    // Initialize with 100 bps (1%) fee.
+    client.initialize(&admin, &treasury, &100);
+    token.mint(&sender, 1000);
+
+    let now = env.ledger().timestamp();
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, now, now + 1000, now);
+    advance_time(&env, 1000);
+
+    // Recipient withdraws to destination: 1000 claimable, 10 fee to treasury, 990 to destination.
+    let withdrawn = client.withdraw_to(&id, &destination);
+    assert_eq!(withdrawn, 990);
+    assert_eq!(token.balance(&destination), 990);
+    assert_eq!(token.balance(&treasury), 10);
+    assert_eq!(token.balance(&recipient), 0);
+    assert_eq!(token.balance(&client.address), 0);
+
+    let stream = client.get_stream(&id).unwrap();
+    assert_eq!(stream.withdrawn, 1000);
+}
+
+#[test]
+fn test_withdraw_to_paused_stream_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+    let destination = account(&env);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 500);
+
+    client.pause(&id);
+    assert_eq!(client.try_withdraw_to(&id, &destination), Err(Ok(StreamError::StreamPaused)));
+}
+
+// ==================== Issue #294: get_streams tests ====================
+
+#[test]
+fn test_get_streams_mixed_batch_and_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 3000);
+
+    let id1 = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    let id2 = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    // Empty vector returns empty vector.
+    let empty_ids: Vec<u64> = Vec::new(&env);
+    let empty_result = client.get_streams(&empty_ids);
+    assert_eq!(empty_result.len(), 0);
+
+    // Mixed batch: existing, missing, existing in custom order.
+    let mixed_ids: Vec<u64> = Vec::from_array(&env, [id2, 9999, id1, 8888]);
+    let results = client.get_streams(&mixed_ids);
+    assert_eq!(results.len(), 4);
+    assert_eq!(results.get(0).unwrap().map(|s| s.id), Some(id2));
+    assert_eq!(results.get(1).unwrap(), None);
+    assert_eq!(results.get(2).unwrap().map(|s| s.id), Some(id1));
+    assert_eq!(results.get(3).unwrap(), None);
+}
+
+#[test]
+fn test_get_streams_bumps_persistent_ttl() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.min_persistent_entry_ttl = 600_000;
+        l.max_entry_ttl = 3_000_000;
+    });
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+
+    // Move close to expiry.
+    env.ledger().with_mut(|l| l.sequence_number = 590_000);
+    let ids = Vec::from_array(&env, [id]);
+    let res = client.get_streams(&ids);
+    assert!(res.get(0).unwrap().is_some());
+
+    // Past the original expiry, entry is still alive because get_streams bumped its TTL.
+    env.ledger().with_mut(|l| l.sequence_number = 650_000);
+    assert!(client.get_stream(&id).is_some());
+}
+
+// ==================== Issue #298: close_stream tests ====================
+
+#[test]
+fn test_close_stream_rejects_active_stream() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 500);
+
+    // Active (ongoing, not ended, not cancelled) stream must be rejected.
+    assert_eq!(client.try_close_stream(&id), Err(Ok(StreamError::InvalidStateTransition)));
+}
+
+#[test]
+fn test_close_stream_rejects_unclaimed_remainder() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 1000);
+
+    // Ended, but withdrawn is 0 < total_amount (1000).
+    assert_eq!(client.try_close_stream(&id), Err(Ok(StreamError::InvalidStateTransition)));
+
+    // Partially withdrawn (500 < 1000).
+    assert_eq!(client.withdraw(&id), 1000);
+    // Now fully withdrawn (1000 == 1000), close succeeds.
+    assert_eq!(client.close_stream(&id), ());
+}
+
+#[test]
+fn test_close_stream_rejects_cancelled_with_unclaimed_remainder() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 400);
+
+    client.cancel(&id);
+    // Cancelled, but vested remainder (400) not yet withdrawn.
+    assert_eq!(client.try_close_stream(&id), Err(Ok(StreamError::InvalidStateTransition)));
+
+    // Recipient claims the remainder.
+    assert_eq!(client.withdraw(&id), 400);
+    // Now fully withdrawn, close succeeds.
+    assert_eq!(client.close_stream(&id), ());
+}
+
+#[test]
+fn test_close_stream_success_and_double_close() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (token, sender, recipient, client) = setup(&env);
+    token.mint(&sender, 1000);
+
+    let id = create(&env, &client, &sender, &recipient, &token.id, 1000, 0, 1000, 0);
+    advance_time(&env, 1000);
+    assert_eq!(client.withdraw(&id), 1000);
+
+    // Close removes the entry.
+    client.close_stream(&id);
+
+    // get_stream returns None.
+    assert_eq!(client.get_stream(&id), None);
+
+    // withdraw returns StreamNotFound.
+    assert_eq!(client.try_withdraw(&id), Err(Ok(StreamError::StreamNotFound)));
+
+    // Double close returns StreamNotFound.
+    assert_eq!(client.try_close_stream(&id), Err(Ok(StreamError::StreamNotFound)));
 }

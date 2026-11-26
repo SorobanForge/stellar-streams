@@ -67,7 +67,7 @@ describe('transferRecipient', () => {
 
   it.each([
     [6, 'UNAUTHORIZED'],
-    [20, 'SAME_RECIPIENT'],
+    [22, 'SAME_RECIPIENT'],
   ] as const)(
     'surfaces contract error #%i as %s before asking the wallet to sign',
     async (contractCode, code) => {

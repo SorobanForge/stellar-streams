@@ -72,7 +72,8 @@ stellar/
 │   ├── hooks/                # @stellar-starter-kit/hooks   — React hooks (useStream)
 │   ├── wallets/              # @stellar-starter-kit/wallets — Freighter/Albedo/Rabet/Hana/Ledger
 │   ├── contracts/            # generated Soroban TS bindings
-│   └── ui/                   # shared UI primitives
+│   ├── ui/                   # shared UI primitives + toast notifications
+│   └── testing/              # @stellar-starter-kit/testing — test-only RPC fakes
 ├── apps/
 │   └── web/                  # Next.js dashboard (/streams, /escrow, /docs)
 ├── scripts/                  # cross-platform build/deploy/invoke scripts
@@ -114,9 +115,12 @@ The flagship contract locks tokens up front and releases them linearly.
 | `create_stream(sender, recipient, token, amount, start, end, cliff)` | Lock tokens and open a stream. Returns the stream id.                     |
 | `create_streams(sender, token, entries)`                             | Lock a whole batch atomically. Returns the new ids, in input order.       |
 | `withdraw(id)`                                                       | Recipient claims the vested, unclaimed balance.                           |
+| `preview_withdraw(id)`                                               | Gross claimable, protocol fee and net a `withdraw` would pay right now.   |
 | `cancel(id)`                                                         | Sender cancels; unvested funds are refunded, vested funds stay claimable. |
 | `transfer_recipient(id, caller, new_recipient)`                      | Recipient hands the unwithdrawn balance off to a new address.             |
-| `claimable(id)` / `vested(id)`                                       | View helpers.                                                             |
+| `set_metadata(id, sender, label, reference)`                         | Sender replaces the stream's label and invoice/grant reference.           |
+| `pause(id)` / `resume(id)`                                           | Sender freezes and unfreezes accrual (one pause lasts at most 30 days).   |
+| `claimable(id)` / `vested(id)` / `unvested(id)`                      | View helpers.                                                             |
 | `get_stream(id)` / `get_config()` / `next_stream_id()`               | Read helpers.                                                             |
 
 Safety properties enforced on-chain: `end > start`, `start ≤ cliff ≤ end`, `amount > 0`,
@@ -398,6 +402,36 @@ Good places to start:
 
 - Add an integration test that exercises a full stream lifecycle on a local node.
 - Implement the `splits` dashboard page.
+
+### Continuous integration
+
+Every pull request runs the workflows in `.github/workflows/`:
+
+- **CI** (`ci.yml`) — lint/format, TypeScript, unit tests, Soroban contracts, generated
+  bindings, dependency licenses (`cargo-deny`), and a production build. On pull requests it also
+  runs `vitest --coverage` for each package, uploads the report as the `coverage-report`
+  artifact, and posts a per-package summary with deltas against
+  `scripts/coverage-baseline.json`; packages without tests are listed as "not covered".
+  Run it locally with `pnpm run coverage`.
+- **Dependency Review** (`dependency-review.yml`) — `actions/dependency-review-action` blocks a
+  PR that adds a dependency with a high-severity advisory, and a weekly job runs
+  `pnpm audit --prod --audit-level=high`, so a vulnerability published after a dependency lands
+  still fails rather than being skipped.
+- **Secret Scan** (`secret-scan.yml`) and **Malware Scan** (`malware-scan.yml`) — scan PRs for
+  committed secrets, known malware, and supply-chain attack patterns; the malware scan also
+  re-scans `main` nightly.
+- **Docs** (`docs.yml`) — checks documentation links, and **PR Commit Check** (`pr-check.yml`)
+  enforces a conventional PR title.
+
+Maintainers apply these job names as required status checks on `main` with
+`./scripts/setup-branch-protection.sh`.
+
+### Testing packages
+
+`@stellar-starter-kit/testing` is a private, test-only workspace package: an in-memory Soroban RPC
+transport, `Stream`/`Escrow`/`Split` fixtures, and a `createTestClient` harness. It is never a
+dependency of `apps/web`, so it is never bundled. See
+[its README](packages/testing/README.md) for the API and a worked example.
 
 ---
 
