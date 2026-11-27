@@ -19,6 +19,8 @@ import {
   Footer,
   Header,
   Modal,
+  NumberInput,
+  Spinner,
   Skeleton,
   StatusBadge,
   type DataTableColumn,
@@ -194,6 +196,7 @@ const galleryColumns: DataTableColumn<GalleryStream>[] = [
 export default function UiGallery() {
   const [loading, setLoading] = useState(false);
   const [toggled, setToggled] = useState(false);
+  const [amount, setAmount] = useState('100.0000000');
   const [modalOpen, setModalOpen] = useState(false);
 
   return (
@@ -330,18 +333,14 @@ export default function UiGallery() {
                 </span>
                 <input className={cn(inputClassName, 'mt-2')} placeholder="G..." defaultValue="" />
               </label>
-              <label className="block">
-                <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                  Number input
-                </span>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  defaultValue="100"
-                  className={cn(inputClassName, 'mt-2')}
+              <div>
+                <NumberInput
+                  label="Token amount (7 decimals)"
+                  decimals={7}
+                  value={amount}
+                  onValueChange={setAmount}
                 />
-              </label>
+              </div>
               <label className="block">
                 <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
                   Disabled input
@@ -386,6 +385,33 @@ export default function UiGallery() {
                 />
               </label>
             </div>
+          </GallerySection>
+
+          {/* -------------------------------------------------- Spinners */}
+          <GallerySection
+            title="Spinners"
+            description="Busy indicators in three sizes. They inherit the current colour and stop animating when the user prefers reduced motion."
+          >
+            <Row label="Sizes">
+              <Spinner size="sm" />
+              <Spinner size="md" />
+              <Spinner size="lg" />
+            </Row>
+            <div className="border-t border-slate-900" />
+            <Row label="Inside a button">
+              <button
+                type="button"
+                disabled
+                className={cn(buttonBase, buttonVariants.primary, buttonSizes.md)}
+              >
+                <Spinner size="sm" label="Submitting transaction" /> Submitting
+              </button>
+            </Row>
+            <div className="border-t border-slate-900" />
+            <Row label="Colour inheritance">
+              <Spinner label="Signing transaction" className="text-cyan-400" />
+              <span className="text-xs text-slate-500">status role, cyan current colour</span>
+            </Row>
           </GallerySection>
 
           {/* -------------------------------------------------- Badges */}

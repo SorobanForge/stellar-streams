@@ -138,6 +138,16 @@ cargo clippy --manifest-path contracts/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path contracts/Cargo.toml
 ```
 
+The tests run as a matrix of three parallel jobs, one per crate
+(`contracts/stream`, `contracts/splits`, `contracts/escrow`), each running the
+three commands above with `-p <crate>`. A pull request only selects the crates
+whose files changed, so an escrow-only change no longer waits on stream and
+splits; a push to `main`, or a change to a shared file (the workspace manifest,
+the toolchain pin, `contracts/test-support`, `contracts/version`, or the workflow
+itself), selects all three. The required status check is the aggregate
+**Test Soroban Contracts** job, which passes when every selected crate passed or
+when no crate was selected — the per-crate job names are not required contexts.
+
 `cargo test` writes (and rewrites) `contracts/<contract>/test_snapshots/`. A PR
 that adds or edits a contract test must **commit the regenerated snapshots with
 it**, and must delete the snapshots of renamed or removed tests — Soroban only
@@ -227,6 +237,13 @@ ClamAV scans only tracked files (`git ls-files`), not `node_modules`, `.next` or
 `dist`. The job fails when the scanner cannot update its signatures, so a
 `freshclam` outage reads as a scan failure rather than a silent pass.
 
+The ~110 MB signature database is cached with `actions/cache` under a per-day
+key and restored from the most recent previous day. A restored database younger
+than 24 hours is used as-is, so most PRs skip `freshclam` and its mirror
+entirely; an older one is updated incrementally. A corrupt or incomplete cache
+is discarded with a warning and replaced by a full download instead of failing
+the job.
+
 ```bash
 # Linux/macOS with clamscan installed
 git ls-files > /tmp/files-to-scan.txt
@@ -244,7 +261,8 @@ reviewer should read.
 ### Scan PR for Secrets
 
 `gitleaks detect` over the PR's commit range, with `.gitleaks.toml` extending
-the default ruleset.
+the default ruleset. Findings are reported with their file and line, and
+`--redact` keeps the matched value out of the log.
 
 ```bash
 docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:v8.30.1 \
@@ -269,7 +287,9 @@ A `freshclam`/network failure in the job is transient: rerun the job.
 ### gitleaks reports a Stellar key
 
 Account public keys (`G...`) and contract ids (`C...`) are public and already
-allowlisted by the `[CG][A-Z0-9]{55}` regex in `.gitleaks.toml`. A finding that
+allowlisted by the `[CG][A-Z0-9]{55}` regex in `.gitleaks.toml`. The native XLM
+SAC ids used as test fixtures (Testnet `CDLZF...` and Mainnet `CAS3J...`) are
+also listed there by name, so a reader can see why they are safe. A finding that
 is **not** a public identifier is either a real secret — rotate it before doing
 anything else — or a narrowly scoped allowlist addition. Read
 [the triage guide](triage.md) before editing `.gitleaks.toml`: every entry needs

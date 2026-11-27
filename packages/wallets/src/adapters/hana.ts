@@ -1,5 +1,6 @@
 import type { WalletAdapter, SignTransactionOptions } from './adapter';
 import type { WalletType } from '../WalletProvider';
+import { toWalletLockedError } from '../errors.js';
 
 interface HanaInterface {
   send: (
@@ -33,8 +34,20 @@ export class HanaAdapter implements WalletAdapter {
     return typeof (window as Window & { hanaWallet?: unknown }).hanaWallet !== 'undefined';
   }
 
+  /** Sends an extension request, mapping a locked wallet onto a typed error. */
+  private async send(
+    method: string,
+    params?: { xdr: string; network: string },
+  ): Promise<{ publicKey?: string; signedTransaction?: string } | string> {
+    try {
+      return await this.hana.send(method, params);
+    } catch (err) {
+      throw toWalletLockedError(err, this.name) ?? err;
+    }
+  }
+
   private async getPublicKeyFromWallet(): Promise<string> {
-    const res = await this.hana.send('stellar:getPublicKey');
+    const res = await this.send('stellar:getPublicKey');
     const publicKey = typeof res === 'string' ? res : res.publicKey || '';
     if (!publicKey) {
       throw new Error('Failed to retrieve public key from wallet.');
@@ -56,7 +69,7 @@ export class HanaAdapter implements WalletAdapter {
 
   async signTransaction(xdr: string, opts?: SignTransactionOptions): Promise<string> {
     const network = opts?.network ?? 'TESTNET';
-    const res = await this.hana.send('stellar:signTransaction', {
+    const res = await this.send('stellar:signTransaction', {
       xdr,
       network: network.toLowerCase(),
     });

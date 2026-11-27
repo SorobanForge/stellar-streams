@@ -19,6 +19,24 @@ export type SignTransactionOptions = {
 export const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
 export const PUBLIC_NETWORK_PASSPHRASE = 'Public Global Stellar Network ; September 2015';
 
+export function networkLabelForPassphrase(passphrase: string): string {
+  if (passphrase === TESTNET_PASSPHRASE) return 'Testnet';
+  if (passphrase === PUBLIC_NETWORK_PASSPHRASE) return 'Mainnet';
+  return `the "${passphrase}" network`;
+}
+
+export function networkMismatchMessage(
+  configuredPassphrase: string,
+  walletPassphrase: string,
+): string {
+  return (
+    `Wallet network mismatch: the app is configured for ${networkLabelForPassphrase(configuredPassphrase)} ` +
+    `(${configuredPassphrase}) but the connected wallet is on ${networkLabelForPassphrase(walletPassphrase)} ` +
+    `(${walletPassphrase}). Switch the wallet to ${networkLabelForPassphrase(configuredPassphrase)} and try again, or call ` +
+    `setNetwork('${walletPassphrase === PUBLIC_NETWORK_PASSPHRASE ? 'MAINNET' : 'TESTNET'}') and reconnect the wallet.`
+  );
+}
+
 /** Resolves the network passphrase from the signing options. */
 export function resolveNetworkPassphrase(opts?: SignTransactionOptions): string {
   if (opts?.networkPassphrase) return opts.networkPassphrase;
@@ -33,8 +51,11 @@ export interface WalletAdapter {
   readonly name: string;
   /** Whether the wallet extension appears installed and reachable. */
   isAvailable(): Promise<boolean>;
-  /** Connect to the wallet and return its public key. */
-  connect(): Promise<string>;
+  /**
+   * Connect to the wallet and return its public key. The watch address adapter
+   * accepts an optional address to watch; every other adapter ignores it.
+   */
+  connect(address?: string): Promise<string>;
   /**
    * End the extension session, when the wallet's API exposes one.
    *
@@ -44,6 +65,8 @@ export interface WalletAdapter {
   disconnect?(): Promise<void>;
   /** Return the connected public key. */
   getPublicKey(): Promise<string>;
+  /** Return the wallet's selected network, when the provider exposes it. */
+  getNetworkPassphrase?(): Promise<string | null>;
   /** Sign a transaction XDR and return the signed envelope XDR. */
   signTransaction(xdr: string, opts?: SignTransactionOptions): Promise<string>;
   /**
