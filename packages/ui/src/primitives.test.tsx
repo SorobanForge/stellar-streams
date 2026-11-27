@@ -6,9 +6,12 @@ import {
   Alert,
   Button,
   Card,
+  Modal,
   Input,
+  NumberInput,
   ProgressBar,
   Skeleton,
+  Spinner,
   StatusBadge,
   type AlertTone,
 } from './primitives';
@@ -52,10 +55,150 @@ describe('Input', () => {
   });
 });
 
+describe('NumberInput', () => {
+  it('sets inputMode decimal and a text input type', () => {
+    render(<NumberInput label="Amount" />);
+    const input = screen.getByRole('textbox', { name: 'Amount' });
+    expect(input.getAttribute('inputmode')).toBe('decimal');
+    expect(input.getAttribute('type')).toBe('text');
+  });
+
+  it('keeps large raw strings unchanged instead of converting to a float', () => {
+    const onValueChange = vi.fn();
+    render(<NumberInput label="Amount" onValueChange={onValueChange} />);
+    const input = screen.getByRole('textbox', { name: 'Amount' });
+
+    fireEvent.change(input, { target: { value: '123456789012345678901234567890' } });
+
+    expect(onValueChange).toHaveBeenCalledWith('123456789012345678901234567890');
+    expect((input as HTMLInputElement).value).toBe('123456789012345678901234567890');
+  });
+
+  it('accepts a value with exactly 7 decimal places', () => {
+    const onValueChange = vi.fn();
+    render(<NumberInput label="Amount" decimals={7} onValueChange={onValueChange} />);
+    const input = screen.getByRole('textbox', { name: 'Amount' });
+
+    fireEvent.change(input, { target: { value: '1.1234567' } });
+
+    expect(onValueChange).toHaveBeenCalledWith('1.1234567');
+  });
+
+  it('truncates an over-precise value to the token decimals', () => {
+    const onValueChange = vi.fn();
+    render(<NumberInput label="Amount" decimals={7} onValueChange={onValueChange} />);
+    const input = screen.getByRole('textbox', { name: 'Amount' });
+
+    fireEvent.change(input, { target: { value: '1.123456789' } });
+
+    expect(onValueChange).toHaveBeenCalledWith('1.1234567');
+    expect((input as HTMLInputElement).value).toBe('1.1234567');
+  });
+
+  it('sanitises pasted text and rejects a second decimal separator', () => {
+    const onValueChange = vi.fn();
+    render(<NumberInput label="Amount" decimals={2} onValueChange={onValueChange} />);
+    const input = screen.getByRole('textbox', { name: 'Amount' });
+
+    fireEvent.change(input, { target: { value: '  0012.3.4x ' } });
+
+    expect(onValueChange).toHaveBeenCalledWith('12.34');
+    expect((input as HTMLInputElement).value).toBe('12.34');
+  });
+
+  it('normalises leading zeros', () => {
+    render(<NumberInput label="Amount" defaultValue="000" />);
+    const input = screen.getByRole('textbox', { name: 'Amount' });
+
+    expect((input as HTMLInputElement).value).toBe('0');
+
+    fireEvent.change(input, { target: { value: '007' } });
+    expect((input as HTMLInputElement).value).toBe('7');
+  });
+});
+
+describe('Spinner', () => {
+  it('is decorative and hidden from assistive technology by default', () => {
+    render(<Spinner />);
+    const spinner = document.querySelector('span');
+    expect(spinner?.getAttribute('aria-hidden')).toBe('true');
+    expect(spinner?.getAttribute('role')).toBeNull();
+  });
+
+  it('exposes a status role with the supplied label', () => {
+    render(<Spinner label="Signing transaction" />);
+    const spinner = screen.getByRole('status', { name: 'Signing transaction' });
+    expect(spinner.getAttribute('aria-hidden')).toBeNull();
+  });
+
+  it('supports the size scale and inherits the current colour', () => {
+    const { container } = render(
+      <div>
+        <Spinner size="sm" />
+        <Spinner size="md" />
+        <Spinner size="lg" />
+      </div>,
+    );
+    const [sm, md, lg] = Array.from(container.querySelectorAll('span'));
+
+    expect(sm.classList.contains('h-3')).toBe(true);
+    expect(md.classList.contains('h-5')).toBe(true);
+    expect(lg.classList.contains('h-8')).toBe(true);
+    expect(sm.classList.contains('border-current')).toBe(true);
+  });
+
+  it('stops spinning when the user prefers reduced motion', () => {
+    render(<Spinner />);
+    expect(document.querySelector('span')?.classList.contains('motion-reduce:animate-none')).toBe(
+      true,
+    );
+  });
+});
+
 describe('Card', () => {
   it('accepts a custom className', () => {
     render(<Card className="custom-card">Body</Card>);
     expect(screen.getByText('Body').classList.contains('custom-card')).toBe(true);
+  });
+});
+
+describe('Modal', () => {
+  it('labels the dialog, traps focus, handles Escape, and restores trigger focus', () => {
+    function ModalHarness() {
+      const [open, setOpen] = React.useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>
+            Open dialog
+          </button>
+          <Modal open={open} onOpenChange={setOpen} title="Review transaction">
+            <button type="button">First action</button>
+            <button type="button">Last action</button>
+          </Modal>
+        </>
+      );
+    }
+
+    render(<ModalHarness />);
+
+    const trigger = screen.getByRole('button', { name: 'Open dialog' });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const dialog = screen.getByRole('dialog', { name: 'Review transaction' });
+    const firstAction = screen.getByRole('button', { name: 'First action' });
+    const lastAction = screen.getByRole('button', { name: 'Last action' });
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(document.activeElement).toBe(firstAction);
+
+    fireEvent.keyDown(firstAction, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(lastAction);
+    fireEvent.keyDown(lastAction, { key: 'Tab' });
+    expect(document.activeElement).toBe(firstAction);
+
+    fireEvent.keyDown(firstAction, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 });
 

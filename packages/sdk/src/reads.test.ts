@@ -62,6 +62,8 @@ describe('read call decoding', () => {
       cancelled: true,
       label: '',
       reference: '',
+      pausedAt: null,
+      totalPaused: 0,
     });
   });
 

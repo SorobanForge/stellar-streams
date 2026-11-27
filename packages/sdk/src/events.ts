@@ -18,7 +18,8 @@ export type StreamEvent =
       amount: bigint;
       fee: bigint;
     }
-  | { type: 'StreamCancelled'; id: bigint; sender: string; refunded: bigint };
+  | { type: 'StreamCancelled'; id: bigint; sender: string; refunded: bigint }
+  | { type: 'StreamClosed'; id: bigint };
 export type SplitEvent =
   | { type: 'SplitCreated'; id: bigint; creator: string; total_shares: number }
   | {
@@ -151,6 +152,10 @@ export const decodeStreamEvent = (t: T, v: V): StreamEvent | null =>
       return id !== null && sender !== null && refunded !== null
         ? { type: 'StreamCancelled', id, sender, refunded }
         : null;
+    },
+    closed: (d) => {
+      const id = n(d, 'id');
+      return id !== null ? { type: 'StreamClosed', id } : null;
     },
   });
 export const decodeSplitEvent = (t: T, v: V): SplitEvent | null =>
