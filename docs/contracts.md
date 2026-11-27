@@ -53,5 +53,4 @@ stateDiagram-v2
       Entry: cancel
       Errors: StreamAlreadyCancelled, StreamNotFound, Unauthorized
     end note
-end
 ```
