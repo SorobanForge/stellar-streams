@@ -58,6 +58,7 @@ import {
 import type { EnvironmentConfig } from '@stellar-starter-kit/config';
 import { environmentConfig, environmentErrors } from '../../lib/environment';
 import ConfigurationError from '../../components/ConfigurationError';
+import CopyButton from '../../components/CopyButton';
 import { REPO_URL } from '../../lib/constants';
 import {
   describeStreamActionError,
@@ -156,6 +157,7 @@ export function StreamsDashboard({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [lastTxHash, setLastTxHash] = useState<string | null>(null);
 
   // Create form.
   const [recipient, setRecipient] = useState('');
@@ -212,13 +214,15 @@ export function StreamsDashboard({
     downloadCsv(filename, csv);
   }, [loadedStreams, activeAddress, network]);
 
-  const notify = useCallback((kind: 'success' | 'error', message: string) => {
+  const notify = useCallback((kind: 'success' | 'error', message: string, txHash?: string) => {
     if (kind === 'success') {
       setSuccess(message);
       setError(null);
+      setLastTxHash(txHash ?? null);
     } else {
       setError(message);
       setSuccess(null);
+      setLastTxHash(null);
     }
   }, []);
 
@@ -273,7 +277,7 @@ export function StreamsDashboard({
   // hand-rolled here, and refresh the inspected stream once a write confirms.
   const createStream = useCreateStream(client, {
     onSuccess: ({ hash }) => {
-      notify('success', `Stream created. Tx ${formatAddress(hash, 6)}`);
+      notify('success', `Stream created. Tx ${formatAddress(hash, 6)}`, hash);
       setRecipient('');
     },
     onError: (message) => notify('error', message),
@@ -281,7 +285,7 @@ export function StreamsDashboard({
 
   const withdrawStream = useWithdrawStream(client, {
     onSuccess: ({ hash }) => {
-      notify('success', `Withdraw submitted successfully. Tx ${formatAddress(hash, 6)}`);
+      notify('success', `Withdraw submitted successfully. Tx ${formatAddress(hash, 6)}`, hash);
       if (stream) void loadStream(stream.id);
     },
     onError: (message) => notify('error', message),
@@ -289,7 +293,7 @@ export function StreamsDashboard({
 
   const cancelStream = useCancelStream(client, {
     onSuccess: ({ hash }) => {
-      notify('success', `Cancel submitted successfully. Tx ${formatAddress(hash, 6)}`);
+      notify('success', `Cancel submitted successfully. Tx ${formatAddress(hash, 6)}`, hash);
       if (stream) void loadStream(stream.id);
     },
     onError: (message) => notify('error', message),
@@ -297,7 +301,7 @@ export function StreamsDashboard({
 
   const pauseStream = usePauseStream(client, {
     onSuccess: ({ hash }) => {
-      notify('success', `Pause submitted successfully. Tx ${formatAddress(hash, 6)}`);
+      notify('success', `Pause submitted successfully. Tx ${formatAddress(hash, 6)}`, hash);
       if (stream) void loadStream(stream.id);
     },
     onError: (message) => notify('error', message),
@@ -305,7 +309,7 @@ export function StreamsDashboard({
 
   const resumeStream = useResumeStream(client, {
     onSuccess: ({ hash }) => {
-      notify('success', `Resume submitted successfully. Tx ${formatAddress(hash, 6)}`);
+      notify('success', `Resume submitted successfully. Tx ${formatAddress(hash, 6)}`, hash);
       if (stream) void loadStream(stream.id);
     },
     onError: (message) => notify('error', message),
@@ -313,7 +317,7 @@ export function StreamsDashboard({
 
   const topUpStream = useTopUpStream(client, {
     onSuccess: ({ hash }) => {
-      notify('success', `Top-up confirmed. Tx ${formatAddress(hash, 6)}`);
+      notify('success', `Top-up confirmed. Tx ${formatAddress(hash, 6)}`, hash);
       setTopUpAmount('');
       if (stream) void loadStream(stream.id);
     },
@@ -322,7 +326,11 @@ export function StreamsDashboard({
 
   const reduceStream = useReduceStream(client, {
     onSuccess: ({ hash }) => {
-      notify('success', `Stream reduced and the difference refunded. Tx ${formatAddress(hash, 6)}`);
+      notify(
+        'success',
+        `Stream reduced and the difference refunded. Tx ${formatAddress(hash, 6)}`,
+        hash,
+      );
       setReduceTotal('');
       if (stream) void loadStream(stream.id);
     },
@@ -495,7 +503,12 @@ export function StreamsDashboard({
     {
       id: 'recipient',
       header: 'Recipient',
-      cell: (item) => formatAddress(item.recipient, 6),
+      cell: (item) => (
+        <div className="flex items-center gap-2">
+          <span>{formatAddress(item.recipient, 6)}</span>
+          <CopyButton value={item.recipient} label="recipient address" />
+        </div>
+      ),
     },
     {
       id: 'total',
@@ -591,6 +604,7 @@ export function StreamsDashboard({
                 <span className="font-mono text-slate-300">
                   {formatAddress(activeAddress ?? '', 6)}
                 </span>
+                {activeAddress ? <CopyButton value={activeAddress} label="wallet address" /> : null}
               </>
             ) : (
               <>
@@ -662,6 +676,8 @@ export function StreamsDashboard({
         <NotificationBanner
           kind={error ? 'error' : success ? 'success' : null}
           message={error ?? success ?? ''}
+          copyValue={error ? undefined : (lastTxHash ?? undefined)}
+          copyLabel="transaction hash"
           className="mb-6"
           enterFrom="top"
         />
@@ -839,7 +855,10 @@ export function StreamsDashboard({
                   <dl className="grid grid-cols-2 gap-4 border-t border-slate-900 pt-4">
                     <div>
                       <dt className="text-[10px] text-slate-500 uppercase">Recipient</dt>
-                      <dd className="mt-1 text-slate-300">{formatAddress(stream.recipient, 6)}</dd>
+                      <dd className="mt-1 flex items-center gap-2 text-slate-300">
+                        <span>{formatAddress(stream.recipient, 6)}</span>
+                        <CopyButton value={stream.recipient} label="recipient address" />
+                      </dd>
                     </div>
                     <div>
                       <dt className="text-[10px] text-slate-500 uppercase">Total</dt>
