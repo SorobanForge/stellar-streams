@@ -37,8 +37,10 @@ export interface Stream {
   /** Optional external reference (invoice or grant id); empty when none was set. */
   reference: string;
   cancelled: boolean;
-  pausedAt?: number | null;
-  totalPaused?: number;
+  /** Ledger timestamp at which the stream was paused, or `null` when it is not paused. */
+  pausedAt: number | null;
+  /** Cumulative seconds the stream has spent paused. */
+  totalPaused: number;
 }
 
 /** Raw values returned by the Soroban `stream` contract. */
