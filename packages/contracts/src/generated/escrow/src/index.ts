@@ -76,7 +76,6 @@ export enum EscrowStatus {
 
 
 
-
 export interface Client {
   /**
    * Construct and simulate a version transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.

@@ -15,8 +15,6 @@ build
 *.tsbuildinfo
 
 # Environment files
-.env
-.env.local
 .env.development.local
 .env.test.local
 .env.production.local
@@ -24,7 +22,6 @@ build
 
 # IDE and OS files
 .DS_Store
-.vscode/
 .idea/
 *.suo
 *.ntvs*
@@ -58,6 +55,7 @@ yarn.lock
 
 # Generated API reference (typedoc output — regenerate with `pnpm --filter @stellar-starter-kit/sdk docs`)
 docs/api/
+config.bat
 
 # Vitest coverage output
 coverage

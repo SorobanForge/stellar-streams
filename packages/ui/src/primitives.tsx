@@ -99,6 +99,62 @@ export function Input({
   );
 }
 
+export interface FormFieldRenderProps {
+  id: string;
+  'aria-describedby'?: string;
+  'aria-invalid'?: true;
+}
+
+export interface FormFieldProps {
+  label: React.ReactNode;
+  hint?: React.ReactNode;
+  error?: React.ReactNode;
+  /** Explicit id; generated when omitted. */
+  id?: string;
+  className?: string;
+  /** Render prop receiving the id and aria attributes to spread onto the control. */
+  children: (props: FormFieldRenderProps) => React.ReactNode;
+}
+
+/**
+ * Label, optional hint and optional error wired to a single control via
+ * `htmlFor`, `id` and `aria-describedby`. Errors use role="alert" so they are
+ * announced when they appear.
+ */
+export function FormField({ label, hint, error, id, className, children }: FormFieldProps) {
+  const generatedId = React.useId();
+  const controlId = id ?? `field-${generatedId}`;
+  const hintId = hint ? `${controlId}-hint` : undefined;
+  const errorId = error ? `${controlId}-error` : undefined;
+  const describedBy = [hintId, errorId].filter(Boolean).join(' ') || undefined;
+
+  return (
+    <div className={cn('block', className)}>
+      <label
+        htmlFor={controlId}
+        className="mb-2 block text-xs font-semibold tracking-wider text-slate-500 uppercase"
+      >
+        {label}
+      </label>
+      {children({
+        id: controlId,
+        'aria-describedby': describedBy,
+        'aria-invalid': error ? true : undefined,
+      })}
+      {hint ? (
+        <p id={hintId} className="mt-1.5 text-xs text-slate-500">
+          {hint}
+        </p>
+      ) : null}
+      {error ? (
+        <p id={errorId} role="alert" className="mt-1.5 text-xs text-rose-400">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * Normalises a raw numeric string without ever converting it to a number.
  *

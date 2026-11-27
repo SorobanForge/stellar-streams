@@ -30,6 +30,8 @@ export type {
   StatusBadgeProps,
   StatusBadgeStatus,
 } from './primitives';
+export { FormField } from './FormField';
+export type { FormFieldProps, FormFieldRenderProps } from './FormField';
 export { ToastProvider, useToast } from './toast';
 export type {
   ToastContextValue,
