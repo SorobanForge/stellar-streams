@@ -72,7 +72,13 @@ skip = [
     { crate = "darling_macro" },
     { crate = "digest" },
     { crate = "fiat-crypto" },
+    # proptest 1.12 (dev-only) pulls rand 0.10/getrandom 0.4 alongside the
+    # soroban host tree's rand_core 0.6/getrandom 0.2. Neither reaches the
+    # shipped WASM; upstream has not unified on a single rand generation.
+    { crate = "getrandom" },
+    { crate = "getrandom" },
     { crate = "hashbrown" },
+    { crate = "rand_core" },
     { crate = "stellar-strkey" },
     { crate = "syn" },
 ]

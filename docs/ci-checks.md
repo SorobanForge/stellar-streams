@@ -32,11 +32,12 @@ renamed workflow job silently drops out of branch protection until
 These run on a pull request as well. They are not required contexts, but a
 failing check still needs a fix or an explanation on the PR.
 
-| Check                           | Workflow       | Why it is not required                                                                                   |
-| :------------------------------ | :------------- | :------------------------------------------------------------------------------------------------------- |
-| Check Dependencies (cargo-deny) | `ci.yml`       | Rust advisory/licence/source policy; can fail on an advisory with no fix available, so it stays advisory |
-| Analyze Codebase (CodeQL)       | `codeql.yml`   | Security analysis that runs on a schedule as well as on PRs                                              |
-| Validate PR Title               | `pr-check.yml` | Enforces the Conventional Commits type prefix (`feat(web): …`); convention rather than build output      |
+| Check                           | Workflow             | Why it is not required                                                                                   |
+| :------------------------------ | :------------------- | :------------------------------------------------------------------------------------------------------- |
+| Check Dependencies (cargo-deny) | `ci.yml`             | Rust advisory/licence/source policy; can fail on an advisory with no fix available, so it stays advisory |
+| Check Contract WASM Size        | `contract-sizes.yml` | Runs only when `contracts/**` (or the size scripts/budget) changes; reports sizes and fails over budget  |
+| Analyze Codebase (CodeQL)       | `codeql.yml`         | Security analysis that runs on a schedule as well as on PRs                                              |
+| Validate PR Title               | `pr-check.yml`       | Enforces the Conventional Commits type prefix (`feat(web): …`); convention rather than build output      |
 
 ## Local pre-flight
 
@@ -61,6 +62,30 @@ node scripts/check-pr-supply-chain.mjs --base origin/main
 
 The scan jobs need tooling that CI installs itself; their commands are in the
 sections below.
+
+## Dependency caching
+
+Every job that installs Node or Rust dependencies restores a cache keyed on a
+committed lockfile, so a cache hit skips re-downloading packages and a cache
+miss still produces a correct build:
+
+| Cache                                                | Tool                                                                | Key                                                                       |
+| :--------------------------------------------------- | :------------------------------------------------------------------ | :------------------------------------------------------------------------ |
+| pnpm content-addressable store                       | `actions/setup-node` with `cache: pnpm` and `cache-dependency-path` | `pnpm-lock.yaml`                                                          |
+| Cargo registry, git checkout, and `contracts/target` | `Swatinem/rust-cache` (`workspaces: contracts`)                     | `contracts/Cargo.lock`, the Rust toolchain version, and the target triple |
+
+The Node jobs cover **Lint Codebase**, **Run TypeScript Checks**, **Run Unit
+Tests**, **Verify Production Build**, and the release workflow. The Rust cache
+covers **Test Soroban Contracts**, **Check Generated Bindings**, and the Rust
+leg of CodeQL.
+
+`contracts/Cargo.lock` is committed for the same reason as `pnpm-lock.yaml`:
+it pins the dependency graph that CI builds and tests, and gives the Rust cache
+a stable, committed key. Update it with `cargo update` when contract
+dependencies change, and commit it in the same PR.
+
+The bindings job's pinned Stellar CLI download is not cached; it is fetched on
+each run so a stale binary can never hide a binding-generation regression.
 
 ## Details
 
@@ -98,6 +123,16 @@ cargo fmt --manifest-path contracts/Cargo.toml --all -- --check
 cargo clippy --manifest-path contracts/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path contracts/Cargo.toml
 ```
+
+The tests run as a matrix of three parallel jobs, one per crate
+(`contracts/stream`, `contracts/splits`, `contracts/escrow`), each running the
+three commands above with `-p <crate>`. A pull request only selects the crates
+whose files changed, so an escrow-only change no longer waits on stream and
+splits; a push to `main`, or a change to a shared file (the workspace manifest,
+the toolchain pin, `contracts/test-support`, `contracts/version`, or the workflow
+itself), selects all three. The required status check is the aggregate
+**Test Soroban Contracts** job, which passes when every selected crate passed or
+when no crate was selected — the per-crate job names are not required contexts.
 
 `cargo test` writes (and rewrites) `contracts/<contract>/test_snapshots/`. A PR
 that adds or edits a contract test must **commit the regenerated snapshots with
@@ -160,11 +195,40 @@ are checked too, so renaming a heading breaks links that point at it. The
 workflow deliberately has no `paths:` filter: a path-filtered required check
 never reports on unrelated PRs, which would block every merge.
 
+### Check Contract WASM Size
+
+A careless contract change can inflate the WASM, raising deploy cost and
+edging toward Soroban's 65536-byte contract limit. When a PR touches
+`contracts/**`, `scripts/build-contracts.sh`, `scripts/optimize-contracts.sh`,
+`scripts/check-contract-sizes.sh`, or the workflow itself, this job builds and
+optimizes the contracts, prints each optimized size, and fails above the
+budget in [`contracts/wasm-size-budgets.json`](../contracts/wasm-size-budgets.json).
+Unrelated PRs skip the job, so they stay fast.
+
+Reproduce locally with the [Stellar CLI](https://github.com/stellar/stellar-cli/releases)
+on your `PATH` and the `wasm32v1-none` Rust target:
+
+```bash
+pnpm build:contracts
+pnpm optimize --check
+```
+
+`pnpm optimize` on its own reports the sizes without failing, which is handy
+when checking how much a change grew a contract. The budget is measured on the
+optimized `.optimized.wasm`, the same artifact `deploy-contracts.sh` deploys.
+
 ### Scan PR for Malware
 
 ClamAV scans only tracked files (`git ls-files`), not `node_modules`, `.next` or
 `dist`. The job fails when the scanner cannot update its signatures, so a
 `freshclam` outage reads as a scan failure rather than a silent pass.
+
+The ~110 MB signature database is cached with `actions/cache` under a per-day
+key and restored from the most recent previous day. A restored database younger
+than 24 hours is used as-is, so most PRs skip `freshclam` and its mirror
+entirely; an older one is updated incrementally. A corrupt or incomplete cache
+is discarded with a warning and replaced by a full download instead of failing
+the job.
 
 ```bash
 # Linux/macOS with clamscan installed
@@ -183,7 +247,8 @@ reviewer should read.
 ### Scan PR for Secrets
 
 `gitleaks detect` over the PR's commit range, with `.gitleaks.toml` extending
-the default ruleset.
+the default ruleset. Findings are reported with their file and line, and
+`--redact` keeps the matched value out of the log.
 
 ```bash
 docker run --rm -v "$PWD:/repo" -w /repo ghcr.io/gitleaks/gitleaks:v8.30.1 \
@@ -208,7 +273,9 @@ A `freshclam`/network failure in the job is transient: rerun the job.
 ### gitleaks reports a Stellar key
 
 Account public keys (`G...`) and contract ids (`C...`) are public and already
-allowlisted by the `[CG][A-Z0-9]{55}` regex in `.gitleaks.toml`. A finding that
+allowlisted by the `[CG][A-Z0-9]{55}` regex in `.gitleaks.toml`. The native XLM
+SAC ids used as test fixtures (Testnet `CDLZF...` and Mainnet `CAS3J...`) are
+also listed there by name, so a reader can see why they are safe. A finding that
 is **not** a public identifier is either a real secret — rotate it before doing
 anything else — or a narrowly scoped allowlist addition. Read
 [the triage guide](triage.md) before editing `.gitleaks.toml`: every entry needs

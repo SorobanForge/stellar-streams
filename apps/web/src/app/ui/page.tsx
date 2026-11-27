@@ -13,7 +13,18 @@ import {
   TriangleAlert,
   Wallet,
 } from 'lucide-react';
-import { cn, Footer, Header, Modal } from '@stellar-starter-kit/ui';
+import {
+  cn,
+  DataTable,
+  Footer,
+  Header,
+  Modal,
+  NumberInput,
+  Spinner,
+  Skeleton,
+  StatusBadge,
+  type DataTableColumn,
+} from '@stellar-starter-kit/ui';
 import {
   formatAddress,
   formatBps,
@@ -118,12 +129,74 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 // ---------------------------------------------------------------------------
+// DataTable demo data
+// ---------------------------------------------------------------------------
+
+type GalleryStream = {
+  id: string;
+  recipient: string;
+  totalAmount: bigint;
+  status: 'streaming' | 'scheduled' | 'completed';
+};
+
+const galleryStreams: GalleryStream[] = [
+  {
+    id: '101',
+    recipient: 'GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ',
+    totalAmount: 5_000_000_000n,
+    status: 'streaming',
+  },
+  {
+    id: '42',
+    recipient: 'GC2B262OCPB4IA7CBZ77GLL7CQK7747754S727772656372657424242',
+    totalAmount: 1_234_567_000n,
+    status: 'scheduled',
+  },
+  {
+    id: '7',
+    recipient: 'GDMOCKRECIPIENTZQ4Q7M4M6Q4M6Q4M6Q4M6Q4M6Q4M6Q4M6Q4M6',
+    totalAmount: 250_000_000n,
+    status: 'completed',
+  },
+];
+
+const galleryColumns: DataTableColumn<GalleryStream>[] = [
+  {
+    id: 'id',
+    header: 'ID',
+    sortable: true,
+    sortValue: (row) => row.id,
+    cell: (row) => <span className="font-mono font-semibold text-white">#{row.id}</span>,
+  },
+  {
+    id: 'recipient',
+    header: 'Recipient',
+    cell: (row) => <span className="font-mono">{formatAddress(row.recipient, 6)}</span>,
+  },
+  {
+    id: 'total',
+    header: 'Total amount',
+    sortable: true,
+    sortValue: (row) => row.totalAmount.toString(),
+    cell: (row) => <span className="font-mono">{formatTokenAmount(row.totalAmount, 7)} XLM</span>,
+  },
+  {
+    id: 'status',
+    header: 'Status',
+    sortable: true,
+    sortValue: (row) => row.status,
+    cell: (row) => <StatusBadge status={row.status} />,
+  },
+];
+
+// ---------------------------------------------------------------------------
 // Gallery
 // ---------------------------------------------------------------------------
 
 export default function UiGallery() {
   const [loading, setLoading] = useState(false);
   const [toggled, setToggled] = useState(false);
+  const [amount, setAmount] = useState('100.0000000');
   const [modalOpen, setModalOpen] = useState(false);
 
   return (
@@ -260,18 +333,14 @@ export default function UiGallery() {
                 </span>
                 <input className={cn(inputClassName, 'mt-2')} placeholder="G..." defaultValue="" />
               </label>
-              <label className="block">
-                <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                  Number input
-                </span>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  defaultValue="100"
-                  className={cn(inputClassName, 'mt-2')}
+              <div>
+                <NumberInput
+                  label="Token amount (7 decimals)"
+                  decimals={7}
+                  value={amount}
+                  onValueChange={setAmount}
                 />
-              </label>
+              </div>
               <label className="block">
                 <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
                   Disabled input
@@ -318,6 +387,33 @@ export default function UiGallery() {
             </div>
           </GallerySection>
 
+          {/* -------------------------------------------------- Spinners */}
+          <GallerySection
+            title="Spinners"
+            description="Busy indicators in three sizes. They inherit the current colour and stop animating when the user prefers reduced motion."
+          >
+            <Row label="Sizes">
+              <Spinner size="sm" />
+              <Spinner size="md" />
+              <Spinner size="lg" />
+            </Row>
+            <div className="border-t border-slate-900" />
+            <Row label="Inside a button">
+              <button
+                type="button"
+                disabled
+                className={cn(buttonBase, buttonVariants.primary, buttonSizes.md)}
+              >
+                <Spinner size="sm" label="Submitting transaction" /> Submitting
+              </button>
+            </Row>
+            <div className="border-t border-slate-900" />
+            <Row label="Colour inheritance">
+              <Spinner label="Signing transaction" className="text-cyan-400" />
+              <span className="text-xs text-slate-500">status role, cyan current colour</span>
+            </Row>
+          </GallerySection>
+
           {/* -------------------------------------------------- Badges */}
           <GallerySection
             title="Badges & status chips"
@@ -349,6 +445,55 @@ export default function UiGallery() {
                 <span className="h-2 w-2 rounded-full bg-rose-500" /> Wallet not connected
               </span>
             </Row>
+          </GallerySection>
+
+          {/* -------------------------------------------------- Data table */}
+          <GallerySection
+            title="Data table"
+            description="Typed columns with internal sorting. Sortable headers cycle ascending/descending and publish aria-sort; loading and empty states are caller-provided slots."
+          >
+            <DataTable
+              caption="Example streams"
+              columns={galleryColumns}
+              rows={galleryStreams}
+              getRowKey={(row) => row.id}
+            />
+            <div className="mt-6 grid gap-4 sm:grid-cols-2">
+              <div>
+                <p className="mb-2 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                  Empty slot
+                </p>
+                <DataTable
+                  caption="Empty streams table"
+                  columns={galleryColumns}
+                  rows={[]}
+                  getRowKey={(row) => row.id}
+                  emptyState={
+                    <div className="rounded-2xl border border-slate-900 bg-slate-950/40 p-6 text-center text-sm text-slate-400">
+                      No streams found for this address.
+                    </div>
+                  }
+                />
+              </div>
+              <div>
+                <p className="mb-2 text-xs font-semibold tracking-wider text-slate-500 uppercase">
+                  Loading slot
+                </p>
+                <DataTable
+                  caption="Loading streams table"
+                  columns={galleryColumns}
+                  rows={[]}
+                  getRowKey={(row) => row.id}
+                  loading
+                  loadingState={
+                    <div className="space-y-3 rounded-2xl border border-slate-900 bg-slate-950/40 p-6">
+                      <Skeleton height="1.25rem" width="30%" rounded="sm" />
+                      <Skeleton height="0.75rem" width="60%" rounded="sm" />
+                    </div>
+                  }
+                />
+              </div>
+            </div>
           </GallerySection>
 
           {/* -------------------------------------------------- Alerts */}

@@ -47,9 +47,10 @@ describe('transaction submission and polling', () => {
     rpc.getTransaction.mockResolvedValue(txResponse(GetTransactionStatus.SUCCESS));
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
 
-    await expect(makeClient({ pollIntervalMs: 5, transport: rpc }).withdraw(1)).resolves.toEqual({
-      hash: 'abc123',
-    });
+    // Per-request RPC timeouts also use `setTimeout`; disable them so the spy
+    // only sees the submission backoff this test is about.
+    const client = makeClient({ pollIntervalMs: 5, requestTimeoutMs: 0, transport: rpc });
+    await expect(client.withdraw(1)).resolves.toEqual({ hash: 'abc123' });
     expect(rpc.sendTransaction).toHaveBeenCalledTimes(3);
     const delays = setTimeoutSpy.mock.calls.map(([, ms]) => ms);
     expect(delays).toEqual([5, 10]);

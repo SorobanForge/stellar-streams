@@ -28,13 +28,15 @@ Calling `useWallet()` outside a `WalletProvider` throws
 
 ## Supported wallets
 
-Every adapter can connect and sign a transaction envelope. Soroban
+Most adapters can connect and sign a transaction envelope. Soroban
 authorization entries need a wallet whose SDK exposes that operation, so only
 Freighter implements `signAuthEntry`; the others raise `NotSupportedError`
-instead of returning an unsigned entry.
+instead of returning an unsigned entry. `WatchAdapter` is read-only: it needs
+no extension and rejects both signing methods.
 
 | Adapter            | `WalletType` | Connect | Disconnect | `signTransaction` | `signAuthEntry` |
 | ------------------ | ------------ | ------- | ---------- | ----------------- | --------------- |
+| `WatchAdapter`     | `watch`      | Yes     | No         | No                | No              |
 | `FreighterAdapter` | `freighter`  | Yes     | No         | Yes               | Yes             |
 | `AlbedoAdapter`    | `albedo`     | Yes     | No         | Yes               | No              |
 | `RabetAdapter`     | `rabe`       | Yes     | Yes        | Yes               | No              |
@@ -44,20 +46,39 @@ instead of returning an unsigned entry.
 An auth-entry flow that targets a wallet without this capability is a
 follow-up feature, not something the dashboard should attempt today.
 
+### Watching an address
+
+To inspect a public address without a wallet extension, pass it as the second
+argument to `connect()`, or use `WatchAdapter.watch()` directly. The address is
+validated as a `G...` account or `C...` contract StrKey before the session is
+created.
+
+```tsx
+const { connect, readOnly } = useWallet();
+await connect('watch', 'GABC...'); // validates the address
+// readOnly === true: disable write buttons while watching
+```
+
+The watched session is restored on page load like any other wallet, and
+signing through it throws `NotSupportedError` with a clear message.
+
 ## Capability matrix
 
 `WALLET_CAPABILITIES` publishes the same information as data, so a component
 can decide what to render instead of showing a button that will fail with
 `NotSupportedError`.
 
-| Key         | Adapter            | `signAuthEntry` | `hardware` | `deepLink` |
-| ----------- | ------------------ | --------------- | ---------- | ---------- |
-| `freighter` | `FreighterAdapter` | Yes             | No         | No         |
-| `albedo`    | `AlbedoAdapter`    | No              | No         | Yes        |
-| `rabe`      | `RabetAdapter`     | No              | No         | No         |
-| `hana`      | `HanaAdapter`      | No              | No         | No         |
-| `ledger`    | `LedgerAdapter`    | No              | Yes        | No         |
+| Key         | Adapter            | `readOnly` | `signAuthEntry` | `hardware` | `deepLink` |
+| ----------- | ------------------ | ---------- | --------------- | ---------- | ---------- |
+| `watch`     | `WatchAdapter`     | Yes        | No              | No         | No         |
+| `freighter` | `FreighterAdapter` | No         | Yes             | No         | No         |
+| `albedo`    | `AlbedoAdapter`    | No         | No              | No         | Yes        |
+| `rabe`      | `RabetAdapter`     | No         | No              | No         | No         |
+| `hana`      | `HanaAdapter`      | No         | No              | No         | No         |
+| `ledger`    | `LedgerAdapter`    | No         | No              | Yes        | No         |
 
+- **`readOnly`** — the adapter can only observe and never signs; disable write
+  buttons (`readOnly` on `useWallet()`) while it is active.
 - **`signAuthEntry`** — the adapter implements Soroban auth-entry signing.
 - **`hardware`** — the wallet is a device (Ledger), not an extension or web
   wallet; Ledger also requires WebHID.
@@ -211,6 +232,38 @@ gone away.
 - **No active session** – signing before connecting throws
   `No active wallet session to sign transaction.` (or `... sign auth entry.`).
 
+### Sequence diagram
+
+For the complete end-to-end signing and submission sequence diagram across the UI, SDK, wallet adapter, fee-bump sponsorship, and Soroban RPC, see [Transaction Signing and Submission Lifecycle in ARCHITECTURE.md](../../ARCHITECTURE.md#transaction-signing-and-submission-lifecycle).
+
+## WalletConnect mobile wallet adapter
+
+`WalletConnectAdapter` bridges mobile wallets (Lobstr, Solar, etc.) via the WalletConnect v2
+SignClient protocol, enabling seamless connection via pairing URIs / QR codes and transaction / auth-entry signing according to SEP-0007 / SEP-0043.
+
+```ts
+import { WalletConnectAdapter } from '@stellar-starter-kit/wallets';
+
+const wcAdapter = new WalletConnectAdapter({
+  projectId: '<YOUR_WALLETCONNECT_PROJECT_ID>',
+  onUri: (uri) => {
+    // Render QR code or open mobile deep link
+    console.log('Pairing URI:', uri);
+  },
+});
+
+const address = await wcAdapter.connect();
+const signedXdr = await wcAdapter.signTransaction(xdr, { network: 'TESTNET' });
+await wcAdapter.disconnect();
+```
+
+### Features and Behavior
+
+- **Session Handling:** Stores and restores active session topics across browser reloads via `stellar_streams_wc_topic` in localStorage.
+- **Cleanup:** Calling `disconnect()` sends a session termination RPC to peer mobile clients and purges stored session keys.
+- **Methods:** Implements `signTransaction` (`stellar_signXDR`) and `signAuthEntry` (`stellar_signAuthEntry`) conforming to CAIP-2 Stellar chain identifiers (`stellar:pubnet`, `stellar:testnet`).
+- **Dynamic Chunking:** Dynamically loads `@walletconnect/sign-client` so applications only download WalletConnect bundles when mobile wallet pairing is requested.
+
 ## Troubleshooting
 
 ### "Extension not detected"
@@ -243,6 +296,15 @@ A rejection is expected behaviour, not a bug. The provider surfaces the
 wallet's message and logs it at `warn` level. Offer a retry instead of an error
 banner styled as a failure, and never retry automatically — the user has to
 approve the next request.
+
+## Adding a wallet adapter
+
+A new wallet is one class under `src/adapters/` plus a registration entry in
+`WalletProvider` and `capabilities.ts`. The
+[wallet adapter authoring guide](../../docs/wallet-adapters.md) walks through
+the `WalletAdapter` contract, a complete copy-pasteable adapter, the rejection
+vs. cancellation error rules, and the shared test mock (`src/testing/mock-wallet.ts`)
+the adapter suites drive.
 
 ## Development
 

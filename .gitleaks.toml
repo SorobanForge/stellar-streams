@@ -21,6 +21,17 @@ regexes = [
   # Single-quoted TOML strings are literal: a double-quoted "\\b" would be a
   # backspace character rather than a regex word boundary.
   '''\b[CG][A-Z0-9]{55}\b''',
+
+  # Named test fixtures, listed explicitly so the next reader of this file can
+  # see why the value is safe without decoding it. Both are the native XLM
+  # Stellar Asset Contract id (the SAC of the `native` asset), derived from the
+  # network passphrase:
+  #   * CDLZF... is the Testnet SAC used in the SDK, hooks, and web tests;
+  #   * CAS3J... is the Mainnet SAC documented in the examples.
+  # A SAC id is a public on-chain address. It is not a key, cannot sign, and
+  # cannot move funds — anyone may read or reference it.
+  '''CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC''',
+  '''CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA''',
 ]
 
 paths = [

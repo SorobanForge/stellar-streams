@@ -3,8 +3,13 @@
 #
 # Required status check contexts are the *job names* in .github/workflows/ci.yml,
 # .github/workflows/pr-check.yml, .github/workflows/docs.yml,
-# .github/workflows/malware-scan.yml and .github/workflows/secret-scan.yml —
-# keep them in sync if those change.
+# .github/workflows/malware-scan.yml, .github/workflows/secret-scan.yml and
+# .github/workflows/dependency-review.yml — keep them in sync if those change.
+#
+# `Test Soroban Contracts` is deliberately the aggregate job: the per-crate
+# matrix jobs (`Test Soroban Contracts (stream)` and friends) are only selected
+# when their files change, and a context that never reports would block every
+# unrelated merge. Require the aggregate, never the individual names.
 #
 # Usage:
 #   ./scripts/setup-branch-protection.sh
@@ -46,7 +51,9 @@ gh api \
       "Check Documentation Links",
       "Scan PR for Malware",
       "Check Supply-Chain Changes",
-      "Scan PR for Secrets"
+      "Scan PR for Secrets",
+      "Review Dependencies",
+      "Audit Dependencies"
     ]
   },
   "enforce_admins": false,
