@@ -3,6 +3,7 @@
 import React from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Alert } from '@stellar-starter-kit/ui';
+import CopyButton from './CopyButton';
 
 export type NotificationKind = 'error' | 'success';
 
@@ -16,6 +17,10 @@ interface NotificationBannerProps {
   className?: string;
   /** Which edge the banner animates in from. */
   enterFrom?: 'top' | 'bottom';
+  /** Optional full value (such as a transaction hash) to expose via a copy button. */
+  copyValue?: string;
+  /** Accessible name describing `copyValue`. */
+  copyLabel?: string;
 }
 
 /**
@@ -29,6 +34,8 @@ export default function NotificationBanner({
   title,
   className,
   enterFrom = 'bottom',
+  copyValue,
+  copyLabel = 'transaction hash',
 }: NotificationBannerProps) {
   const offset = enterFrom === 'top' ? -6 : 10;
   return (
@@ -41,7 +48,10 @@ export default function NotificationBanner({
           className={className}
         >
           <Alert tone={kind} title={title}>
-            {message}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span>{message}</span>
+              {copyValue ? <CopyButton value={copyValue} label={copyLabel} /> : null}
+            </div>
           </Alert>
         </motion.div>
       )}

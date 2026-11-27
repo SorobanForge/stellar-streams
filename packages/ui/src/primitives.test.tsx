@@ -10,6 +10,7 @@ import {
   Input,
   NumberInput,
   ProgressBar,
+  Select,
   Skeleton,
   Spinner,
   StatusBadge,
@@ -152,6 +153,93 @@ describe('Spinner', () => {
     expect(document.querySelector('span')?.classList.contains('motion-reduce:animate-none')).toBe(
       true,
     );
+  });
+});
+
+describe('Select', () => {
+  const networkOptions = [
+    { value: 'local', label: 'Local' },
+    { value: 'testnet', label: 'Testnet' },
+    { value: 'mainnet', label: 'Mainnet' },
+  ];
+
+  it('renders an accessible label, selected value, and disabled state', () => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <Select label="Network" options={networkOptions} value="testnet" onChange={onChange} />,
+    );
+
+    const trigger = screen.getByRole('combobox', { name: 'Network' });
+    expect(trigger.textContent).toContain('Testnet');
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(trigger.className).toContain('focus:ring-2');
+    expect(trigger.className).toContain('focus:border-purple-500');
+
+    rerender(
+      <Select
+        label="Network"
+        options={networkOptions}
+        value="testnet"
+        onChange={onChange}
+        disabled
+      />,
+    );
+
+    expect((trigger as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(trigger);
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('supports keyboard navigation with arrow keys, Enter, and Escape in jsdom', () => {
+    const onChange = vi.fn();
+    render(
+      <Select
+        label="Network"
+        options={[
+          { value: 'local', label: 'Local' },
+          { value: 'testnet', label: 'Testnet', disabled: true },
+          { value: 'mainnet', label: 'Mainnet' },
+        ]}
+        value="local"
+        onChange={onChange}
+      />,
+    );
+
+    const trigger = screen.getByRole('combobox', { name: 'Network' });
+    trigger.focus();
+
+    // ArrowDown opens the listbox on the selected option, then another ArrowDown skips disabled 'testnet'.
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    expect(screen.getByRole('listbox')).toBeDefined();
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    expect(trigger.getAttribute('aria-activedescendant')).toBe('network-option-2');
+
+    // Escape closes without firing onChange and keeps focus on trigger.
+    fireEvent.keyDown(trigger, { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(trigger);
+
+    // Re-open with ArrowUp (starts on last enabled option) and confirm with Enter.
+    fireEvent.keyDown(trigger, { key: 'ArrowUp' });
+    fireEvent.keyDown(trigger, { key: 'ArrowUp' });
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('mainnet');
+    expect(screen.queryByRole('listbox')).toBeNull();
+  });
+
+  it('renders error styling matching Input', () => {
+    render(
+      <Select label="Token" options={[{ value: 'xlm', label: 'XLM' }]} error="Select a token." />,
+    );
+
+    const trigger = screen.getByRole('combobox', { name: 'Token' });
+    expect(trigger.getAttribute('aria-invalid')).toBe('true');
+    expect(trigger.className).toContain('border-rose-500/50');
+    expect(screen.getByRole('alert').textContent).toBe('Select a token.');
   });
 });
 

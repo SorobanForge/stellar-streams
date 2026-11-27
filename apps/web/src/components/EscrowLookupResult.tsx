@@ -3,6 +3,7 @@
 import React from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import type { Escrow } from '@stellar-starter-kit/types';
+import CopyButton from './CopyButton';
 
 interface EscrowLookupResultProps {
   result: Escrow | null;
@@ -44,19 +45,31 @@ export default function EscrowLookupResult({ result, onOpenManage }: EscrowLooku
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <div className="text-[10px] text-slate-500 uppercase">Payer</div>
-              <div className="text-slate-350 mt-1 break-all">{result.payer}</div>
+              <div className="mt-1 flex items-start justify-between gap-2">
+                <span className="text-slate-350 break-all">{result.payer}</span>
+                <CopyButton value={result.payer} label="payer address" />
+              </div>
             </div>
             <div>
               <div className="text-[10px] text-slate-500 uppercase">Payee</div>
-              <div className="text-slate-350 mt-1 break-all">{result.payee}</div>
+              <div className="mt-1 flex items-start justify-between gap-2">
+                <span className="text-slate-350 break-all">{result.payee}</span>
+                <CopyButton value={result.payee} label="payee address" />
+              </div>
             </div>
             <div>
               <div className="text-[10px] text-slate-500 uppercase">Arbiter</div>
-              <div className="text-slate-350 mt-1 break-all">{result.arbiter}</div>
+              <div className="mt-1 flex items-start justify-between gap-2">
+                <span className="text-slate-350 break-all">{result.arbiter}</span>
+                <CopyButton value={result.arbiter} label="arbiter address" />
+              </div>
             </div>
             <div>
               <div className="text-[10px] text-slate-500 uppercase">Token Contract</div>
-              <div className="text-slate-350 mt-1 break-all">{result.token}</div>
+              <div className="mt-1 flex items-start justify-between gap-2">
+                <span className="text-slate-350 break-all">{result.token}</span>
+                <CopyButton value={result.token} label="token contract id" />
+              </div>
             </div>
             <div>
               <div className="text-[10px] text-slate-500 uppercase">Amount</div>

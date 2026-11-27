@@ -1,6 +1,6 @@
 import * as React from 'react';
 import type { StreamStatus } from '@stellar-starter-kit/types';
-import { AlertCircle, CheckCircle2, Info, TriangleAlert, X } from 'lucide-react';
+import { AlertCircle, Check, CheckCircle2, ChevronDown, Info, TriangleAlert, X } from 'lucide-react';
 import { cn } from './utils';
 
 const buttonBase =
@@ -19,8 +19,21 @@ const buttonSizes = {
   md: 'px-6 py-3 text-sm',
 } as const;
 
-const inputBase =
-  'w-full rounded-xl border border-slate-900 bg-slate-950 px-4 py-2.5 font-mono text-sm text-slate-200 placeholder:text-slate-500 focus:border-purple-500 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40';
+const fieldBase =
+  'w-full rounded-xl border bg-slate-950 font-mono text-slate-200 placeholder:text-slate-500 focus:ring-2 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40';
+
+const fieldVariants = {
+  default: 'border-slate-900 focus:border-purple-500 focus:ring-purple-500/20',
+  error: 'border-rose-500/50 focus:border-rose-500 focus:ring-rose-500/20',
+} as const;
+
+const fieldSizes = {
+  sm: 'px-3 py-2 text-xs',
+  md: 'px-4 py-2.5 text-sm',
+} as const;
+
+export type FieldVariant = keyof typeof fieldVariants;
+export type FieldSize = keyof typeof fieldSizes;
 
 export type ButtonVariant = keyof typeof buttonVariants;
 export type ButtonSize = keyof typeof buttonSizes;
@@ -62,17 +75,20 @@ export function Button({
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   label?: React.ReactNode;
   error?: string;
+  variant?: FieldVariant;
 }
 
 export function Input({
   className,
   label,
   error,
+  variant,
   id,
   'aria-invalid': ariaInvalid,
   ...props
 }: InputProps) {
-  const invalid = Boolean(error) || ariaInvalid;
+  const invalid = Boolean(error) || Boolean(ariaInvalid) || variant === 'error';
+  const resolvedVariant: FieldVariant = invalid ? 'error' : (variant ?? 'default');
   const inputId =
     id ?? (typeof label === 'string' ? label.toLowerCase().replace(/\s+/g, '-') : undefined);
 
@@ -88,7 +104,7 @@ export function Input({
         id={inputId}
         aria-label={typeof label === 'string' ? label : undefined}
         aria-invalid={invalid || undefined}
-        className={cn(inputBase, invalid && 'border-rose-500/50 focus:border-rose-500', className)}
+        className={cn(fieldBase, fieldVariants[resolvedVariant], fieldSizes.md, className)}
       />
       {error ? (
         <span role="alert" className="mt-1.5 block text-xs text-rose-400">
@@ -182,7 +198,7 @@ export function NumberInput({
     sanitizeNumberInput(defaultValue, decimals),
   );
   const displayValue = sanitizeNumberInput(isControlled ? value : internalValue, decimals);
-  const invalid = Boolean(error) || ariaInvalid;
+  const invalid = Boolean(error) || Boolean(ariaInvalid);
   const inputId =
     id ?? (typeof label === 'string' ? label.toLowerCase().replace(/\s+/g, '-') : undefined);
 
@@ -209,7 +225,12 @@ export function NumberInput({
         onChange={handleChange}
         aria-label={typeof label === 'string' ? label : undefined}
         aria-invalid={invalid || undefined}
-        className={cn(inputBase, invalid && 'border-rose-500/50 focus:border-rose-500', className)}
+        className={cn(
+          fieldBase,
+          fieldVariants[invalid ? 'error' : 'default'],
+          fieldSizes.md,
+          className,
+        )}
       />
       {error ? (
         <span role="alert" className="mt-1.5 block text-xs text-rose-400">
@@ -250,6 +271,290 @@ export function Spinner({ size = 'md', label, className, ...props }: SpinnerProp
         className,
       )}
     />
+  );
+}
+
+export interface SelectOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}
+
+export type SelectVariant = FieldVariant;
+export type SelectSize = FieldSize;
+
+export interface SelectProps extends Omit<
+  React.ButtonHTMLAttributes<HTMLButtonElement>,
+  'value' | 'defaultValue' | 'onChange'
+> {
+  options: readonly SelectOption[];
+  value?: string;
+  defaultValue?: string;
+  onChange?: (value: string) => void;
+  label?: React.ReactNode;
+  error?: string;
+  placeholder?: string;
+  variant?: SelectVariant;
+  size?: SelectSize;
+}
+
+/**
+ * Accessible dropdown select matching `Input`'s variant and focus-ring styles.
+ * Supports keyboard navigation (ArrowDown, ArrowUp, Home, End, Enter, Space, Escape)
+ * in both browsers and jsdom.
+ */
+export function Select({
+  options,
+  value,
+  defaultValue,
+  onChange,
+  label,
+  error,
+  placeholder = 'Select an option',
+  variant,
+  size = 'md',
+  disabled,
+  id,
+  className,
+  onClick,
+  onKeyDown,
+  'aria-invalid': ariaInvalid,
+  'aria-label': ariaLabel,
+  ...props
+}: SelectProps) {
+  const invalid = Boolean(error) || Boolean(ariaInvalid) || variant === 'error';
+  const resolvedVariant: SelectVariant = invalid ? 'error' : (variant ?? 'default');
+  const reactId = React.useId();
+  const selectId =
+    id ??
+    (typeof label === 'string' ? label.toLowerCase().replace(/\s+/g, '-') : `select-${reactId}`);
+  const labelId = `${selectId}-label`;
+  const listboxId = `${selectId}-listbox`;
+
+  const [open, setOpen] = React.useState(false);
+  const [internalValue, setInternalValue] = React.useState(defaultValue ?? '');
+  const [activeIndex, setActiveIndex] = React.useState(-1);
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
+
+  const currentValue = value !== undefined ? value : internalValue;
+  const selectedOption = options.find((option) => option.value === currentValue);
+
+  const findEnabledIndex = React.useCallback(
+    (startIndex: number, step: 1 | -1): number => {
+      if (options.length === 0) return -1;
+      for (let offset = 0; offset < options.length; offset += 1) {
+        const index = (startIndex + offset * step + options.length) % options.length;
+        if (!options[index]?.disabled) return index;
+      }
+      return -1;
+    },
+    [options],
+  );
+
+  const openMenu = React.useCallback(
+    (edge: 'first' | 'last' = 'first') => {
+      if (disabled || options.length === 0) return;
+      const selectedIdx = options.findIndex(
+        (option) => option.value === currentValue && !option.disabled,
+      );
+      const nextActive =
+        selectedIdx >= 0
+          ? selectedIdx
+          : edge === 'last'
+            ? findEnabledIndex(options.length - 1, -1)
+            : findEnabledIndex(0, 1);
+      setActiveIndex(nextActive);
+      setOpen(true);
+    },
+    [currentValue, disabled, findEnabledIndex, options],
+  );
+
+  const selectIndex = React.useCallback(
+    (index: number) => {
+      const option = options[index];
+      if (!option || option.disabled) return;
+      if (value === undefined) setInternalValue(option.value);
+      onChange?.(option.value);
+      setOpen(false);
+      triggerRef.current?.focus();
+    },
+    [onChange, options, value],
+  );
+
+  React.useEffect(() => {
+    if (disabled && open) setOpen(false);
+  }, [disabled, open]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    function handlePointerDown(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => document.removeEventListener('mousedown', handlePointerDown);
+  }, [open]);
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    onKeyDown?.(event);
+    if (event.defaultPrevented || disabled) return;
+
+    if (!open) {
+      if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openMenu('first');
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        openMenu('last');
+      }
+      return;
+    }
+
+    switch (event.key) {
+      case 'ArrowDown': {
+        event.preventDefault();
+        const next = findEnabledIndex(activeIndex < 0 ? 0 : activeIndex + 1, 1);
+        if (next >= 0) setActiveIndex(next);
+        break;
+      }
+      case 'ArrowUp': {
+        event.preventDefault();
+        const prev = findEnabledIndex(activeIndex < 0 ? options.length - 1 : activeIndex - 1, -1);
+        if (prev >= 0) setActiveIndex(prev);
+        break;
+      }
+      case 'Home': {
+        event.preventDefault();
+        const first = findEnabledIndex(0, 1);
+        if (first >= 0) setActiveIndex(first);
+        break;
+      }
+      case 'End': {
+        event.preventDefault();
+        const last = findEnabledIndex(options.length - 1, -1);
+        if (last >= 0) setActiveIndex(last);
+        break;
+      }
+      case 'Enter':
+      case ' ': {
+        event.preventDefault();
+        if (activeIndex >= 0) selectIndex(activeIndex);
+        break;
+      }
+      case 'Escape': {
+        event.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+        break;
+      }
+      case 'Tab': {
+        setOpen(false);
+        break;
+      }
+      default:
+        break;
+    }
+  };
+
+  return (
+    <div ref={containerRef} className="relative block">
+      {label ? (
+        <label
+          id={labelId}
+          htmlFor={selectId}
+          className="mb-2 block text-xs font-semibold tracking-wider text-slate-500 uppercase"
+        >
+          {label}
+        </label>
+      ) : null}
+      <button
+        {...props}
+        ref={triggerRef}
+        id={selectId}
+        type="button"
+        role="combobox"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        aria-label={ariaLabel ?? (typeof label === 'string' ? label : undefined)}
+        aria-labelledby={!ariaLabel && label && typeof label !== 'string' ? labelId : undefined}
+        aria-activedescendant={
+          open && activeIndex >= 0 ? `${selectId}-option-${activeIndex}` : undefined
+        }
+        aria-invalid={invalid || undefined}
+        disabled={disabled}
+        onClick={(event) => {
+          onClick?.(event);
+          if (event.defaultPrevented || disabled) return;
+          if (open) {
+            setOpen(false);
+          } else {
+            openMenu('first');
+          }
+        }}
+        onKeyDown={handleKeyDown}
+        className={cn(
+          fieldBase,
+          fieldVariants[resolvedVariant],
+          fieldSizes[size],
+          'flex items-center justify-between gap-2 text-left',
+          className,
+        )}
+      >
+        <span className={cn('truncate', !selectedOption && 'text-slate-500')}>
+          {selectedOption ? selectedOption.label : placeholder}
+        </span>
+        <ChevronDown
+          aria-hidden="true"
+          className={cn('h-4 w-4 shrink-0 text-slate-400 transition-transform', open && 'rotate-180')}
+        />
+      </button>
+      {open ? (
+        <ul
+          id={listboxId}
+          role="listbox"
+          aria-labelledby={label ? labelId : undefined}
+          aria-label={!label ? (ariaLabel ?? 'Options') : undefined}
+          className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-xl border border-slate-800 bg-slate-950 py-1 shadow-xl"
+        >
+          {options.map((option, index) => {
+            const isSelected = option.value === currentValue;
+            const isActive = index === activeIndex;
+            return (
+              <li
+                key={option.value}
+                id={`${selectId}-option-${index}`}
+                role="option"
+                aria-selected={isSelected}
+                aria-disabled={option.disabled || undefined}
+                onMouseEnter={() => {
+                  if (!option.disabled) setActiveIndex(index);
+                }}
+                onClick={() => selectIndex(index)}
+                className={cn(
+                  'flex cursor-pointer items-center justify-between px-4 py-2 font-mono text-sm transition-colors',
+                  isActive ? 'bg-purple-500/20 text-white' : 'text-slate-300',
+                  isSelected && 'text-cyan-300',
+                  option.disabled && 'cursor-not-allowed opacity-40',
+                )}
+              >
+                <span className="truncate">{option.label}</span>
+                {isSelected ? (
+                  <Check aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-cyan-400" />
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      {error ? (
+        <span role="alert" className="mt-1.5 block text-xs text-rose-400">
+          {error}
+        </span>
+      ) : null}
+    </div>
   );
 }
 

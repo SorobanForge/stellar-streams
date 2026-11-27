@@ -20,6 +20,7 @@ import { formatAddress, formatBps, formatDuration } from '@stellar-starter-kit/u
 import type { EnvironmentConfig } from '@stellar-starter-kit/config';
 import { environmentConfig, environmentErrors } from '../../../lib/environment';
 import ConfigurationError from '../../../components/ConfigurationError';
+import CopyButton from '../../../components/CopyButton';
 import { REPO_URL } from '../../../lib/constants';
 
 /**
@@ -50,8 +51,11 @@ export function ReceivedStreamCard({ stream, now }: { stream: Stream; now: numbe
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-mono text-sm font-bold text-white">Stream #{stream.id}</p>
-          <p className="mt-1 text-xs text-slate-500">
-            From <span className="font-mono text-slate-300">{formatAddress(stream.sender, 6)}</span>
+          <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <span>
+              From <span className="font-mono text-slate-300">{formatAddress(stream.sender, 6)}</span>
+            </span>
+            <CopyButton value={stream.sender} label="sender address" />
           </p>
           {stream.label ? <p className="mt-1 text-sm text-slate-300">{stream.label}</p> : null}
         </div>
@@ -85,7 +89,10 @@ export function ReceivedStreamCard({ stream, now }: { stream: Stream; now: numbe
         </div>
         <div>
           <dt className="text-[10px] tracking-wide text-slate-500 uppercase">Token</dt>
-          <dd className="mt-1 font-mono text-slate-400">{formatAddress(stream.token, 6)}</dd>
+          <dd className="mt-1 flex items-center gap-2 font-mono text-slate-400">
+            <span>{formatAddress(stream.token, 6)}</span>
+            <CopyButton value={stream.token} label="token contract id" />
+          </dd>
         </div>
       </dl>
     </li>
@@ -193,6 +200,7 @@ export function MyStreams({ config }: { config: EnvironmentConfig }) {
                 <span className="font-mono text-slate-300">
                   {formatAddress(activeAddress ?? '', 6)}
                 </span>
+                {activeAddress ? <CopyButton value={activeAddress} label="wallet address" /> : null}
               </>
             ) : (
               <>

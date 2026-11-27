@@ -20,6 +20,7 @@ import {
   Header,
   Modal,
   NumberInput,
+  Select,
   Spinner,
   Skeleton,
   StatusBadge,
@@ -198,6 +199,7 @@ export default function UiGallery() {
   const [toggled, setToggled] = useState(false);
   const [amount, setAmount] = useState('100.0000000');
   const [modalOpen, setModalOpen] = useState(false);
+  const [selectedNetwork, setSelectedNetwork] = useState('testnet');
 
   return (
     <div className="min-h-screen bg-[#06060c] text-slate-100 selection:bg-purple-500/30 selection:text-purple-200">
@@ -364,16 +366,34 @@ export default function UiGallery() {
                   Must be a C... contract id.
                 </span>
               </label>
-              <label className="block">
-                <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
-                  Select
-                </span>
-                <select className={cn(inputClassName, 'mt-2')} defaultValue="testnet">
-                  <option value="local">Local</option>
-                  <option value="testnet">Testnet</option>
-                  <option value="mainnet">Mainnet</option>
-                </select>
-              </label>
+              <Select
+                label="Select"
+                options={[
+                  { value: 'local', label: 'Local' },
+                  { value: 'testnet', label: 'Testnet' },
+                  { value: 'mainnet', label: 'Mainnet' },
+                ]}
+                value={selectedNetwork}
+                onChange={setSelectedNetwork}
+              />
+              <Select
+                label="Disabled select"
+                options={[
+                  { value: 'xlm', label: 'XLM (Native)' },
+                  { value: 'usdc', label: 'USDC' },
+                ]}
+                value="xlm"
+                disabled
+              />
+              <Select
+                label="Error select"
+                options={[
+                  { value: 'xlm', label: 'XLM (Native)' },
+                  { value: 'usdc', label: 'USDC' },
+                ]}
+                placeholder="Choose a token"
+                error="Select a token."
+              />
               <label className="block">
                 <span className="text-xs font-semibold tracking-wider text-slate-500 uppercase">
                   Textarea

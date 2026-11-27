@@ -8,6 +8,7 @@ import { Footer, Header } from '@stellar-starter-kit/ui';
 import type { EnvironmentConfig } from '@stellar-starter-kit/config';
 import { environmentConfig, environmentErrors } from '../../lib/environment';
 import ConfigurationError from '../../components/ConfigurationError';
+import CopyButton from '../../components/CopyButton';
 import { normalizeEscrow, type RawEscrow, type Escrow } from '@stellar-starter-kit/types';
 import {
   ArrowLeft,
@@ -398,6 +399,9 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                           {activeAddress?.substring(0, 8)}...
                           {activeAddress?.substring(activeAddress.length - 8)} ({activeProvider})
                         </span>
+                        {activeAddress ? (
+                          <CopyButton value={activeAddress} label="wallet address" />
+                        ) : null}
                       </>
                     ) : (
                       <>
@@ -730,8 +734,11 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
               <div className="mt-4 space-y-3 font-mono text-xs">
                 <div>
                   <div className="text-[10px] text-slate-500 uppercase">Contract ID</div>
-                  <div className="mt-1 break-all text-slate-300 transition-colors select-all hover:text-cyan-400">
-                    {contractId || 'Not configured'}
+                  <div className="mt-1 flex items-start justify-between gap-2">
+                    <span className="break-all text-slate-300 transition-colors select-all hover:text-cyan-400">
+                      {contractId || 'Not configured'}
+                    </span>
+                    {contractId ? <CopyButton value={contractId} label="contract id" /> : null}
                   </div>
                 </div>
                 <div>
@@ -793,14 +800,17 @@ function EscrowDemo({ config }: { config: EnvironmentConfig }) {
                             <CheckCircle2 className="h-3 w-3" /> Success
                           </span>
                           {log.hash && (
-                            <a
-                              href={`${expertUrl}/tx/${log.hash}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="flex items-center gap-0.5 text-[10px] text-slate-500 hover:text-white"
-                            >
-                              Tx Hash <ExternalLink className="h-2.5 w-2.5" />
-                            </a>
+                            <div className="flex items-center gap-2">
+                              <CopyButton value={log.hash} label="transaction hash" />
+                              <a
+                                href={`${expertUrl}/tx/${log.hash}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="flex items-center gap-0.5 text-[10px] text-slate-500 hover:text-white"
+                              >
+                                Tx Hash <ExternalLink className="h-2.5 w-2.5" />
+                              </a>
+                            </div>
                           )}
                         </div>
                       )}

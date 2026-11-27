@@ -16,6 +16,7 @@ import {
 
 export * from './splits.js';
 export * from './escrow.js';
+export * from './token-metadata.js';
 // `useEscrow.ts` repeats the `EscrowId` type, so its names are re-exported
 // explicitly to keep the barrel free of ambiguous star exports.
 export { isEscrowFinal, useEscrow } from './useEscrow.js';
@@ -78,6 +79,10 @@ export interface UseStreamResult {
    * "reconnecting" hint instead of blanking the stream.
    */
   isStale: boolean;
+  /** `true` while interval polling is active (enabled and tab is visible). */
+  isPolling: boolean;
+  /** Unix timestamp (ms) of the last successful load, or `null` if none yet. */
+  lastUpdatedAt: number | null;
   refresh: () => Promise<void>;
 }
 
@@ -116,6 +121,8 @@ export function useStream(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isStale, setIsStale] = useState(false);
+  const [isPolling, setIsPolling] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
   const mounted = useRef(true);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   // Last value read from the chain; pending mutations are overlaid on it.
@@ -142,6 +149,7 @@ export function useStream(
         setClaimable(0n);
         setError(null);
         setIsStale(false);
+        setLastUpdatedAt(null);
         setLoading(false);
         return;
       }
@@ -168,6 +176,7 @@ export function useStream(
             setClaimable(nextClaimable);
             setError(null);
             setIsStale(false);
+            setLastUpdatedAt(Date.now());
             return;
           } catch (err) {
             if (!mounted.current) return;
@@ -214,61 +223,64 @@ export function useStream(
   // Handle polling with visibility awareness
   useEffect(() => {
     // Skip during SSR or when polling is disabled
-    if (typeof window === 'undefined' || !pollMs || !client || id === null) return;
+    if (typeof window === 'undefined' || !pollMs || pollMs <= 0 || !client || id === null) {
+      setIsPolling(false);
+      return;
+    }
 
-    // Set up initial polling
-    const startPolling = () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
-      timerRef.current = setInterval(() => void refresh(), pollMs);
-      // Initial refresh already handled by the separate useEffect above
-    };
-
-    // Stop polling
-    const stopPolling = () => {
+    const clearTimer = () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
     };
 
+    const startPolling = () => {
+      clearTimer();
+      timerRef.current = setInterval(() => void refresh(), pollMs);
+      setIsPolling(true);
+    };
+
+    const stopPolling = () => {
+      clearTimer();
+      setIsPolling(false);
+    };
+
     // Handle visibility changes
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         // Resume polling with immediate refresh
-        stopPolling();
-        void refresh(); // Immediate refresh
-        startPolling(); // Then start regular polling
+        clearTimer();
+        void refresh();
+        startPolling();
       } else if (document.visibilityState === 'hidden') {
         // Pause polling when tab is hidden
         stopPolling();
       }
     };
 
-    // Start polling assuming we begin visible (will be corrected on first visibilitychange if needed)
-    startPolling();
+    const isVisible = typeof document === 'undefined' || document.visibilityState !== 'hidden';
+    if (isVisible) {
+      startPolling();
+    } else {
+      stopPolling();
+    }
 
-    // Set up visibility change listener if document is available
-    if (document) {
+    if (typeof document !== 'undefined') {
       document.addEventListener('visibilitychange', handleVisibilityChange);
-
-      // Handle initial state (in case we start hidden)
-      if (document.visibilityState === 'hidden') {
-        stopPolling();
-      }
     }
 
     // Cleanup
     return () => {
-      stopPolling();
-      if (document) {
+      clearTimer();
+      if (mounted.current) setIsPolling(false);
+      if (typeof document !== 'undefined') {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
       }
     };
   }, [pollMs, refresh, client, id]);
 
-  return { stream, claimable, loading, error, isStale, refresh };
+  return { stream, claimable, loading, error, isStale, isPolling, lastUpdatedAt, refresh };
 }
 
 export type StreamMutationOptions = MutationOptions;
