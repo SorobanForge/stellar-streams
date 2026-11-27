@@ -6,6 +6,11 @@
 # .github/workflows/malware-scan.yml, .github/workflows/secret-scan.yml and
 # .github/workflows/dependency-review.yml — keep them in sync if those change.
 #
+# `Test Soroban Contracts` is deliberately the aggregate job: the per-crate
+# matrix jobs (`Test Soroban Contracts (stream)` and friends) are only selected
+# when their files change, and a context that never reports would block every
+# unrelated merge. Require the aggregate, never the individual names.
+#
 # Usage:
 #   ./scripts/setup-branch-protection.sh
 #

@@ -76,6 +76,7 @@ skip = [
     # soroban host tree's rand_core 0.6/getrandom 0.2. Neither reaches the
     # shipped WASM; upstream has not unified on a single rand generation.
     { crate = "getrandom" },
+    { crate = "getrandom" },
     { crate = "hashbrown" },
     { crate = "rand_core" },
     { crate = "stellar-strkey" },

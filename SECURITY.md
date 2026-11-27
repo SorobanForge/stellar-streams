@@ -107,3 +107,44 @@ token to honour SEP-41:
   denominated in it. Senders choose the token, and integrators should check that it is the
   expected contract (for example, the Stellar Asset Contract for a classic asset) before
   creating a stream or escrow.
+
+## Malware Scanning and Supply-Chain Guards
+
+To defend against malicious code, supply-chain attacks, and accidental credential leaks, CI executes automated security scanners on every pull request and on a nightly schedule via `.github/workflows/malware-scan.yml`.
+
+### Architecture Overview
+
+1. **ClamAV Anti-Malware Scanner (`clamav` job):**
+   - Scans all tracked repository files against an up-to-date ClamAV virus signature database.
+   - Detects known trojans, viruses, and malware embedded in binaries or scripts.
+   - Caches the signature database between runs to keep PR turnaround times minimal.
+
+2. **Supply-Chain Guard (`scripts/check-pr-supply-chain.mjs`):**
+   - Heuristically inspects pull request diffs for supply-chain threats that signature databases cannot yet identify.
+   - Analyzes package manifests, lockfiles, registry configs, and newly added files.
+
+### Blocking Findings and Legitimate Resolutions
+
+When a security check fails in CI or locally, use the following remedies:
+
+| Finding                               | Cause                                                                                                                    | Legitimate Way Forward                                                                                                                                                                                                           |
+| :------------------------------------ | :----------------------------------------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Lifecycle scripts in manifests**    | Added `preinstall`, `install`, or `postinstall` scripts that run unverified commands during package installation.        | Move script logic into an explicit build or tooling script invoked manually (such as `pnpm build` or `pnpm prepare`), eliminating automatic installation-time code execution.                                                    |
+| **Package registry overrides**        | Alterations to `.npmrc`, `.yarnrc`, or `.pnpmfile.cjs` pointing dependencies to untrusted or custom external registries. | Keep package resolution pointed to the official public npm registry. For shared internal packages, vendor them inside the `packages/*` workspace monorepo.                                                                       |
+| **Committed executables or binaries** | Added precompiled binaries (`.exe`, `.dll`, `.wasm`, ELF, PE, Mach-O).                                                   | Do not commit prebuilt binaries to the repository. Compile binaries from source during build/CI (`cargo build --target wasm32v1-none --release`) or fetch them via download scripts (such as `scripts/download-stellar-cli.sh`). |
+| **Known malware signatures**          | ClamAV matched a known malware signature in tracked files.                                                               | If genuine malware, immediately purge the offending file and report to the security contact. If a false positive, report to the security contact for signature review.                                                           |
+
+### Local Verification and Reproduction
+
+Run the checks locally before pushing changes:
+
+```bash
+# 1. Run the supply-chain guard against origin/main
+node scripts/check-pr-supply-chain.mjs --base origin/main
+
+# 2. Run ClamAV signature scan against tracked files (requires clamav installed)
+git ls-files > /tmp/files-to-scan.txt
+clamscan --file-list=/tmp/files-to-scan.txt --infected --no-summary --max-filesize=50M --max-scansize=200M
+```
+
+For developer workflow guidelines, see [docs/development-guide.md](docs/development-guide.md#malware-scan-and-supply-chain-guard).

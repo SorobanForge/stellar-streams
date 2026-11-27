@@ -135,6 +135,112 @@ A Next.js 15 App Router application:
 
 ---
 
+## Transaction Signing and Submission Lifecycle
+
+The journey from a user action in the dashboard (such as clicking Withdraw or Create Stream) to a confirmed transaction on Stellar passes through the UI layer, React hooks, SDK, wallet adapter, and Soroban RPC.
+
+### Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant UI as UI (apps/web)
+    participant Hook as React Hook (packages/hooks)
+    participant SDK as StreamsClient (packages/sdk)
+    participant Wallet as Wallet Adapter (packages/wallets)
+    participant Sponsor as Fee Sponsor (Optional)
+    participant RPC as Soroban RPC
+
+    User->>UI: Click action (e.g. Withdraw)
+    UI->>Hook: trigger action(params)
+    Hook->>SDK: execute write method
+
+    Note over SDK,RPC: 1. Simulate Phase
+    SDK->>RPC: simulateTransaction(builtTx)
+    alt Simulation Failed
+        RPC-->>SDK: Simulation failure (restore / footprint / contract error)
+        SDK-->>Hook: throw StreamsError (SIMULATION_FAILED)
+        Hook-->>UI: Surface simulation error banner
+    else Simulation Succeeded
+        RPC-->>SDK: Simulation result (auth, resource fees, footprint)
+    end
+
+    Note over SDK: 2. Prepare Phase
+    SDK->>SDK: assembleTransaction(simulationResult)
+
+    Note over SDK,Wallet: 3. Wallet Sign Phase
+    SDK->>Wallet: signTransaction(envelopeXdr)
+    alt User Rejection
+        Wallet-->>SDK: throw WalletRejectedError (WALLET_REJECTED)
+        SDK-->>Hook: propagate WalletRejectedError
+        Hook-->>UI: Surface rejection warning / offer retry
+    else User Cancel or Dismiss
+        Wallet-->>SDK: throw WalletCancelledError (WALLET_CANCELLED)
+        SDK-->>Hook: propagate WalletCancelledError
+        Hook-->>UI: Dismiss prompt cleanly
+    else Unsupported Operation or Device Error
+        Wallet-->>SDK: throw NotSupportedError / LedgerConfigurationError
+        SDK-->>Hook: propagate error
+        Hook-->>UI: Surface hardware or wallet guidance
+    else User Approves
+        Wallet-->>SDK: Return signed envelope XDR
+    end
+
+    alt Fee-Bump Sponsorship Branch (Optional)
+        Note over SDK,Sponsor: 4a. Fee-Bump Wrapping
+        SDK->>SDK: buildFeeBumpTransaction(innerTx, sponsorAddress)
+        SDK->>Sponsor: sponsorSigner(feeBumpEnvelopeXdr)
+        alt Sponsor Signing Failed
+            Sponsor-->>SDK: throw FeeBumpError
+            SDK-->>Hook: abort transaction
+            Hook-->>UI: Surface fee-bump sponsor failure
+        else Sponsor Approves
+            Sponsor-->>SDK: Return sponsored envelope XDR
+        end
+    end
+
+    Note over SDK,RPC: 4. Submit Phase
+    SDK->>RPC: sendTransaction(signedEnvelopeXdr)
+    alt Submission Rejected
+        RPC-->>SDK: status: ERROR / DUPLICATE / TRY_AGAIN_LATER
+        SDK-->>Hook: throw StreamsError (SUBMISSION_FAILED)
+        Hook-->>UI: Surface RPC submission error
+    else Submission Accepted
+        RPC-->>SDK: status: PENDING (txHash)
+    end
+
+    Note over SDK,RPC: 5. Poll Phase
+    loop Poll until finality or timeout
+        SDK->>RPC: getTransaction(txHash)
+        alt Transaction Pending
+            RPC-->>SDK: status: NOT_FOUND / PENDING
+            Note over SDK: Wait exponential backoff interval
+        else Transaction Succeeded
+            RPC-->>SDK: status: SUCCESS (resultMetaXdr)
+            SDK-->>Hook: Return confirmed transaction result
+            Hook-->>UI: Update UI state and notify onSuccess
+        else Transaction Failed on-chain
+            RPC-->>SDK: status: FAILED (errorResultXdr)
+            SDK-->>Hook: throw StreamsError (TRANSACTION_FAILED / contract error)
+            Hook-->>UI: Surface contract revert error code
+        else Polling Timeout
+            SDK-->>Hook: throw TimeoutError (POLL_TIMEOUT)
+            Hook-->>UI: Surface pending transaction tracker
+        end
+    end
+```
+
+### Lifecycle Phases and Error Handling
+
+1. **Simulate:** `StreamsClient` invokes Soroban RPC's `simulateTransaction` to determine resource consumption, fees, and state footprints. Contract assertion failures or insufficient balances raise `StreamsError` with code `SIMULATION_FAILED`.
+2. **Prepare:** The SDK populates resource limits and fees based on simulation output, producing a ready-to-sign transaction envelope.
+3. **Wallet Sign:** The envelope is passed to `WalletAdapter.signTransaction`. If the user cancels or closes the prompt, `WalletCancelledError` is raised. If the user explicitly clicks reject, `WalletRejectedError` is raised. Unsupported methods or misconfigured hardware paths throw `NotSupportedError` or `LedgerConfigurationError`.
+4. **Fee-Bump Sponsorship (Variant):** When a fee sponsor is configured, the signed inner transaction is wrapped inside a `FeeBumpTransaction` paid for by the sponsor. Failure during sponsor signing aborts before submission.
+5. **Submit:** The envelope is submitted to Soroban RPC via `sendTransaction`. Invalid envelopes or duplicate sequence numbers raise `StreamsError` with code `SUBMISSION_FAILED`.
+6. **Poll:** The SDK polls `getTransaction` until the transaction is included in a ledger or times out. Reverts on-chain return `StreamsError` with code `TRANSACTION_FAILED` and contract diagnostic details; timeouts raise `TimeoutError`.
+
+---
+
 ## Escrow Lifecycle
 
 The `escrow` contract implements a three-party agreement: **payer** (funds), **payee** (receives
