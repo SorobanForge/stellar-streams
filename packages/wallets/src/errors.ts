@@ -45,6 +45,48 @@ export class WalletCancelledError extends Error {
   }
 }
 
+/**
+ * Raised when the wallet extension is locked.
+ *
+ * Injected wallet APIs reject with an opaque payload in this state, which the
+ * UI would otherwise surface as "request failed". Mapping it lets callers tell
+ * the user to unlock the extension instead of offering an unhelpful retry.
+ */
+export class WalletLockedError extends Error {
+  readonly code = 'WALLET_LOCKED';
+
+  constructor(wallet: string, options?: { cause?: unknown }) {
+    super(`${wallet} wallet is locked. Unlock the extension and try again.`, options);
+    this.name = 'WalletLockedError';
+  }
+}
+
+/** Reads a message out of the shapes extensions reject with. */
+function errorMessage(err: unknown): string {
+  if (typeof err === 'string') return err;
+  if (err && typeof err === 'object') {
+    const { message, error } = err as { message?: unknown; error?: unknown };
+    if (typeof message === 'string') return message;
+    if (typeof error === 'string') return error;
+  }
+  return '';
+}
+
+/** True when an adapter failure says the extension has to be unlocked. */
+export function isWalletLockedError(err: unknown): boolean {
+  const message = errorMessage(err).toLowerCase();
+  return message.includes('locked') || message.includes('unlock');
+}
+
+/**
+ * Maps a locked-extension failure onto `WalletLockedError`, or returns `null`
+ * when the failure is unrelated so callers can rethrow their own value.
+ */
+export function toWalletLockedError(err: unknown, wallet: string): WalletLockedError | null {
+  if (err instanceof WalletLockedError) return err;
+  return isWalletLockedError(err) ? new WalletLockedError(wallet, { cause: err }) : null;
+}
+
 /** True when a signing failure came from the user dismissing the request. */
 export function isUserRejection(message: string): boolean {
   const normalized = message.toLowerCase();
@@ -63,7 +105,11 @@ export function isUserRejection(message: string): boolean {
 export function toSigningError(err: unknown, fallback: string): Error {
   // Adapter-classified errors already carry the type and `code` callers branch
   // on; re-wrapping them would drop both.
-  if (err instanceof WalletRejectedError || err instanceof WalletCancelledError) {
+  if (
+    err instanceof WalletRejectedError ||
+    err instanceof WalletCancelledError ||
+    err instanceof WalletLockedError
+  ) {
     return err;
   }
 

@@ -7,6 +7,7 @@ import {
   useCreateStream,
   usePauseStream,
   useResumeStream,
+  useTopUpStream,
   useWithdrawStream,
 } from './index';
 
@@ -190,5 +191,57 @@ describe('stream mutation hooks', () => {
     expect(onError).toHaveBeenCalledWith('unauthorized');
     expect(result.current.status).toBe('error');
     expect(result.current.error).toBe('unauthorized');
+  });
+
+  it('tops up a stream with a validated amount and refreshes readers', async () => {
+    const topUp = vi.fn().mockResolvedValue({ hash: 'tx-top-up' });
+    const client = { topUp } as unknown as StreamsClient;
+    const onSuccess = vi.fn();
+
+    const { result } = renderHook(() => useTopUpStream(client, { onSuccess }));
+
+    await act(async () => {
+      expect(await result.current.mutate({ id: 3, amount: '250' })).toEqual({
+        hash: 'tx-top-up',
+      });
+    });
+
+    expect(topUp).toHaveBeenCalledWith(3, 250n);
+    expect(result.current.status).toBe('success');
+    expect(result.current.hash).toBe('tx-top-up');
+    expect(onSuccess).toHaveBeenCalledWith({ hash: 'tx-top-up' });
+  });
+
+  it('rejects a non-positive top-up before calling the client', async () => {
+    const topUp = vi.fn();
+    const client = { topUp } as unknown as StreamsClient;
+
+    const { result } = renderHook(() => useTopUpStream(client));
+
+    await act(async () => {
+      expect(await result.current.mutate({ id: 3, amount: '0' })).toBeNull();
+    });
+
+    expect(topUp).not.toHaveBeenCalled();
+    expect(result.current.status).toBe('error');
+    expect(result.current.error).toMatch(/greater than zero/i);
+  });
+
+  it('carries the contract error code of a rejected top-up', async () => {
+    const topUp = vi.fn().mockRejectedValue(
+      Object.assign(new Error('Simulation of top_up failed'), {
+        code: 'STREAM_COMPLETED',
+      }),
+    );
+    const client = { topUp } as unknown as StreamsClient;
+
+    const { result } = renderHook(() => useTopUpStream(client));
+
+    await act(async () => {
+      expect(await result.current.mutate({ id: 3, amount: '250' })).toBeNull();
+    });
+
+    expect(result.current.status).toBe('error');
+    expect(result.current.errorCode).toBe('STREAM_COMPLETED');
   });
 });
