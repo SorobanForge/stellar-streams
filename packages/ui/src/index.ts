@@ -7,9 +7,12 @@ export {
   Dialog,
   Input,
   Modal,
+  NumberInput,
   ProgressBar,
   Skeleton,
+  Spinner,
   StatusBadge,
+  sanitizeNumberInput,
 } from './primitives';
 export type {
   AlertProps,
@@ -18,9 +21,12 @@ export type {
   CardProps,
   InputProps,
   ModalProps,
+  NumberInputProps,
   ProgressBarProps,
   SkeletonProps,
   SkeletonRounded,
+  SpinnerProps,
+  SpinnerSize,
   StatusBadgeProps,
   StatusBadgeStatus,
 } from './primitives';

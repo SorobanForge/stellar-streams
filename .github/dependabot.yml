@@ -1,4 +1,16 @@
 version: 2
+
+# Grouping rules:
+#
+#   * `stellar-sdk` moves every `@stellar/*` package together. The Stellar SDK,
+#     its XDR/RPC helpers and the generated bindings share one version line, so
+#     bumping them in lockstep is the only way to test or release them.
+#   * `dev-tooling` groups the linters, the formatter, the compiler and the test
+#     runner. These only affect the build, so one combined PR is enough review.
+#   * Security updates are intentionally absent from every `groups` entry. A
+#     group covers version updates only unless it opts in with
+#     `applies-to: security-updates`, so an advisory still arrives as its own
+#     small PR that can merge quickly instead of waiting on this grouping.
 updates:
   - package-ecosystem: 'npm'
     directory: '/'
@@ -8,6 +20,20 @@ updates:
     labels:
       - 'dependencies'
       - 'javascript'
+    groups:
+      stellar-sdk:
+        patterns:
+          - '@stellar/*'
+      dev-tooling:
+        patterns:
+          - 'eslint'
+          - 'eslint-*'
+          - '@typescript-eslint/*'
+          - 'prettier'
+          - 'prettier-*'
+          - 'typescript'
+          - 'vitest'
+          - '@vitest/*'
 
   - package-ecosystem: 'github-actions'
     directory: '/'
