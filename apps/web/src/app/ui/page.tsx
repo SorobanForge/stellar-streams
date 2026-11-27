@@ -22,9 +22,11 @@ import {
   Header,
   Modal,
   NumberInput,
+  Popover,
   Spinner,
   Skeleton,
   StatusBadge,
+  Tooltip,
   type DataTableColumn,
 } from '@stellar-starter-kit/ui';
 import {
@@ -584,6 +586,43 @@ export default function UiGallery() {
                 </button>
               </div>
             </Modal>
+          </GallerySection>
+
+          {/* -------------------------------------------------- Tooltips & popovers */}
+          <GallerySection
+            title="Tooltips & popovers"
+            description="Reveal the full value of truncated addresses on hover or keyboard focus, or open a copyable panel."
+          >
+            <div className="grid gap-6 sm:grid-cols-2">
+              <div className="rounded-xl border border-slate-900 bg-slate-950/40 p-5">
+                <h3 className="text-sm font-bold text-white">Tooltip</h3>
+                <p className="mt-2 text-xs text-slate-400">
+                  Hover or focus the truncated address to reveal its full value.
+                </p>
+                <Tooltip content={sampleContractAddress} side="top" align="start">
+                  <span className="mt-4 max-w-full truncate font-mono text-sm text-cyan-300">
+                    {formatAddress(sampleContractAddress, 6)}
+                  </span>
+                </Tooltip>
+              </div>
+              <div className="rounded-xl border border-slate-900 bg-slate-950/40 p-5">
+                <h3 className="text-sm font-bold text-white">Popover</h3>
+                <p className="mt-2 text-xs text-slate-400">
+                  Open the panel to inspect and copy the full contract address.
+                </p>
+                <Popover
+                  label="Full contract address"
+                  trigger="Show full address"
+                  triggerLabel="Show full contract address"
+                  className="mt-4"
+                >
+                  <p className="font-mono text-xs break-all text-slate-200">
+                    {sampleContractAddress}
+                  </p>
+                  <CopyValue value={sampleContractAddress} />
+                </Popover>
+              </div>
+            </div>
           </GallerySection>
 
           {/* -------------------------------------------------- Surfaces */}
