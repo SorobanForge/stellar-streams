@@ -30,7 +30,7 @@
     "@stellar-starter-kit/types": "workspace:*",
     "@stellar-starter-kit/utils": "workspace:*",
     "@stellar-starter-kit/wallets": "workspace:*",
-    "@stellar/stellar-sdk": "^14.5.0"
+    "@stellar/stellar-sdk": "^17.4.0"
   },
   "devDependencies": {
     "@stellar-starter-kit/testing": "workspace:*",
