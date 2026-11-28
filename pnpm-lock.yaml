@@ -145,7 +145,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1)(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
       vitest-axe:
         specifier: ^0.1.0
         version: 0.1.0(vitest@4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)))
@@ -210,7 +210,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1)(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/config:
     devDependencies:
@@ -225,7 +225,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1)(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/contracts:
     dependencies:
@@ -272,7 +272,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1)(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/eslint-config:
     dependencies:
@@ -330,7 +330,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1)(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/sdk:
     dependencies:
@@ -370,7 +370,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1)(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/testing:
     dependencies:
@@ -395,7 +395,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1)(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/tsconfig: {}
 
@@ -422,7 +422,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1)(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/ui:
     dependencies:
@@ -504,7 +504,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1)(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   packages/wallets:
     dependencies:
@@ -512,8 +512,8 @@ importers:
         specifier: ^0.11.1
         version: 0.11.2
       '@ledgerhq/hw-app-str':
-        specifier: ^7.8.0
-        version: 7.8.0
+        specifier: ^7.9.0
+        version: 7.9.0
       '@ledgerhq/hw-transport-webhid':
         specifier: ^6.36.0
         version: 6.36.0
@@ -556,7 +556,7 @@ importers:
         version: 6.0.3
       vitest:
         specifier: ^4.1.12
-        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+        version: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1)(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
 packages:
 
@@ -1262,15 +1262,15 @@ packages:
   '@ledgerhq/devices@8.16.0':
     resolution: {integrity: sha512-brXLPzkvGM3D5YNsWQ25P5G4SmWdSNBed9W8wKoOIRLGdRfvE+bg9mzFty0iZ+aRLBkLoXwX7xKIL9zUi6LBKQ==}
 
-  '@ledgerhq/devices@8.18.0':
-    resolution: {integrity: sha512-90qS23wtqdviis+8pDWRbgyp4jE4YLK24CyAmH79rLySaPbgEJX5mZzbEKlDQ6cXvSA/51Z2/PtzmlAi26rzug==}
+  '@ledgerhq/devices@8.18.1':
+    resolution: {integrity: sha512-mOoW1neiE9/G+zbHbTkfRtYh7SHTUzxqVyCy4jMh2br/cBD56b6mFrQrj5xUXX6AYaw7yP1i/Wy/bGaHoBQkdA==}
 
   '@ledgerhq/errors@6.37.0':
     resolution: {integrity: sha512-T5yiKI5UX7ugeocdTF3TUsCIN2BH41Bio4ZeN410YFjFOf3es08n/5JyMzzKwzRgP0blG3HfBf7s7vJKqCSAeg==}
     deprecated: This package is no longer maintained and will not receive updates. Published versions remain available.
 
-  '@ledgerhq/hw-app-str@7.8.0':
-    resolution: {integrity: sha512-mUDxrUrEUN94pQJ/mxxnKuySSaOCw+U87dxKbiCiOVvKSdvWCieb+6fXOdH9XaQ9ynaA8v5dZsUG76osU1nsVg==}
+  '@ledgerhq/hw-app-str@7.9.0':
+    resolution: {integrity: sha512-nJNrStSJy/LXWH0SlsJrQgpL76+fqSgeBMT0AOdnhNZnwWoyKH1WkDqrNtsXA0Lo3DA30zWpdvxayqm7c3eGTg==}
 
   '@ledgerhq/hw-transport-webhid@6.36.0':
     resolution: {integrity: sha512-1mKWm3LyGOgmaYlAiqbmaGoupOZHbj2Kow5sXLxKZzQa4kFvQuUdinYOWhs7T8hqJyAkz9WlHYyKM7aIs8kjNg==}
@@ -1279,8 +1279,8 @@ packages:
   '@ledgerhq/hw-transport@6.35.5':
     resolution: {integrity: sha512-P4+wtLewLWgxPtIb90h5kjpzXVlC6f4IBQBmvowVFkInvZt34ffXkX7wa5KfMzu4l3cqCcpNSqtPSCMp+0vuqg==}
 
-  '@ledgerhq/hw-transport@6.36.0':
-    resolution: {integrity: sha512-fU1rNnn6TgI9CrtynakAkhH09Tu4fTS5QEukO+71n0C5bFBL2Mee5WMQsuGaXBB8Ana3iJwbqZnm+0msssmY3g==}
+  '@ledgerhq/hw-transport@6.36.1':
+    resolution: {integrity: sha512-glmZmmqrC/M9CWGJQvkiNP7piKquH3oySyymA8s7TBkejyuZezDq44phk8njhkWzhntOCADKrEp36mWcwYeIFQ==}
 
   '@ledgerhq/logs@6.19.0':
     resolution: {integrity: sha512-kmWj18C7eTtuytdaWygzVrQm9EoD4YWuYnd/kY8stVBBAzRdJzrGlm013ijQF6I/kGLKlGY7JKmll6j32KGpfQ==}
@@ -5407,15 +5407,15 @@ snapshots:
     dependencies:
       semver: 7.7.3
 
-  '@ledgerhq/devices@8.18.0':
+  '@ledgerhq/devices@8.18.1':
     dependencies:
-      semver: 7.7.3
+      semver: 7.8.5
 
   '@ledgerhq/errors@6.37.0': {}
 
-  '@ledgerhq/hw-app-str@7.8.0':
+  '@ledgerhq/hw-app-str@7.9.0':
     dependencies:
-      '@ledgerhq/hw-transport': 6.36.0
+      '@ledgerhq/hw-transport': 6.36.1
       bip32-path: 0.4.2
 
   '@ledgerhq/hw-transport-webhid@6.36.0':
@@ -5432,9 +5432,9 @@ snapshots:
       '@ledgerhq/logs': 6.19.0
       events: 3.3.0
 
-  '@ledgerhq/hw-transport@6.36.0':
+  '@ledgerhq/hw-transport@6.36.1':
     dependencies:
-      '@ledgerhq/devices': 8.18.0
+      '@ledgerhq/devices': 8.18.1
       '@ledgerhq/logs': 6.19.0
       events: 3.3.0
 
@@ -5998,7 +5998,7 @@ snapshots:
       obug: 2.1.3
       std-env: 4.2.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+      vitest: 4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1)(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
 
   '@vitest/expect@4.1.12':
     dependencies:
@@ -8886,6 +8886,35 @@ snapshots:
       - msw
 
   vitest@4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1(@noble/hashes@1.8.0))(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)):
+    dependencies:
+      '@vitest/expect': 4.1.12
+      '@vitest/mocker': 4.1.12(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
+      '@vitest/pretty-format': 4.1.12
+      '@vitest/runner': 4.1.12
+      '@vitest/snapshot': 4.1.12
+      '@vitest/spy': 4.1.12
+      '@vitest/utils': 4.1.12
+      es-module-lexer: 2.3.1
+      expect-type: 1.4.0
+      magic-string: 0.30.21
+      obug: 2.1.3
+      pathe: 2.0.3
+      picomatch: 4.0.7
+      std-env: 4.2.0
+      tinybench: 2.9.0
+      tinyexec: 1.3.1
+      tinyglobby: 0.2.17
+      tinyrainbow: 3.1.0
+      vite: 8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
+      why-is-node-running: 2.3.0
+    optionalDependencies:
+      '@types/node': 26.1.1
+      '@vitest/coverage-v8': 4.1.12(vitest@4.1.12)
+      jsdom: 29.1.1(@noble/hashes@1.8.0)
+    transitivePeerDependencies:
+      - msw
+
+  vitest@4.1.12(@types/node@26.1.1)(@vitest/coverage-v8@4.1.12)(jsdom@29.1.1)(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)):
     dependencies:
       '@vitest/expect': 4.1.12
       '@vitest/mocker': 4.1.12(vite@8.1.4(@types/node@26.1.1)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1))
