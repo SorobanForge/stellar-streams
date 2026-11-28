@@ -3,7 +3,9 @@
 import React, { useState } from 'react';
 import {
   AlertCircle,
+  Check,
   CheckCircle2,
+  Copy,
   Droplets,
   ExternalLink,
   Info,
@@ -20,9 +22,11 @@ import {
   Header,
   Modal,
   NumberInput,
+  Popover,
   Spinner,
   Skeleton,
   StatusBadge,
+  Tooltip,
   type DataTableColumn,
 } from '@stellar-starter-kit/ui';
 import {
@@ -114,6 +118,32 @@ function GallerySection({
       <p className="mt-1 text-xs font-light text-slate-500">{description}</p>
       <div className="mt-6">{children}</div>
     </section>
+  );
+}
+
+const sampleContractAddress = 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
+
+function CopyValue({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+
+  React.useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(value).catch(() => undefined);
+        setCopied(true);
+      }}
+      className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-800 bg-slate-900/50 px-2.5 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-900 hover:text-white focus-visible:ring-2 focus-visible:ring-cyan-400/70 focus-visible:outline-none"
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? 'Copied' : 'Copy address'}
+    </button>
   );
 }
 
@@ -556,6 +586,43 @@ export default function UiGallery() {
                 </button>
               </div>
             </Modal>
+          </GallerySection>
+
+          {/* -------------------------------------------------- Tooltips & popovers */}
+          <GallerySection
+            title="Tooltips & popovers"
+            description="Reveal the full value of truncated addresses on hover or keyboard focus, or open a copyable panel."
+          >
+            <div className="grid gap-6 sm:grid-cols-2">
+              <div className="rounded-xl border border-slate-900 bg-slate-950/40 p-5">
+                <h3 className="text-sm font-bold text-white">Tooltip</h3>
+                <p className="mt-2 text-xs text-slate-400">
+                  Hover or focus the truncated address to reveal its full value.
+                </p>
+                <Tooltip content={sampleContractAddress} side="top" align="start">
+                  <span className="mt-4 max-w-full truncate font-mono text-sm text-cyan-300">
+                    {formatAddress(sampleContractAddress, 6)}
+                  </span>
+                </Tooltip>
+              </div>
+              <div className="rounded-xl border border-slate-900 bg-slate-950/40 p-5">
+                <h3 className="text-sm font-bold text-white">Popover</h3>
+                <p className="mt-2 text-xs text-slate-400">
+                  Open the panel to inspect and copy the full contract address.
+                </p>
+                <Popover
+                  label="Full contract address"
+                  trigger="Show full address"
+                  triggerLabel="Show full contract address"
+                  className="mt-4"
+                >
+                  <p className="font-mono text-xs break-all text-slate-200">
+                    {sampleContractAddress}
+                  </p>
+                  <CopyValue value={sampleContractAddress} />
+                </Popover>
+              </div>
+            </div>
           </GallerySection>
 
           {/* -------------------------------------------------- Surfaces */}
