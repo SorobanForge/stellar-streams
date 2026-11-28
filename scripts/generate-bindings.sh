@@ -36,6 +36,10 @@ for Contract in "${CONTRACTS[@]}"; do
         --wasm "$WasmPath" \
         --output-dir "$OutputDir" \
         --overwrite
+
+    # The CLI template still points to the retired Soroban docs domain.
+    node -e 'const fs = require("node:fs"); const path = process.argv[1]; fs.writeFileSync(path, fs.readFileSync(path, "utf8").replaceAll("https://soroban.stellar.org/", "https://developers.stellar.org/docs/build/smart-contracts"));' \
+        "$OutputDir/README.md"
 done
 
 echo "Bindings regenerated. Review the diff under packages/contracts/src/generated."
