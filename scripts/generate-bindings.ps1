@@ -35,6 +35,12 @@ foreach ($Contract in $Contracts) {
     Write-Host "Generating TypeScript bindings for $Contract -> $OutputDir"
     & $StellarCli contract bindings typescript --wasm $WasmPath --output-dir $OutputDir --overwrite
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    # The CLI template still points to the retired Soroban docs domain.
+    $ReadmePath = Join-Path $OutputDir "README.md"
+    $Readme = [System.IO.File]::ReadAllText($ReadmePath)
+    $Readme = $Readme.Replace("https://soroban.stellar.org/", "https://developers.stellar.org/docs/build/smart-contracts")
+    [System.IO.File]::WriteAllText($ReadmePath, $Readme)
 }
 
 Write-Host "Bindings regenerated. Review the diff under packages/contracts/src/generated."
