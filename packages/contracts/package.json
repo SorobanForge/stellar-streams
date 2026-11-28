@@ -16,7 +16,7 @@
   "devDependencies": {
     "@stellar-starter-kit/tsconfig": "workspace:*",
     "@stellar-starter-kit/eslint-config": "workspace:*",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   }
 }
 

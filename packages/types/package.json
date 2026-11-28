@@ -30,9 +30,9 @@
   "devDependencies": {
     "@stellar-starter-kit/tsconfig": "workspace:*",
     "@stellar-starter-kit/eslint-config": "workspace:*",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.12",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.2",
 
-    "@vitest/coverage-v8": "^4.1.12"
+    "@vitest/coverage-v8": "^5.1.2"
   }
 }

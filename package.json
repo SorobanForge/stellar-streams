@@ -48,14 +48,14 @@
     "@commitlint/config-conventional": "^21.2.0",
     "@stellar-starter-kit/eslint-config": "workspace:*",
     "@types/react": "^19.0.0",
-    "eslint": "^9.39.5",
+    "eslint": "^10.15.0",
     "husky": "^9.0.11",
     "lint-staged": "^17.2.0",
-    "prettier": "3.9.5",
+    "prettier": "3.10.1",
     "prettier-plugin-tailwindcss": "^0.8.1",
     "react": "^19.0.0",
     "turbo": "^2.10.5",
-    "typescript": "^6.0.3"
+    "typescript": "^7.0.2"
   },
   "packageManager": "pnpm@9.4.0",
   "pnpm": {
