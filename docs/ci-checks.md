@@ -116,6 +116,20 @@ debugging.
 iterating with `pnpm --filter @stellar-starter-kit/sdk test`, then run the full
 command before pushing.
 
+The `apps/web` suite includes an axe sweep of the component gallery
+(`apps/web/src/app/ui/page.a11y.test.tsx`). It renders the whole gallery —
+header and footer included — and fails with the axe rule id plus every offending
+node. Run just that sweep with:
+
+```bash
+pnpm --filter @stellar-starter-kit/web exec vitest run src/app/ui/page.a11y.test.tsx
+```
+
+Rules that cannot run under jsdom are disabled in `ALLOWED_RULES` in that file,
+each with the reason the exception is unavoidable (currently only
+`color-contrast`, which needs a layout engine and canvas). Everything else must
+be fixed in the markup rather than allowlisted.
+
 ### Test Soroban Contracts
 
 ```bash

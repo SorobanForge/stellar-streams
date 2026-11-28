@@ -23,8 +23,8 @@ one-off transfer, you can:
 - **Split** a payment into proportional shares for multiple recipients in a single transaction.
 - **Escrow** funds with an arbiter and deadline-based refunds (payment primitive module).
 
-Everything runs on [Soroban](https://soroban.stellar.org) smart contracts written in Rust, with a
-typed TypeScript SDK and an open web dashboard.
+Everything runs on [Soroban](https://developers.stellar.org/docs/build/smart-contracts) smart
+contracts written in Rust, with a typed TypeScript SDK and an open web dashboard.
 
 > **Project status:** pre-1.0. The contracts are implemented, unit-tested, and build clean under
 > `clippy` / `rustfmt`. They have **not** been audited or deployed to Mainnet. Before integrating,

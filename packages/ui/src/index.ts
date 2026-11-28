@@ -40,6 +40,8 @@ export type {
 } from './toast';
 export { DataTable } from './DataTable';
 export type { DataTableColumn, DataTableProps, DataTableSort, SortDirection } from './DataTable';
+export { Popover, Tooltip } from './overlays';
+export type { OverlayAlign, OverlaySide, PopoverProps, TooltipProps } from './overlays';
 export { Header } from './components/Header';
 export { Footer } from './components/Footer';
 export { Logo } from './components/Logo';

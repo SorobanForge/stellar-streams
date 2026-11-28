@@ -40,7 +40,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Review Dependency Changes
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@v5
         with:
           # Fail on high and critical advisories; lower severities are reported
           # in the job log without blocking the PR.
