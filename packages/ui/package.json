@@ -18,7 +18,7 @@
     "@stellar-starter-kit/types": "workspace:*",
     "clsx": "^2.1.1",
     "tailwind-merge": "^3.6.0",
-    "lucide-react": "^0.395.0",
+    "lucide-react": "^1.80.0",
     "framer-motion": "^12.42.2"
   },
   "peerDependencies": {
