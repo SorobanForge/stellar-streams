@@ -38,8 +38,21 @@ for Contract in "${CONTRACTS[@]}"; do
         --overwrite
 
     # The CLI template still points to the retired Soroban docs domain.
-    node -e 'const fs = require("node:fs"); const path = process.argv[1]; fs.writeFileSync(path, fs.readFileSync(path, "utf8").replaceAll("https://soroban.stellar.org/", "https://developers.stellar.org/docs/build/smart-contracts"));' \
-        "$OutputDir/README.md"
+    node - "$OutputDir/README.md" <<'NODE'
+const fs = require("node:fs");
+const readmePath = process.argv[2];
+const readme = fs
+  .readFileSync(readmePath, "utf8")
+  .replaceAll(
+    "https://soroban.stellar.org/docs/reference/rpc#public-rpc-providers",
+    "https://developers.stellar.org/docs/data/apis/rpc/providers",
+  )
+  .replaceAll(
+    "https://soroban.stellar.org/",
+    "https://developers.stellar.org/docs/build/smart-contracts",
+  );
+fs.writeFileSync(readmePath, readme);
+NODE
 done
 
 echo "Bindings regenerated. Review the diff under packages/contracts/src/generated."

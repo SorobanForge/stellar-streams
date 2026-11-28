@@ -45,7 +45,7 @@ import { Contract, networks } from "escrow"
 
 const contract = new Contract({
   ...networks.futurenet, // for example; check which networks this library exports
-  rpcUrl: '...', // use your own, or find one for testing at https://soroban.stellar.org/docs/reference/rpc#public-rpc-providers
+  rpcUrl: '...', // use your own, or find one for testing at https://developers.stellar.org/docs/data/apis/rpc/providers
 })
 
 contract.|

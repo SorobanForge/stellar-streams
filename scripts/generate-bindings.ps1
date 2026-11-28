@@ -39,6 +39,10 @@ foreach ($Contract in $Contracts) {
     # The CLI template still points to the retired Soroban docs domain.
     $ReadmePath = Join-Path $OutputDir "README.md"
     $Readme = [System.IO.File]::ReadAllText($ReadmePath)
+    $Readme = $Readme.Replace(
+        "https://soroban.stellar.org/docs/reference/rpc#public-rpc-providers",
+        "https://developers.stellar.org/docs/data/apis/rpc/providers"
+    )
     $Readme = $Readme.Replace("https://soroban.stellar.org/", "https://developers.stellar.org/docs/build/smart-contracts")
     [System.IO.File]::WriteAllText($ReadmePath, $Readme)
 }
