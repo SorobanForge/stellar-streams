@@ -37,10 +37,10 @@
     "@stellar-starter-kit/tsconfig": "workspace:*",
     "@stellar-starter-kit/eslint-config": "workspace:*",
     "typedoc": "^0.28.20",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "tsx": "^4.23.15",
-    "vitest": "^4.1.12",
+    "vitest": "^5.1.2",
 
-    "@vitest/coverage-v8": "^4.1.12"
+    "@vitest/coverage-v8": "^5.1.2"
   }
 }
