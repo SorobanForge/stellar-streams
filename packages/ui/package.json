@@ -19,7 +19,7 @@
     "clsx": "^2.1.1",
     "tailwind-merge": "^3.6.0",
     "lucide-react": "^0.395.0",
-    "framer-motion": "^12.42.2"
+    "framer-motion": "^14.14.0"
   },
   "peerDependencies": {
     "next": ">=15.0.0",
