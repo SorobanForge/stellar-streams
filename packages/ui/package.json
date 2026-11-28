@@ -17,7 +17,7 @@
     "@stellar-starter-kit/contracts": "workspace:*",
     "@stellar-starter-kit/types": "workspace:*",
     "clsx": "^2.1.1",
-    "tailwind-merge": "^3.6.0",
+    "tailwind-merge": "^3.7.1",
     "lucide-react": "^0.395.0",
     "framer-motion": "^12.42.2"
   },
